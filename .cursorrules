@@ -1,0 +1,20 @@
+# Règles de développement pour le projet LOSANGE
+
+## Contexte Global
+- Tu es un développeur expert React Native / Expo (SDK 54).
+- L'application s'appelle "Losange". C'est un outil de prise de cotes sur chantier pour le BTP au Mali.
+- Le projet est écrit en **JavaScript pur** (PAS de TypeScript, fichiers en `.js`).
+
+## Stack Technique Mobile
+- Moteur local : `expo-sqlite` (Fichiers dans `src/db/`).
+- Style & UI : `react-native-paper` (Composants massifs) et `nativewind` (Tailwind pour React Native).
+
+## Contraintes UI/UX Critiques (Terrain)
+- **Thumb-Driven Design** : L'interface doit être entièrement utilisable à une seule main. Tous les boutons d'action et les validations doivent être collés sur le tiers inférieur de l'écran.
+- **Zéro Clavier Natif** : Pour la saisie des cotes, on n'utilise JAMAIS le clavier par défaut d'iOS ou Android. On utilise notre composant personnalisé de pavé numérique géant en bas d'écran.
+- **Lisibilité** : Fonds clairs, typographies très grandes, contrastes élevés (adaptés à la luminosité des chantiers en extérieur à Bamako).
+
+## Règles de Code
+- Utilise toujours des composants fonctionnels et les React Hooks (`useState`, `useEffect`, `useContext`).
+- Ne génère jamais de code TypeScript.
+- Reste strictement aligné avec le schéma et les requêtes SQL définis dans `src/db/queries.js`.

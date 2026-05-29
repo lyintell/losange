@@ -1,0 +1,171 @@
+I. 
+Je developpe une application mobile.
+Refere toi au fichier Projet.md pour comprendre la vision du projet.
+Refere toi au fichier folder_structure pour comprendre la structure des dossiers.
+terminal.txt corresponds aux commandes que j ai entre moi meme dans le terminal.
+La base de donnee se trouve dans localDb.js et les querries dans querries.js.
+J ai cree le fichier .cursorrules pour que tu l utilise comme reference lorsque tu build.
+Lorsque tu as compris le projet, je vais te passer un prompt pour commencer a travailler.
+
+II.
+En te basant sur notre fichier `.cursorrules`, initialise l'architecture UI complète de notre application "Losange" en créant les fichiers JavaScript nécessaires dans le dossier `src/`. Tous les écrans doivent être pensés pour le "Thumb-Driven Design" (utilisation exclusive à une main en bas d'écran) et connectés à notre base locale via `src/db/queries.js`.
+
+Génère et peuple les fichiers suivants :
+
+1. `src/styles/theme.js` :
+- Exporte un objet de configuration de couleurs à haut contraste adapté au chantier (Couleur principale : Orange/Brique BTP `#FF5722`, Fond : Blanc/Gris très clair `#F8F9FA`, Texte : Sombre `#212529`, Succès/Validation : Vert `#2B9348`).
+
+2. `src/components/terrain/PaveNumerique.js` :
+- Une grille de boutons tactiles géants (0-9, `.`, `Effacer`) intégrée en bas d'écran.
+- Ce pavé doit prendre une fonction `onKeyPress(val)` en paramètre pour renvoyer la touche pressée sans jamais ouvrir le clavier natif du téléphone.
+
+3. `src/screens/ListeChantiers.js` :
+- Écran principal qui charge les chantiers via `getChantiersWithClientLocal()`.
+- Affiche une FlatList de cartes épaisses (Nom du chantier, Client, Statut avec badge coloré).
+- Un bouton d'action flottant (FAB) géant collé en bas à droite sous le pouce pour lancer la création d'un chantier/relevé.
+
+4. `src/screens/SelecteurMetierOuvrage.js` :
+- Première étape de saisie : affiche d'abord une grille de gros boutons pour choisir le Métier (Menuiserie Alu, Maçonnerie, Peinture).
+- Une fois le métier choisi, l'écran affiche en bas sous forme de grosses puces la liste des ouvrages correspondants pour l'entreprise connectée en utilisant `getOuvragesByMetierAndEntreprise()`.
+
+5. `src/screens/PaveSaisieOneHand.js` :
+- Écran de capture des cotes. Affiche en haut les cotes déjà saisies dans la pièce de manière compacte.
+- Au centre, affiche de grandes cases pour la valeur en cours : Largeur, Hauteur, Nombre. Le focus change de case dès qu'on valide.
+- Intègre `@PaveNumerique.js` sur les 40% inférieurs de l'écran.
+- Un énorme bouton vert "VALIDER LA LIGNE" qui appelle `insertLigneReleveLocal()` de `@queries.js` pour enregistrer en SQLite.
+
+Assure-toi que tout le code est en JavaScript pur, propre, modulaire et utilise React Native Paper pour les composants de base. Ne casse pas les relations SQL existantes.
+
+III.
+Les ecritures sont trop hors ecran. Voici une capture de comment l app apparait sur mobile.
+
+IV.
+Connecte le flux complet réel (création client/chantier/relevé avant la saisie ligne) pour éviter le releveId vide en mode démo.
+
+V. 
+Execute les instrutions dans design.md
+
+VI.
+Le flow nouvelle dimension n est pas bonne voici le flow:
+- Sur clique de nouveau chantier, afficher une page de selection de metier seulement. Puis apres selection de metier,
+selection d ouvrage et d unite. N affiche pas les prix. Apres selection d ouvrage et d unite.
+Si l unite est n est pas une dimension alors on entre juste le nombre (ligne de releve).
+Si l unite est une dimension, lors on est requis d entrer les dimensions et le nombre.
+
+VII.
+Travaillons sur l'ecran login.
+Le login consiste en un identifiant d'exactement 4 characters majuscule (1 lettre 2 chiffre 1 lettre).
+Et le mot de passe en bas.
+Lorsqu on ouvre l'appli, on voit l ecran de login. Pour le moment, concentrons nous sur le UI. On travaillersur l authentication apres.
+Pour le moment n importe quel combinaison d identifiant et mot de passe ouvre l appli.
+
+VIII.
+Travaillons sur l ecran admin.
+L ecran admin est accessible sur browser seulement (pas mobile). Sur l ecran admin sert a gerer tous les aspets de l appli.
+CRUD de toutes les tables. Il y a un sidebar avec toute les tables. On click, montre les listes. On click sur les element de liste,
+ouvre la page details. Sur l ecran details, bouton modifier et supprimer.
+Respect les couleurs existantes (n utilise pas d autres couleurs) et les icons existantes (+ pour ajouter, pen pour modifier, trash pour supprimer).
+Un bouton logout en bas du sidebar.
+
+Pour le moment ne connect pas les donnees de la base de donnees. Juste visuel pour le moment.
+
+IX. 
+Pour tous les ecrans du web, cree un dossier web partout ou necessaire (screen, components, etc) ou sauvegarder les pages et components
+du web. 
+
+X.
+Ajoute les tables entreprises et profils et separe les des autres tables.
+
+#11.
+Implemente les donnees du mode admin. Localement les donnees seront sauvegarder dans le navigateur.
+Implemente les formulaire d ajout et modifier et permet la sauvegarde des donnees dans le localStorage.
+Apres on travaille sur l implementation de Supabase
+
+#12.
+Efface toutes les donnees durs du code de l application pour les tables dans la base de donnees.
+
+#13.
+Met a jour tous les formulaires dans le mode admin avec toutes les champs. LocalDb contient touts les champs ainsi 
+que le type de donnees du champ. Applique a toutes les tables, sans exception
+
+#14.
+Tous les ID sont des uuid.
+Pour les FK, dans le formulaire montre une liste deroulante pour selectionner le PK du model concerne.
+Par example, pour profil, entreprise_id est un FK. Au lieu d un champ text, montre un menu deroulant permettant de selectionner le PK des entreprises.
+Applique le meme logique pour toutes les tables connecte par un FK.
+Pour _synced, montre un bouton check. Si check alors c est la valeur 1. Sinon c est 0. Par default c est 0.
+
+#15.
+Pour la variable role, il y a les choix suivants:
+- A: admin
+- C: chantier
+- S: commercial
+- T: atelier
+
+Par default choix = A
+
+#16.
+Toutes les champs cree_le et mise_a_jour_le doivent etre auto generer apres save
+
+#17.
+status chantier parmi les choix suivants:
+- D: dimension
+- V: devis
+- E: en cours
+- X: terminé
+
+Par defaut choix = D
+
+#18.
+Met a jour les libelle suivant pour les listes respectives:
+- Ouvrage_unite : nom ouvrage / symbole ouvrage
+- releve : nom client / nom chantier
+- ligne releve : nom client / nom chantier / nom ouvrage / symbole ouvrage
+
+#19.
+Maintenant travaillons sur le calcul des lignes de releve.
+Dans ligne releve, le symbole de:
+ - largeur = l
+ - hauteur = h
+ - profondeur = p
+ - nombre = n
+
+Lorsque l ouvrage_unite est choisi et que ind_dimension = 1,
+alors on match le nom de l unite avec la formule equivalent au combinaison des symbole dans ligne releve.
+
+Par exemple:
+    - si nom unite = lxh et que ind_dimension = 1, alors dans ligne_releve,
+    on fait l operation l x h x n pour obtenir la quantite.
+    - si nom unite = (l+h)x2 et que ind_dimension = 1, alors dans ligne_releve,
+    on fait l operation (l+h)x2 x n pour obtenir la quantite.
+    - si ind_dimension = 0, alors on ignore l, h, p. on utilise seulement n. et quantite = n.
+
+#20.
+Dans la table unite, on renomme le champ nom par formule, symbole par nom. Supprime formule.
+Update les calculs pour reflete les nouveau champ. 
+
+#21.
+l, h, p sont en cm. Donc durant les calcul chacun est converti en m avant le calcul des quantité (ie. divisé par 100).
+
+#22.
+Ajoute le champ ind_unitaire (choix 1 ou 0) et nom_unite (text max 10 char) a la table unite. elle sont tous les deux obligatoire.
+Dans admin, ind_unitaire est un check. par default checked (=1). 
+
+#23.
+Dans ligneReleve, lorsque ind_unitaire dans unite est 1, ne pas mulitplier les l, h, p. Juste utilise quantite = n.
+
+#24.
+Met a jour les libelle suivant pour les listes respectives:
+- Ouvrage_unite : nom ouvrage / nom_unite
+- ligne releve : nom client / nom chantier / nom ouvrage / nom_unite
+
+#25.
+Concentrons nous maintenant sur le sync sur Supabase. La base de donnees sera deployer sur Supabase.
+L'ecran admin se connectera directement a Supabase pour obtenir et inserer les donnees.
+Sur mobile, les donnees sont sauvegarder localement d abord sur SQLite. Puis il y aura un mecanisme pour
+charger les donnees sur  Supabase ou telecharger les donnees de Supabase, dependemment de quel base de donnees est plus a jour.
+Pour l instant, configure l appli pour utiliser Supabase comme base de donnees. Enleve tout autre hardcoded donnee ou des donnees
+sur localStorage.
+
+#26.
+Met a jour le fichier .gitignore

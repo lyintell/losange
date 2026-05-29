@@ -1,0 +1,23 @@
+1.
+Android Bundling failed 305ms index.js (780 modules)
+Unable to resolve "react-native-get-random-values" from "src\db\querries.js"
+  1 | import { getLocalDB } from './localDb';
+> 2 | import 'react-native-get-random-values';
+    |         ^
+  3 | import { v4 as uuidv4 } from 'uuid';
+
+2.
+ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+ ERROR  Erreur chargement chantiers: [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: java.lang.NullPointerException: java.lang.NullPointerException]
+
+3. Sur clique de la loupe
+ WARN  Unable to get the view config for %s from module &s ExpoBlurView ExpoBlur
+ ERROR  [TypeError: Cannot read property 'level3' of undefined]
+
+4.
+> 22 | import wasmModule from './wa-sqlite/wa-sqlite.wasm';
+     |                         ^
+  23 | import {
+  24 |   type SQLiteWorkerMessage,
+  25 |   type SQLiteWorkerMessageType,

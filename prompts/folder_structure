@@ -1,0 +1,21 @@
+Losange_new/
+├── assets/                  # Icônes, Splash screen, Images fixes
+├── src/
+│   ├── components/          # Composants UI réutilisables (Boutons géants, Pavé numérique)
+│   │   ├── common/          # Composants génériques (GrosBouton.js, BadgeStatut.js)
+│   │   └── terrain/         # Composants spécifiques à la saisie (PaveNumerique.js)
+│   ├── db/                  # Le cœur SQL local
+│   │   ├── localDb.js       # Initialisation des tables SQLite (ton fichier épuré)
+│   │   └── queries.js       # Fonctions d'écriture/lecture (INSERT, SELECT)
+│   ├── screens/             # Écrans principaux de l'application
+│   │   ├── ListeChantiers.js
+│   │   ├── SelecteurMetierOuvrage.js
+│   │   └── PaveSaisieOneHand.js
+│   ├── styles/              # Fichiers de configuration thématique globale
+│   │   └── theme.js         # Couleurs à haut contraste (Soleil/Poussière)
+│   └── utils/               # Fonctions d'aide (Calculateurs de formules géométriques)
+│       └── helpers.js
+├── App.js                   # Point d'entrée de l'application
+├── app.json                 # Configuration Expo
+├── babel.config.js          # Configuration Babel
+└── package.json             # Dépendances du projet
