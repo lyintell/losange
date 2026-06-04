@@ -1,0 +1,11 @@
+[functions.master-admin-login]
+verify_jwt = false
+
+[functions.master-admin-verify]
+verify_jwt = false
+
+[functions.terrain-login]
+verify_jwt = false
+
+[functions.terrain-sync]
+verify_jwt = false

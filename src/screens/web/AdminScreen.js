@@ -49,6 +49,8 @@ const TABLE_SCHEMAS = {
     { name: 'telephone_2', type: 'TEXT' },
     { name: 'adresse', type: 'TEXT' },
     { name: 'logo', type: 'TEXT' },
+    { name: 'ind_pro', type: 'INTEGER', required: true, isBinaryToggle: true, defaultValue: 0 },
+    { name: 'ind_active', type: 'INTEGER', required: true, isBinaryToggle: true, defaultValue: 1 },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
     { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
@@ -61,6 +63,8 @@ const TABLE_SCHEMAS = {
     { name: 'telephone_1', type: 'TEXT', required: true },
     { name: 'telephone_2', type: 'TEXT' },
     { name: 'role', type: 'TEXT', required: true, enumOptions: ROLE_OPTIONS, defaultValue: 'A' },
+    { name: 'identifiant', type: 'TEXT' },
+    { name: 'mot_de_passe', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
     { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
@@ -121,7 +125,6 @@ const TABLE_SCHEMAS = {
     { name: 'formule', type: 'TEXT', required: true },
     { name: 'nom', type: 'TEXT', required: true },
     { name: 'nom_unite', type: 'TEXT', required: true, maxLength: 10 },
-    { name: 'ind_unitaire', type: 'INTEGER', required: true, isBinaryToggle: true, defaultValue: 1 },
     { name: 'ind_dimension', type: 'INTEGER', required: true, isBinaryToggle: true, defaultValue: 0 },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
@@ -143,6 +146,7 @@ const TABLE_SCHEMAS = {
     { name: 'total_ht_facture', type: 'REAL' },
     { name: 'tva_facture', type: 'REAL' },
     { name: 'total_ttc_facture', type: 'REAL' },
+    { name: 'note', type: 'TEXT', isMultiline: true },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
     { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
@@ -158,6 +162,8 @@ const TABLE_SCHEMAS = {
     { name: 'quantite', type: 'REAL', required: true, isAutoComputed: true },
     { name: 'prix_unitaire_applique', type: 'REAL', required: true },
     { name: 'montant', type: 'REAL', required: true, isAutoComputed: true },
+    { name: 'note', type: 'TEXT', isMultiline: true },
+    { name: 'ind_complete', type: 'INTEGER', defaultValue: 0 },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
     { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
@@ -202,6 +208,13 @@ const getTableLabel = (tableKey) => ALL_TABLES.find((item) => item.key === table
 const getPrimaryText = (record) =>
   record?.nom || record?.nom_complet || `${record?.prenom || ''} ${record?.nom || ''}`.trim() || record?.id || 'Sans titre';
 
+const truncateText = (value, maxLength = 80) => {
+  const text = String(value ?? '').trim();
+  if (!text.length) return '';
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1)}…`;
+};
+
 const getById = (list, id) => (list || []).find((item) => String(item.id) === String(id));
 
 const getListLabel = (tableKey, record, recordsByTable) => {
@@ -220,7 +233,9 @@ const getListLabel = (tableKey, record, recordsByTable) => {
     const client = chantier ? getById(recordsByTable.clients, chantier.client_id) : null;
     const clientNom = client?.nom_complet || 'Client inconnu';
     const chantierNom = chantier?.nom || 'Chantier inconnu';
-    return `${clientNom} / ${chantierNom}`;
+    const notePreview = truncateText(record.note, 60);
+    const base = `${clientNom} / ${chantierNom}`;
+    return notePreview ? `${base} — ${notePreview}` : base;
   }
 
   if (tableKey === 'ligne_releves') {
@@ -253,7 +268,6 @@ const applyLigneReleveAutoCalculations = (record, recordsByTable) => {
   const unite = ouvrageUnite ? getById(recordsByTable.unites, ouvrageUnite.unite_id) : null;
   const quantite = computeQuantiteLigneReleve({
     indDimension: unite?.ind_dimension,
-    indUnitaire: unite?.ind_unitaire,
     formule: unite?.formule,
     largeur: record.largeur,
     hauteur: record.hauteur,
@@ -578,7 +592,9 @@ export default function AdminScreen({ onLogout }) {
                     {getListLabel(selectedTable, item, recordsByTable)}
                   </Text>
                   <Text variant="bodyMedium" style={styles.rowSubtitle}>
-                    {String(item.id || '')}
+                    {selectedTable === 'releves' && item.note
+                      ? `Note: ${truncateText(item.note, 120)}`
+                      : String(item.id || '')}
                   </Text>
                 </View>
               </Pressable>
@@ -670,9 +686,11 @@ export default function AdminScreen({ onLogout }) {
                           mode="outlined"
                           value={formValues[field.name] ?? ''}
                           maxLength={field.maxLength}
+                          multiline={!!field.isMultiline}
+                          numberOfLines={field.isMultiline ? 4 : 1}
                           keyboardType={field.type === 'TEXT' ? 'default' : 'numeric'}
                           onChangeText={(value) => setFormValues((prev) => ({ ...prev, [field.name]: value }))}
-                          style={styles.formInput}
+                          style={[styles.formInput, field.isMultiline && styles.formInputMultiline]}
                           disabled={
                             field.isId ||
                             field.name === 'cree_le' ||
@@ -699,7 +717,10 @@ export default function AdminScreen({ onLogout }) {
                         <Text variant="bodyMedium" style={styles.detailLabel}>
                           {field.name}
                         </Text>
-                        <Text variant="bodyLarge" style={styles.detailValue}>
+                        <Text
+                          variant="bodyLarge"
+                          style={[styles.detailValue, field.isMultiline && styles.detailValueMultiline]}
+                        >
                           {formatDetailValue(field, selectedItem[field.name], recordsByTable)}
                         </Text>
                       </View>
@@ -919,6 +940,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     backgroundColor: chantierColors.surface,
   },
+  formInputMultiline: {
+    minHeight: 100,
+  },
   fieldWrapper: {
     marginBottom: 10,
   },
@@ -956,6 +980,9 @@ const styles = StyleSheet.create({
   detailValue: {
     color: chantierColors.text,
     fontWeight: '600',
+  },
+  detailValueMultiline: {
+    whiteSpace: 'pre-wrap',
   },
   detailSubTitle: {
     color: chantierColors.muted,

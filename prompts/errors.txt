@@ -21,3 +21,20 @@ Unable to resolve "react-native-get-random-values" from "src\db\querries.js"
   23 | import {
   24 |   type SQLiteWorkerMessage,
   25 |   type SQLiteWorkerMessageType,
+
+5.
+Failed to deploy edge function: Failed to bundle the function (reason: Module not found "file:///tmp/user_fn_cbjkuecorfuxythadckj_823311f7-223a-4683-b2ed-b4759056faad_1/_shared/masterSession.ts". at file:///tmp/user_fn_cbjkuecorfuxythadckj_823311f7-223a-4683-b2ed-b4759056faad_1/source/index.ts:8:8).
+
+6. 
+Edge Function returned a non-2xx status code
+
+7.
+{
+  "ok": false,
+  "error": "crypto.subtle.timingSafeEqual is not a function"
+}
+
+8.
+After update, getting :
+Call to function 'NativeStatement.finalizeAsync' has been rejected
+-> Caused by error code NOT NULL Constraint failed : unites.ind_unitaire

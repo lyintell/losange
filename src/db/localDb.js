@@ -9,6 +9,52 @@ export const getLocalDB = async () => {
   return dbInstance;
 };
 
+export const tableHasColumn = async (db, tableName, columnName) => {
+  const rows = await db.getAllAsync(`PRAGMA table_info(${tableName});`);
+  return rows.some((row) => row.name === columnName);
+};
+
+/** Supprime ind_unitaire (DROP COLUMN ou recréation de table si SQLite le refuse). */
+const migrateUnitesDropIndUnitaire = async (db) => {
+  if (!(await tableHasColumn(db, 'unites', 'ind_unitaire'))) {
+    return;
+  }
+
+  try {
+    await db.execAsync('ALTER TABLE unites DROP COLUMN ind_unitaire;');
+    if (!(await tableHasColumn(db, 'unites', 'ind_unitaire'))) {
+      return;
+    }
+  } catch {
+    // DROP COLUMN non supporté ou refusé : recréation de la table.
+  }
+
+  await db.execAsync('PRAGMA foreign_keys = OFF;');
+  try {
+  await db.execAsync('DROP TABLE IF EXISTS unites__sans_ind_unitaire;');
+  await db.execAsync(`
+    CREATE TABLE unites__sans_ind_unitaire (
+      id TEXT PRIMARY KEY NOT NULL,
+      formule TEXT NOT NULL,
+      nom TEXT NOT NULL,
+      nom_unite TEXT NOT NULL CHECK (length(nom_unite) <= 10),
+      ind_dimension INTEGER NOT NULL DEFAULT 0 CHECK (ind_dimension IN (0, 1)),
+      cree_le TEXT DEFAULT (datetime('now')),
+      mis_a_jour_le TEXT DEFAULT (datetime('now'))
+    );
+  `);
+  await db.execAsync(`
+    INSERT INTO unites__sans_ind_unitaire (id, formule, nom, nom_unite, ind_dimension, cree_le, mis_a_jour_le)
+    SELECT id, formule, nom, nom_unite, ind_dimension, cree_le, mis_a_jour_le
+    FROM unites;
+  `);
+  await db.execAsync('DROP TABLE unites;');
+  await db.execAsync('ALTER TABLE unites__sans_ind_unitaire RENAME TO unites;');
+  } finally {
+    await db.execAsync('PRAGMA foreign_keys = ON;');
+  }
+};
+
 export const initLocalDatabase = async () => {
   if (dbInitPromise) return dbInitPromise;
 
@@ -28,6 +74,8 @@ export const initLocalDatabase = async () => {
       telephone_2 TEXT,
       adresse TEXT,
       logo TEXT,
+      ind_pro INTEGER NOT NULL DEFAULT 0 CHECK (ind_pro IN (0, 1)),
+      ind_active INTEGER NOT NULL DEFAULT 1 CHECK (ind_active IN (0, 1)),
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
       _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1))
@@ -42,6 +90,7 @@ export const initLocalDatabase = async () => {
       telephone_1 TEXT NOT NULL,
       telephone_2 TEXT,
       role TEXT NOT NULL DEFAULT 'A' CHECK (role IN ('A', 'C', 'S', 'T')),
+      identifiant TEXT UNIQUE,
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
       _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1)),
@@ -55,6 +104,7 @@ export const initLocalDatabase = async () => {
       nom_complet TEXT NOT NULL,
       telephone_1 TEXT NOT NULL,
       telephone_2 TEXT,
+      supprime_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
       _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1)),
@@ -70,6 +120,8 @@ export const initLocalDatabase = async () => {
       adresse TEXT,
       responsable TEXT,
       status TEXT NOT NULL DEFAULT 'D' CHECK (status IN ('D', 'V', 'E', 'X', 'Z')),
+      notes TEXT,
+      supprime_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
       _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1)),
@@ -106,8 +158,7 @@ export const initLocalDatabase = async () => {
       formule TEXT NOT NULL,
       nom TEXT NOT NULL,
       nom_unite TEXT NOT NULL CHECK (length(nom_unite) <= 10),
-      ind_unitaire INTEGER NOT NULL DEFAULT 1 CHECK (ind_unitaire IN (0, 1)),
-      ind_dimension INTEGER NOT NULL DEFAULT 0 CHECK (ind_dimension IN (0, 1)), -- 1 pour True, 0 pour False
+      ind_dimension INTEGER NOT NULL DEFAULT 0 CHECK (ind_dimension IN (0, 1)),
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now'))
     );
@@ -134,6 +185,8 @@ export const initLocalDatabase = async () => {
       total_ht_facture REAL DEFAULT 0.0,
       tva_facture REAL DEFAULT 18.0,
       total_ttc_facture REAL DEFAULT 0.0,
+      note TEXT,
+      supprime_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
       _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1)),
@@ -153,21 +206,142 @@ export const initLocalDatabase = async () => {
       quantite REAL NOT NULL DEFAULT 1.0,
       prix_unitaire_applique REAL NOT NULL,
       montant REAL NOT NULL,
+      note TEXT,
+      ind_complete INTEGER NOT NULL DEFAULT 0 CHECK (ind_complete IN (0, 1)),
+      supprime_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
       _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1)),
       FOREIGN KEY (releve_id) REFERENCES releves (id) ON DELETE CASCADE,
       FOREIGN KEY (ouvrage_unite_id) REFERENCES ouvrage_unites (id) ON DELETE RESTRICT
     );
+
+    CREATE TABLE IF NOT EXISTS terrain_session (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      profil_id TEXT NOT NULL,
+      entreprise_id TEXT NOT NULL,
+      identifiant TEXT NOT NULL,
+      logged_in_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (profil_id) REFERENCES profils (id) ON DELETE CASCADE,
+      FOREIGN KEY (entreprise_id) REFERENCES entreprises (id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS terrain_device (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      profil_id TEXT NOT NULL,
+      entreprise_id TEXT NOT NULL,
+      identifiant TEXT NOT NULL,
+      mot_de_passe TEXT,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   console.log("🚀 Schéma Draw.io complet, épuré et initialisé avec succès dans SQLite !");
+
+  try {
+    await db.execAsync('ALTER TABLE chantiers ADD COLUMN notes TEXT;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync(
+      'ALTER TABLE entreprises ADD COLUMN ind_pro INTEGER NOT NULL DEFAULT 0 CHECK (ind_pro IN (0, 1));'
+    );
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync(
+      'ALTER TABLE entreprises ADD COLUMN ind_active INTEGER NOT NULL DEFAULT 1 CHECK (ind_active IN (0, 1));'
+    );
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync('ALTER TABLE profils ADD COLUMN identifiant TEXT;');
+    await db.execAsync(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_profils_identifiant ON profils(identifiant) WHERE identifiant IS NOT NULL;'
+    );
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS terrain_device (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        profil_id TEXT NOT NULL,
+        entreprise_id TEXT NOT NULL,
+        identifiant TEXT NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+    `);
+  } catch {
+    // Table deja presente.
+  }
+
+  try {
+    await db.execAsync('ALTER TABLE terrain_device ADD COLUMN mot_de_passe TEXT;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync('ALTER TABLE ligne_releves ADD COLUMN note TEXT;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync(
+      'ALTER TABLE ligne_releves ADD COLUMN ind_complete INTEGER NOT NULL DEFAULT 0 CHECK (ind_complete IN (0, 1));'
+    );
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync('ALTER TABLE releves ADD COLUMN note TEXT;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  await migrateUnitesDropIndUnitaire(db);
+
+  for (const tableName of ['clients', 'chantiers', 'releves', 'ligne_releves']) {
+    try {
+      await db.execAsync(`ALTER TABLE ${tableName} ADD COLUMN supprime_le TEXT;`);
+    } catch {
+      // Colonne deja presente.
+    }
+  }
   })();
 
   return dbInitPromise;
 };
 
+const ensureSchemaMigrations = async (db) => {
+  try {
+    await db.execAsync('ALTER TABLE chantiers ADD COLUMN notes TEXT;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  for (const tableName of ['clients', 'chantiers', 'releves', 'ligne_releves']) {
+    try {
+      await db.execAsync(`ALTER TABLE ${tableName} ADD COLUMN supprime_le TEXT;`);
+    } catch {
+      // Colonne deja presente.
+    }
+  }
+};
+
 export const ensureLocalDatabaseReady = async () => {
   await initLocalDatabase();
-  return getLocalDB();
+  const db = await getLocalDB();
+  await ensureSchemaMigrations(db);
+  return db;
 };

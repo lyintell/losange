@@ -1,0 +1,146 @@
+1.
+Maintenant travaillons sur les donnees.
+Met a jour la base de données:
+ - Entreprise :
+    - Ajoute un champ ind_pro qui peut prendre les valeurs 1 ou 0 (pro ou free). par defaut 0.
+    - Ajoute un champ ind_active qui peut prendre les valeurs 1 ou 0. Par defaut 1.
+
+2.
+Mettons a jour les pages pour enlever les mock et utiliser les donnees de la base de donnees.
+Commencons par le login sur mobile. Les identifiants et mot de passe sont obtenu de supabase pour la premiere connections.
+Les donnees sont alors stockee en local si connection successful.
+
+Si l identifiant appartient a une entreprise qui n est pas actif, alors la connexion est rejeté (compte inactif)
+
+3.
+- Lorsque un compte se connecte pour la premiere fois (donnees local vide), charger les donnees du compte depuis Supabase. Si il n y a pas internet, login rejete ("Veuillez vous connecté pour une première connexion").
+- Lors que un compte se connecte sur un telephone, et qu un autre compte (different) etait enregistrer localement),
+montrer un modal danger "Un AUTRE COMPTE etait connecté à cet appareil. Ses données seront effacées du téléphone").
+On clique sur Oui, effacer toute les donnees locales du précédent compte, et enregistrer les donnees du nouveau compte.
+
+4.
+Effacons les donnees mock de l appli. Commencons par la page profil. 
+Remplace par les données locales. Montre un badge basé sur le type de compte (ind_pro = 1 => PRO en rouge. ind_pro=0 => Gratuit en gris)
+
+5.
+Si un compte est deja enregistrer localement, la connexion a ce compte ne doit pas requerir internet.
+Nous allons implementer un system pour reverification plus tard.
+
+6.
+Maintenant, efface tous les donnees mock dans toute les pages de l appli mobile.
+- Cards liste chantiers
+- Choix de metier
+- Choix de l ouvrage
+- Choix de l ouvrage unite
+
+Remplace par les donnees respectives obtenus des tables necessaires
+
+7.
+Ajouter deux boutons icon download et load sync dans le menu Plus (format recherche) dans la colonne gauche 
+On click telecharger / charger les données depuis Supabase.
+
+8.
+J ai ajouté les données dans Supabase (metier et unité et unité ouvrage). Mais les données ne sont pas visible dans l'application. meme après
+download.
+
+9.
+Lorsque ind_unitaire = 1 et ind_dimension = 1, alors sur le pave, on entre les dimensions, mais la quantite = n (il n y a pas de calcul pour la quantite)
+Lorsque ind_unitaire = 0 et ind_dimension = 1, alors sur le pave, on entre les dimensions, mais la quantité est calculé lxhxn
+
+10.
+Par default dans l entree des mesures, le nombre n = 0.
+
+11.
+Dans recap et details, l unite devant quantite should be le champ nom_unite
+
+12.
+Les quantité max 2 decimal apres la virgule.
+Met a jour les cards de details - meme format que celui de recap
+
+13.
+Swap bouton modifier et devis dans details.
+Sur clique de modifier, ramene a l ecran recap
+Ajoute le bouton supprimer dans la colonne gauche de details
+
+14.
+Lorsque enregistrer est cliquer durant la modification, garder les info client et chantiers. L utilisateur peut les modifier avant de sauvegarder.
+
+15.
+Dans la page recap, double clique supprime cette entree (confirmation d abord)
+
+16.
+Dans details lorsqu une mesure a une note, montre ** devant le nom de l ouvrage. On click, ouvre le note modal (non-modifiable).
+Dans details, double clique sur une card de mesure, strickethrough en vers les ecritures. Double clique encore enleve le strickethrough.
+
+Ajoute un champ ind_complete a la table ligne_releve local et dans le cloud.
+Lorsque strickethrough alors ind_complete = 1. sinon ind_complete = 0.
+
+17.
+Deplace Qté en haut.
+Par default pas de prix unitaire dans details. On click sur le bouton devis, montrer les prix unitaire appliqué (par default = prix unitaire ouvrage unite).
+DOuble click gray out le background (similaire to click sur recherche sur liste chantier) et affiche deux boutons - Telecharger (Bleu) et Whatsapp (Vert).
+On click sur choix, le devis est produit et telecharger ou demande de partager sur Whatsapp.
+
+18.
+Ajoute un champ note a la table releve, local et supabase
+met a jour l ecran admin avec le nouveau champ
+
+19.
+ind_unitaire et ind_dimension sont un duplicata. Enleve ind_unitaire partout (base de donnees local et supabase), et dans le frontend.
+Pour les calculs:
+- si ind_dimension = 1 alors le calcul de la quantite est fait selon la formule dans le champ formule.
+- si ind_dimension = 0 alors les quantites sont unitaire
+
+20.
+Il y a une difference entre l apparance dans les pages details, recap et devis des ouvrages unite ind_dimension = 1 vs ind_dimension = 0.
+Si ind_dimension = 1
+- le nombre affiché en qté est n, cependant la valeur qté est bien qté.
+- dans la colonne prix unitaire dans le devis, affiche le montant, cependant les valeurs du prix unitaire et prix unitaire appliqué ne change pas
+
+21.
+- Dans ecran recapitulatif, meme chose.
+- Aussi la qté affichée lors de l entree des mesures doit etre n (visuellement)
+- Dans details, recapitulatif et devis, ne pas afficher lxhxn. affiche juste lxh puisque n apparait en tant que qté
+
+22.
+Maintenant travaillons sur les sync dans Supabase.
+Pour les comptes pro, apres chaque post et s il y a internet, automatiquement load dans le cloud. Si il n y a pas d internet, les donnees sont stocké localement.
+Dès qu il y a internet (check every 1 min), ou sur clique manuel sur sync (upload) dans le menu plus ou on login ou on logout, attempte de charger les données dans le cloud.
+Implemente un mecanisme solide de gestion des conflits pour éviter de perdre les données ou de dupliqué les données dans le cloud et localement.
+D abord explique moi le processus puis je valide pour que tu implemente
+
+23.
+Lorsque le chantier et le client sont enregistrer, automatiquement prise_par dans la table releve est set automatiquement a l utilisateur actuel de l app (qui a enregistrer les dimensions)
+
+24.
+Lorsque les donnees de supabase sont plus a jour que les donnees local, sur login ou clique manuel sur sync (PLUS), telecharger les donnees dans le local
+
+25.
+Il y a un probleme Il y a des donnees (client et chantier) dans supabase pour un profil.
+Je me connecte au profile sur mobile (vierge), mais les donnees ne sont pas telecharger
+
+26.
+Si une entreprise a ind_actif = 0, alors toute connection de profile relie a l entreprise sont rejete
+
+27.
+déconnexion immédiate après sync ou au retour sur l’app
+
+28.
+Chaque double clique sur chantier change de status dans l ordre suivant:
+Dimension -> Devis -> En cours -> Terminé -> Dimension -> etc.
+Triple clique status Annulé. Triple clique encore -> Dimension
+Les status bg sont color codé.
+
+Aussi lorsque devis télécharger au envoyé sur Whatsapp, automatiquement status -> devis
+
+29.
+On va ajouter la possibilité de changer le prix unitaire appliqué.
+Lors de l entrée de dimension (ligne relevel) ou modification d une dimension, afficher le prix unitaire appliqué à droite de notes.
+ie. separe Note et Qté (colonne gauche) et prix (bouton similaire a notes), prix (visibile) colonne droite.
+Le prix visible affiche le prix unitaire appliqué. On clique sur prix (bouton), ouvre le modal pour changer le prix unitaire appliqué.
+
+Aussi, affiche le prix unitaire en bas de Qté à l'écran récapitulatif
+
+30.
+La version MVP de Losange est pret. Je pouvoir acceder a l ecran admin a partir d une page web. Quel est la facon la plus rapide de mettre
+l ecran admin en production

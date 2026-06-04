@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { Button, Chip, Text } from 'react-native-paper';
-import { getMetiersLocal, getOuvragesByMetierAndEntreprise, getUnitesEtPrixParOuvrage } from '../db/querries';
+import { getMetiersForEntrepriseLocal, getOuvragesByMetierAndEntreprise, getUnitesEtPrixParOuvrage } from '../db/querries';
 import { chantierColors } from '../styles/theme';
 
 export default function SelecteurMetierOuvrage({
@@ -23,9 +23,13 @@ export default function SelecteurMetierOuvrage({
 
   useEffect(() => {
     const loadMetiers = async () => {
+      if (!entrepriseId) {
+        setMetiers([]);
+        return;
+      }
       try {
         setLoadingMetiers(true);
-        const data = await getMetiersLocal();
+        const data = await getMetiersForEntrepriseLocal(entrepriseId);
         setMetiers(data || []);
       } catch (error) {
         console.error('Erreur chargement metiers:', error);
@@ -35,7 +39,7 @@ export default function SelecteurMetierOuvrage({
       }
     };
     loadMetiers();
-  }, []);
+  }, [entrepriseId]);
 
   const handleChooseMetier = async (metier) => {
     if (!entrepriseId) return;
@@ -88,7 +92,7 @@ export default function SelecteurMetierOuvrage({
       {loadingMetiers ? (
         <ActivityIndicator size="large" color={chantierColors.primary} />
       ) : metiers.length === 0 ? (
-        <Text style={styles.infoText}>Aucun metier disponible. Synchronisez le catalogue depuis Supabase.</Text>
+        <Text style={styles.infoText}>Aucun metier disponible. Connectez-vous en ligne pour synchroniser le catalogue depuis Supabase.</Text>
       ) : (
         <View style={styles.metierGrid}>
           {metiers.map((metier) => (

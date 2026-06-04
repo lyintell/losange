@@ -1,68 +1,167 @@
-import React, { useMemo, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
-import { Button, Card, Text } from 'react-native-paper';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Button, Modal, Portal, Text, TextInput } from 'react-native-paper';
 import PaveNumerique from '../components/terrain/PaveNumerique';
+import { getFabActionZoneHeight } from '../components/terrain/TerrainFlowFabs';
 import { insertLigneReleveLocal } from '../db/querries';
 import { chantierColors } from '../styles/theme';
 import {
   computeQuantiteLigneReleve,
   getRequiredCotesFromFormula,
-  usesDimensionCotes,
 } from '../utils/ligneReleveCalcul';
+import { formatQuantite, formatMontant } from '../utils/formatLigneMesures';
 
-export default function PaveSaisieOneHand({
-  releveId = '',
-  ouvrageUniteId = '',
-  prixUnitaireApplique = 0,
-  isDimension = true,
-  isUnitaire = false,
-  uniteFormule = '',
-  onSaved,
-  bottomOffset = 0,
-}) {
-  const usesDimension = usesDimensionCotes(isDimension ? 1 : 0, isUnitaire ? 1 : 0);
+const FIELD_SHORT = {
+  largeur: 'l',
+  hauteur: 'h',
+  nombre: 'n',
+};
+
+const COTE_KEY_HEIGHT = 42;
+const COTE_INACTIVE_BG = '#4B5563';
+const COTE_INACTIVE_BORDER = '#3F4654';
+
+export default forwardRef(function PaveSaisieOneHand(
+  {
+    releveId = '',
+    ouvrageUniteId = '',
+    prixUnitaireApplique = 0,
+    isDimension = true,
+    uniteFormule = '',
+    nomUnite = '',
+    onSaved,
+    onSaveLine,
+    onValidityChange,
+    hideInternalSaveButton = false,
+    bottomOffset = 0,
+    initialValues = null,
+    fabSmallCountBelow = 1,
+  },
+  ref
+) {
   const requiredCotes = useMemo(
-    () => getRequiredCotesFromFormula(uniteFormule, isDimension ? 1 : 0, isUnitaire ? 1 : 0),
-    [uniteFormule, isDimension, isUnitaire]
+    () => getRequiredCotesFromFormula(uniteFormule, isDimension ? 1 : 0),
+    [uniteFormule, isDimension]
   );
 
+  const isDimensionMode = Number(isDimension ? 1 : 0) === 1;
+
   const champs = useMemo(() => {
-    if (!usesDimension) return ['nombre'];
+    if (!isDimensionMode) return ['nombre'];
     const fields = [];
     if (requiredCotes.needsLargeur) fields.push('largeur');
     if (requiredCotes.needsHauteur) fields.push('hauteur');
-    if (requiredCotes.needsProfondeur) fields.push('profondeur');
-    if (!fields.length) fields.push('largeur', 'hauteur');
     fields.push('nombre');
     return fields;
-  }, [usesDimension, requiredCotes]);
+  }, [isDimensionMode, requiredCotes]);
+
+  const buildInitialForm = useCallback(
+    () => ({
+      largeur:
+        initialValues?.largeur != null && initialValues.largeur !== ''
+          ? String(initialValues.largeur)
+          : '',
+      hauteur:
+        initialValues?.hauteur != null && initialValues.hauteur !== ''
+          ? String(initialValues.hauteur)
+          : '',
+      nombre:
+        initialValues?.nombre != null && initialValues.nombre !== ''
+          ? String(initialValues.nombre)
+          : '0',
+    }),
+    [initialValues]
+  );
 
   const [focusIndex, setFocusIndex] = useState(0);
-  const [form, setForm] = useState({
-    largeur: '',
-    hauteur: '',
-    profondeur: '',
-    nombre: '1',
-  });
+  const [form, setForm] = useState(buildInitialForm);
+  const [note, setNote] = useState(initialValues?.note || '');
+  const [noteDraft, setNoteDraft] = useState('');
+  const [notesModalVisible, setNotesModalVisible] = useState(false);
+  const [prixUnitaireDraft, setPrixUnitaireDraft] = useState('');
+  const [prixModalVisible, setPrixModalVisible] = useState(false);
+  const [prixUnitaireAppliqueState, setPrixUnitaireAppliqueState] = useState(
+    () =>
+      initialValues?.prix_unitaire_applique != null
+        ? Number(initialValues.prix_unitaire_applique) || 0
+        : Number(prixUnitaireApplique) || 0
+  );
   const [saving, setSaving] = useState(false);
 
-  const focusField = champs[focusIndex];
+  useEffect(() => {
+    setPrixUnitaireAppliqueState(
+      initialValues?.prix_unitaire_applique != null
+        ? Number(initialValues.prix_unitaire_applique) || 0
+        : Number(prixUnitaireApplique) || 0
+    );
+  }, [initialValues?.prix_unitaire_applique, prixUnitaireApplique, ouvrageUniteId]);
+
+  useEffect(() => {
+    setFocusIndex(0);
+  }, [champs.join('|')]);
+
+  const focusField = champs[focusIndex] || champs[0];
+
+  const selectField = (index) => {
+    setFocusIndex(index);
+  };
+
+  const buildPayloadIfValid = useCallback(() => {
+    const largeur = parseFloat(form.largeur || '0');
+    const hauteur = parseFloat(form.hauteur || '0');
+    const nombre = parseInt(form.nombre?.trim() || '0', 10);
+
+    if (requiredCotes.needsLargeur && (!form.largeur?.trim() || !largeur)) return null;
+    if (requiredCotes.needsHauteur && (!form.hauteur?.trim() || !hauteur)) return null;
+    if (!nombre) return null;
+
+    let quantite = 0;
+    try {
+      quantite = computeQuantiteLigneReleve({
+        indDimension: isDimension ? 1 : 0,
+        formule: uniteFormule,
+        largeur,
+        hauteur,
+        profondeur: null,
+        nombre,
+      });
+    } catch {
+      return null;
+    }
+
+    if (!quantite) return null;
+
+    return {
+      largeur: requiredCotes.needsLargeur ? largeur : null,
+      hauteur: requiredCotes.needsHauteur ? hauteur : null,
+      profondeur: null,
+      nombre,
+      quantite,
+      prixUnitaireApplique: prixUnitaireAppliqueState,
+      note: note.trim() || null,
+    };
+  }, [form, isDimension, uniteFormule, requiredCotes, prixUnitaireAppliqueState, note]);
+
+  const isFormComplete = Boolean(buildPayloadIfValid());
+
+  useEffect(() => {
+    onValidityChange?.(isFormComplete);
+  }, [isFormComplete, onValidityChange]);
 
   const quantitePreview = useMemo(() => {
     try {
       return computeQuantiteLigneReleve({
         indDimension: isDimension ? 1 : 0,
-        indUnitaire: isUnitaire ? 1 : 0,
         formule: uniteFormule,
         largeur: form.largeur,
         hauteur: form.hauteur,
-        profondeur: form.profondeur,
-        nombre: form.nombre,
+        profondeur: null,
+        nombre: form.nombre?.trim() || '0',
       });
     } catch {
       return 0;
     }
-  }, [form.hauteur, form.largeur, form.profondeur, form.nombre, isDimension, isUnitaire, uniteFormule]);
+  }, [form.hauteur, form.largeur, form.nombre, isDimension, uniteFormule]);
 
   const handleKeyPress = (value) => {
     if (!focusField) return;
@@ -74,203 +173,392 @@ export default function PaveSaisieOneHand({
     setForm((prev) => ({ ...prev, [focusField]: `${prev[focusField]}${value}` }));
   };
 
-  const moveToNextField = () => {
-    setFocusIndex((prev) => (prev < champs.length - 1 ? prev + 1 : prev));
-  };
-
-  const handleSaveLine = async () => {
-    if (!releveId || !ouvrageUniteId) {
-      Alert.alert('Contexte incomplet', 'Le releve ou l ouvrage est manquant.');
-      return;
+  const handleSaveLine = async ({ silent = false } = {}) => {
+    if (!onSaveLine && (!releveId || !ouvrageUniteId)) {
+      if (!silent) Alert.alert('Contexte incomplet', 'Le releve ou l ouvrage est manquant.');
+      return false;
     }
 
-    const largeur = parseFloat(form.largeur || '0');
-    const hauteur = parseFloat(form.hauteur || '0');
-    const profondeur = parseFloat(form.profondeur || '0');
-    const nombre = parseInt(form.nombre || '1', 10);
-    let quantite = 0;
-
-    try {
-      quantite = computeQuantiteLigneReleve({
-        indDimension: isDimension ? 1 : 0,
-        indUnitaire: isUnitaire ? 1 : 0,
-        formule: uniteFormule,
-        largeur,
-        hauteur,
-        profondeur,
-        nombre,
-      });
-    } catch (error) {
-      Alert.alert('Formule invalide', error.message || 'Impossible de calculer la quantite.');
-      return;
-    }
-
-    if (usesDimension) {
-      if (requiredCotes.needsLargeur && !largeur) {
-        Alert.alert('Valeurs invalides', 'Saisissez une largeur valide.');
-        return;
+    const payload = buildPayloadIfValid();
+    if (!payload) {
+      if (!silent) {
+        Alert.alert('Valeurs invalides', 'Renseignez toutes les cotes requises pour cette unite.');
       }
-      if (requiredCotes.needsHauteur && !hauteur) {
-        Alert.alert('Valeurs invalides', 'Saisissez une hauteur valide.');
-        return;
-      }
-      if (requiredCotes.needsProfondeur && !profondeur) {
-        Alert.alert('Valeurs invalides', 'Saisissez une profondeur valide.');
-        return;
-      }
-      if (!nombre || !quantite) {
-        Alert.alert('Valeurs invalides', 'Saisissez un nombre valide pour calculer la quantite.');
-        return;
-      }
-    } else if (!nombre || !quantite) {
-      Alert.alert('Valeurs invalides', 'Saisissez un Nombre valide.');
-      return;
+      return false;
     }
 
     try {
       setSaving(true);
-      await insertLigneReleveLocal(releveId, ouvrageUniteId, {
-        largeur: usesDimension && requiredCotes.needsLargeur ? largeur : null,
-        hauteur: usesDimension && requiredCotes.needsHauteur ? hauteur : null,
-        profondeur: usesDimension && requiredCotes.needsProfondeur ? profondeur : null,
-        nombre,
-        quantite,
-        prixUnitaireApplique,
-      });
+      if (onSaveLine) {
+        await onSaveLine(payload);
+      } else {
+        await insertLigneReleveLocal(releveId, ouvrageUniteId, payload);
+        onSaved?.();
+      }
 
-      setForm({ largeur: '', hauteur: '', profondeur: '', nombre: '1' });
+      setForm({ largeur: '', hauteur: '', nombre: '0' });
+      setNote('');
+      setPrixUnitaireAppliqueState(Number(prixUnitaireApplique) || 0);
       setFocusIndex(0);
-      onSaved?.();
+      return true;
     } catch (error) {
       console.error('Erreur insertion ligne releve:', error);
-      Alert.alert('Erreur', "Impossible d'enregistrer la ligne.");
+      if (!silent) Alert.alert('Erreur', "Impossible d'enregistrer la ligne.");
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
-  return (
-    <View style={[styles.container, { paddingBottom: bottomOffset + 8 }]}>
-      <View style={styles.topResume}>
-        <Text variant="titleMedium" style={styles.resumeTitle}>
-          {usesDimension ? 'Cotes en cours' : 'Quantite en cours'}
-        </Text>
-        <Text style={styles.resumeText}>
-          {usesDimension
-            ? `L: ${form.largeur || '-'} | H: ${form.hauteur || '-'} | P: ${form.profondeur || '-'} | Nb: ${form.nombre || '1'} | Qt: ${quantitePreview.toFixed(2)}`
-            : `Nb: ${form.nombre || '1'} | Qt: ${quantitePreview.toFixed(2)}`}
-        </Text>
-      </View>
+  useImperativeHandle(ref, () => ({
+    saveLine: handleSaveLine,
+    isFormComplete: () => Boolean(buildPayloadIfValid()),
+  }));
 
-      <View style={styles.center}>
-        {champs.map((field, index) => (
-          <Card
-            key={field}
-            style={[styles.valueCard, focusIndex === index && styles.valueCardActive]}
-            onPress={() => setFocusIndex(index)}
+  const chipDisplayValue = (field, index) => {
+    if (form[field] !== '') return form[field];
+    if (field === 'nombre') return focusIndex === index ? '' : '0';
+    return '0';
+  };
+
+  const mesuresFormatees = useMemo(() => {
+    if (!isDimensionMode) return chipDisplayValue('nombre', 0) || '0';
+
+    const parts = [];
+    if (requiredCotes.needsLargeur) parts.push(chipDisplayValue('largeur', champs.indexOf('largeur')));
+    if (requiredCotes.needsHauteur) parts.push(chipDisplayValue('hauteur', champs.indexOf('hauteur')));
+    parts.push(chipDisplayValue('nombre', champs.indexOf('nombre')));
+    return parts.join(' x ');
+  }, [form, focusIndex, champs, isDimensionMode, requiredCotes]);
+
+  const quantiteAffichage = isDimensionMode
+    ? parseInt(form.nombre?.trim() || '0', 10) || 0
+    : quantitePreview;
+  const quantiteLabel = `Qté =  ${formatQuantite(quantiteAffichage)}${nomUnite ? ` ${nomUnite}` : ''}`;
+
+  const montantPreview = useMemo(() => {
+    const quantite = Number(quantitePreview) || 0;
+    const prix = Number(prixUnitaireAppliqueState) || 0;
+    return Math.round(quantite * prix * 100) / 100;
+  }, [quantitePreview, prixUnitaireAppliqueState]);
+
+  const montantLabel = `Montant = ${formatMontant(montantPreview)}`;
+
+  const openNotesModal = () => {
+    setNoteDraft(note);
+    setNotesModalVisible(true);
+  };
+
+  const saveNotes = () => {
+    setNote(noteDraft.trim());
+    setNotesModalVisible(false);
+  };
+
+  const openPrixModal = () => {
+    setPrixUnitaireDraft(String(prixUnitaireAppliqueState || 0));
+    setPrixModalVisible(true);
+  };
+
+  const savePrix = () => {
+    const parsed = parseFloat(String(prixUnitaireDraft).replace(',', '.'));
+    if (Number.isNaN(parsed) || parsed < 0) {
+      Alert.alert('Prix invalide', 'Saisissez un prix unitaire valide.');
+      return;
+    }
+    setPrixUnitaireAppliqueState(parsed);
+    setPrixModalVisible(false);
+  };
+
+  const renderPaveKey = (field, index) => {
+    const isActive = focusIndex === index;
+    const value = chipDisplayValue(field, index);
+
+    return (
+      <Pressable
+        key={field}
+        onPress={() => selectField(index)}
+        style={[styles.paveKey, isActive && styles.paveKeyActive]}
+      >
+        <Text style={[styles.paveKeyLetter, isActive && styles.paveKeyLetterActive]}>
+          {FIELD_SHORT[field]}
+        </Text>
+        <Text style={[styles.paveKeyValue, isActive && styles.paveKeyValueActive]}>{value || '0'}</Text>
+      </Pressable>
+    );
+  };
+
+  const renderNotesModal = () => (
+    <Portal>
+      <Modal
+        visible={notesModalVisible}
+        onDismiss={() => setNotesModalVisible(false)}
+        contentContainerStyle={styles.notesModal}
+      >
+        <Text variant="titleLarge" style={styles.notesModalTitle}>
+          Note
+        </Text>
+        <TextInput
+          mode="outlined"
+          multiline
+          numberOfLines={4}
+          value={noteDraft}
+          onChangeText={setNoteDraft}
+          placeholder="Saisir une note pour cette ligne..."
+          style={styles.notesInput}
+        />
+        <View style={styles.notesModalActions}>
+          <Button mode="outlined" onPress={() => setNotesModalVisible(false)}>
+            Annuler
+          </Button>
+          <Button mode="contained" onPress={saveNotes}>
+            Enregistrer
+          </Button>
+        </View>
+      </Modal>
+    </Portal>
+  );
+
+  const renderPrixModal = () => (
+    <Portal>
+      <Modal
+        visible={prixModalVisible}
+        onDismiss={() => setPrixModalVisible(false)}
+        contentContainerStyle={styles.notesModal}
+      >
+        <Text variant="titleLarge" style={styles.notesModalTitle}>
+          Prix unitaire applique
+        </Text>
+        <TextInput
+          mode="outlined"
+          keyboardType="decimal-pad"
+          value={prixUnitaireDraft}
+          onChangeText={setPrixUnitaireDraft}
+          placeholder="Prix unitaire..."
+          style={styles.prixInput}
+          right={<TextInput.Affix text="F" />}
+        />
+        <View style={styles.notesModalActions}>
+          <Button mode="outlined" onPress={() => setPrixModalVisible(false)}>
+            Annuler
+          </Button>
+          <Button mode="contained" onPress={savePrix}>
+            Enregistrer
+          </Button>
+        </View>
+      </Modal>
+    </Portal>
+  );
+
+  const renderBottomPanel = () => (
+    <View style={styles.bottomPanel}>
+      <View style={styles.paveGrid}>{champs.map((field, index) => renderPaveKey(field, index))}</View>
+      <View style={styles.metaGrid}>
+        <View style={styles.metaColumn}>
+          <Button
+            mode={note ? 'contained-tonal' : 'outlined'}
+            icon="note-text-outline"
+            onPress={openNotesModal}
+            style={styles.metaButton}
+            contentStyle={styles.paveKeyContent}
+            labelStyle={styles.notesKeyLabel}
+            buttonColor={note ? '#E8F4FD' : chantierColors.surface}
+            textColor={note ? chantierColors.primary : chantierColors.text}
           >
-            <Card.Content>
-              <Text style={styles.cardLabel}>{field.toUpperCase()}</Text>
-              <Text style={styles.cardValue}>{form[field] || '0'}</Text>
-            </Card.Content>
-          </Card>
-        ))}
-
-        <Button
-          mode="contained-tonal"
-          onPress={moveToNextField}
-          style={styles.nextButton}
-          contentStyle={styles.nextButtonContent}
-        >
-          Champ suivant
-        </Button>
+            Notes
+          </Button>
+          <Text style={styles.quantiteLine}>{quantiteLabel}</Text>
+        </View>
+        <View style={styles.metaColumn}>
+          <Button
+            mode="outlined"
+            icon="currency-usd"
+            onPress={openPrixModal}
+            style={styles.metaButton}
+            contentStyle={styles.paveKeyContent}
+            labelStyle={styles.notesKeyLabel}
+            buttonColor={chantierColors.surface}
+            textColor={chantierColors.text}
+          >
+            Prix
+          </Button>
+          <Text style={styles.prixLine}>{formatMontant(prixUnitaireAppliqueState)}</Text>
+        </View>
       </View>
-
-      <View style={styles.bottom}>
-        <Button
-          mode="contained"
-          onPress={handleSaveLine}
-          loading={saving}
-          disabled={saving}
-          style={styles.saveButton}
-          contentStyle={styles.saveContent}
-          buttonColor={chantierColors.success}
-          textColor="#FFFFFF"
-          labelStyle={styles.saveLabel}
-        >
-          VALIDER LA LIGNE
-        </Button>
-        <PaveNumerique onKeyPress={handleKeyPress} disabled={saving} />
-      </View>
+      <Text style={styles.montantLine}>{montantLabel}</Text>
     </View>
   );
-}
+
+  if (hideInternalSaveButton) {
+    const fabZoneHeight = getFabActionZoneHeight(fabSmallCountBelow);
+
+    return (
+      <View style={styles.containerEmbedded}>
+        <View style={styles.topKeypadBlock}>
+          <PaveNumerique
+            onKeyPress={handleKeyPress}
+            disabled={saving}
+            measuresLine={mesuresFormatees}
+            placement="top"
+          />
+        </View>
+        <View style={styles.embeddedSpacer} />
+        <View style={[styles.bottomBlock, { paddingBottom: fabZoneHeight }]}>
+          {renderBottomPanel()}
+        </View>
+        {renderNotesModal()}
+        {renderPrixModal()}
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.container, { paddingBottom: bottomOffset + 8 }]}>
+      <PaveNumerique
+        onKeyPress={handleKeyPress}
+        disabled={saving}
+        measuresLine={mesuresFormatees}
+        placement="top"
+      />
+      <View style={styles.embeddedSpacer} />
+      {renderBottomPanel()}
+      {renderNotesModal()}
+      {renderPrixModal()}
+    </View>
+  );
+});
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: chantierColors.background,
-    justifyContent: 'space-between',
+    minHeight: 0,
   },
-  topResume: {
-    paddingTop: 14,
-    paddingHorizontal: 12,
-  },
-  resumeTitle: {
-    color: chantierColors.text,
-    fontWeight: '800',
-  },
-  resumeText: {
-    marginTop: 4,
-    color: chantierColors.muted,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  center: {
+  containerEmbedded: {
     flex: 1,
+    minHeight: 0,
+  },
+  topKeypadBlock: {
+    flexShrink: 0,
+  },
+  embeddedSpacer: {
+    flex: 1,
+    minHeight: 0,
+  },
+  bottomBlock: {
+    flexShrink: 0,
     paddingHorizontal: 12,
-    gap: 10,
-    paddingTop: 12,
   },
-  valueCard: {
-    borderRadius: 14,
+  bottomPanel: {
+    paddingTop: 4,
+    paddingBottom: 2,
+  },
+  paveGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 6,
+  },
+  paveKey: {
+    width: '31.5%',
+    minHeight: COTE_KEY_HEIGHT,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COTE_INACTIVE_BORDER,
+    backgroundColor: COTE_INACTIVE_BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 2,
+  },
+  paveKeyActive: {
     borderWidth: 2,
-    borderColor: chantierColors.border,
-    backgroundColor: chantierColors.surface,
-  },
-  valueCardActive: {
     borderColor: chantierColors.primary,
     backgroundColor: '#FFF4EF',
   },
-  cardLabel: {
-    color: chantierColors.muted,
-    fontWeight: '700',
+  paveKeyLetter: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.75)',
+    textTransform: 'lowercase',
   },
-  cardValue: {
-    marginTop: 4,
-    fontSize: 34,
+  paveKeyLetterActive: {
+    color: chantierColors.primary,
+  },
+  paveKeyValue: {
+    fontSize: 17,
     fontWeight: '900',
+    color: 'rgba(255,255,255,0.95)',
+    marginTop: 1,
+  },
+  paveKeyValueActive: {
     color: chantierColors.text,
   },
-  nextButton: {
-    marginTop: 4,
+  paveKeyContent: {
+    minHeight: COTE_KEY_HEIGHT,
   },
-  nextButtonContent: {
-    minHeight: 54,
+  metaGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginTop: 30,
+    gap: 10,
   },
-  bottom: {
-    minHeight: '42%',
-    justifyContent: 'flex-end',
+  metaColumn: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 18,
   },
-  saveButton: {
-    marginHorizontal: 12,
-    marginBottom: 8,
+  metaButton: {
+    width: '100%',
+    maxWidth: 160,
+    borderColor: chantierColors.border,
   },
-  saveContent: {
-    minHeight: 62,
-  },
-  saveLabel: {
+  quantiteLine: {
+    textAlign: 'center',
+    color: '#1D4ED8',
     fontSize: 18,
     fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  prixLine: {
+    textAlign: 'center',
+    color: chantierColors.danger,
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  montantLine: {
+    textAlign: 'left',
+    color: chantierColors.text,
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    marginTop: 18,
+  },
+  prixInput: {
+    marginBottom: 12,
+  },
+  notesKeyLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  notesModal: {
+    marginHorizontal: 20,
+    backgroundColor: chantierColors.surface,
+    borderRadius: 14,
+    padding: 16,
+  },
+  notesModalTitle: {
+    color: chantierColors.text,
+    fontWeight: '800',
+    marginBottom: 12,
+  },
+  notesInput: {
+    minHeight: 120,
+    marginBottom: 12,
+  },
+  notesModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
   },
 });

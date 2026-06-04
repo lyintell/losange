@@ -8,10 +8,16 @@ CREATE TABLE IF NOT EXISTS entreprises (
   telephone_2 TEXT,
   adresse TEXT,
   logo TEXT,
+  ind_pro SMALLINT NOT NULL DEFAULT 0 CHECK (ind_pro IN (0, 1)),
+  ind_active SMALLINT NOT NULL DEFAULT 1 CHECK (ind_active IN (0, 1)),
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
 );
+
+-- Migration bases Supabase deja deployees
+ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS ind_pro SMALLINT NOT NULL DEFAULT 0 CHECK (ind_pro IN (0, 1));
+ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS ind_active SMALLINT NOT NULL DEFAULT 1 CHECK (ind_active IN (0, 1));
 
 CREATE TABLE IF NOT EXISTS profils (
   id TEXT PRIMARY KEY,
@@ -21,10 +27,15 @@ CREATE TABLE IF NOT EXISTS profils (
   telephone_1 TEXT NOT NULL,
   telephone_2 TEXT,
   role TEXT NOT NULL DEFAULT 'A' CHECK (role IN ('A', 'C', 'S', 'T')),
+  identifiant TEXT UNIQUE,
+  mot_de_passe TEXT,
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
 );
+
+ALTER TABLE profils ADD COLUMN IF NOT EXISTS identifiant TEXT UNIQUE;
+ALTER TABLE profils ADD COLUMN IF NOT EXISTS mot_de_passe TEXT;
 
 CREATE TABLE IF NOT EXISTS clients (
   id TEXT PRIMARY KEY,
@@ -32,6 +43,7 @@ CREATE TABLE IF NOT EXISTS clients (
   nom_complet TEXT NOT NULL,
   telephone_1 TEXT NOT NULL,
   telephone_2 TEXT,
+  supprime_le TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
@@ -45,6 +57,8 @@ CREATE TABLE IF NOT EXISTS chantiers (
   adresse TEXT,
   responsable TEXT,
   status TEXT NOT NULL DEFAULT 'D' CHECK (status IN ('D', 'V', 'E', 'X', 'Z')),
+  notes TEXT,
+  supprime_le TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
@@ -74,7 +88,6 @@ CREATE TABLE IF NOT EXISTS unites (
   formule TEXT NOT NULL,
   nom TEXT NOT NULL,
   nom_unite TEXT NOT NULL CHECK (char_length(nom_unite) <= 10),
-  ind_unitaire SMALLINT NOT NULL DEFAULT 1 CHECK (ind_unitaire IN (0, 1)),
   ind_dimension SMALLINT NOT NULL DEFAULT 0 CHECK (ind_dimension IN (0, 1)),
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now()
@@ -98,6 +111,8 @@ CREATE TABLE IF NOT EXISTS releves (
   total_ht_facture DOUBLE PRECISION DEFAULT 0,
   tva_facture DOUBLE PRECISION DEFAULT 18,
   total_ttc_facture DOUBLE PRECISION DEFAULT 0,
+  note TEXT,
+  supprime_le TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
@@ -114,6 +129,9 @@ CREATE TABLE IF NOT EXISTS ligne_releves (
   quantite DOUBLE PRECISION NOT NULL DEFAULT 1,
   prix_unitaire_applique DOUBLE PRECISION NOT NULL,
   montant DOUBLE PRECISION NOT NULL,
+  note TEXT,
+  ind_complete SMALLINT NOT NULL DEFAULT 0 CHECK (ind_complete IN (0, 1)),
+  supprime_le TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))

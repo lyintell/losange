@@ -7,8 +7,15 @@ node_modules/
 .expo/
 .expo-shared/
 dist/
+dist-*/
 web-build/
 expo-env.d.ts
+
+# EAS / builds locaux
+.eas/
+*.apk
+*.aab
+*.ipa
 
 # Native
 .kotlin/
@@ -41,6 +48,7 @@ Desktop.ini
 .env
 .env.*
 !.env.example
+expo.dev
 
 # TypeScript
 *.tsbuildinfo
@@ -68,8 +76,9 @@ supabase/.branches/
 *.swo
 *~
 
-# Cursor (local agent state)
+# Cursor / Claude (état local agents)
 .cursor/
+.claude/
 
 # Test & coverage
 coverage/
