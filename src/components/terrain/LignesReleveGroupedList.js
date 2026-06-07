@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { SectionList, StyleSheet, View } from 'react-native';
+import { ScrollView, SectionList, StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
 import LigneReleveCard from './LigneReleveCard';
 import { chantierColors } from '../../styles/theme';
@@ -13,6 +13,7 @@ export function LignesReleveGroupedSections({
   onLigneDoublePress,
   contentContainerStyle,
   ListEmptyComponent,
+  ListFooterComponent,
   refreshControl,
 }) {
   const sections = useMemo(
@@ -26,6 +27,17 @@ export function LignesReleveGroupedSections({
   );
 
   if (!sections.length) {
+    if (ListFooterComponent) {
+      return (
+        <ScrollView
+          contentContainerStyle={contentContainerStyle}
+          refreshControl={refreshControl}
+        >
+          {ListEmptyComponent}
+          {ListFooterComponent}
+        </ScrollView>
+      );
+    }
     return ListEmptyComponent || null;
   }
 
@@ -36,6 +48,7 @@ export function LignesReleveGroupedSections({
       stickySectionHeadersEnabled={false}
       contentContainerStyle={contentContainerStyle}
       refreshControl={refreshControl}
+      ListFooterComponent={ListFooterComponent}
       renderSectionHeader={({ section }) => (
         <Text variant="titleMedium" style={styles.sectionTitle}>
           {section.title}

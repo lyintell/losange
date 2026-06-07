@@ -31,7 +31,49 @@ const stripProfil = (profil: Record<string, unknown>) => {
   return safeProfil;
 };
 
+const startOfUtcDayMs = (value: string | null | undefined) => {
+  if (!value) return null;
+  const parsed = Date.parse(String(value));
+  if (Number.isNaN(parsed)) return null;
+  const date = new Date(parsed);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+};
+
+const isProEntrepriseExpired = (entreprise: Record<string, unknown> | null | undefined) => {
+  if (!entreprise || Number(entreprise.ind_pro) !== 1) return false;
+  const limitMs = startOfUtcDayMs(entreprise.date_actif_jusqua as string | undefined);
+  if (limitMs == null) return false;
+  const todayMs = startOfUtcDayMs(new Date().toISOString());
+  return (todayMs ?? 0) > limitMs;
+};
+
+const deactivateExpiredProEntreprise = async (
+  supabase: ReturnType<typeof createClient>,
+  entreprise: Record<string, unknown> | null | undefined
+) => {
+  if (!entreprise || !isProEntrepriseExpired(entreprise)) {
+    return { expired: false as const, entreprise };
+  }
+
+  const entrepriseId = String(entreprise.id);
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from('entreprises')
+    .update({ ind_active: 0, mis_a_jour_le: now })
+    .eq('id', entrepriseId);
+
+  if (error) {
+    throw new Error(error.message || 'Impossible de desactiver le compte expire.');
+  }
+
+  return {
+    expired: true as const,
+    entreprise: { ...entreprise, ind_active: 0, mis_a_jour_le: now },
+  };
+};
+
 const PUSH_ORDER = [
+  'entreprises',
   'ouvrages',
   'ouvrage_unites',
   'clients',
@@ -90,8 +132,18 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: false, error: 'Identifiant ou mot de passe incorrect.' });
     }
 
-    const entreprise = profilRow.entreprises as Record<string, unknown> | null;
-    if (!entreprise || Number(entreprise.ind_active) !== 1) {
+    let entreprise = profilRow.entreprises as Record<string, unknown> | null;
+    if (!entreprise) {
+      return jsonResponse({ ok: false, error: 'Compte inactif.' });
+    }
+
+    const expiryCheck = await deactivateExpiredProEntreprise(supabase, entreprise);
+    if (expiryCheck.expired) {
+      return jsonResponse({ ok: false, error: 'Compte inactif.' });
+    }
+    entreprise = expiryCheck.entreprise as Record<string, unknown>;
+
+    if (Number(entreprise.ind_active) !== 1) {
       return jsonResponse({ ok: false, error: 'Compte inactif.' });
     }
 
@@ -120,6 +172,62 @@ Deno.serve(async (req) => {
     for (const tableName of PUSH_ORDER) {
       const rows = Array.isArray(push[tableName]) ? push[tableName] : [];
       let scoped = rows;
+
+      if (tableName === 'entreprises') {
+        if (String(profilRow.role) !== 'A') {
+          continue;
+        }
+
+        const row = rows.find((item) => String(item.id) === entrepriseId);
+        if (!row) {
+          continue;
+        }
+
+        const nom = String(row.nom ?? '').trim();
+        if (!nom) {
+          return jsonResponse({ ok: false, error: 'Nom entreprise requis.' });
+        }
+
+        const misAJourLe =
+          typeof row.mis_a_jour_le === 'string' && row.mis_a_jour_le
+            ? row.mis_a_jour_le
+            : new Date().toISOString();
+
+        const { error: entrepriseUpdateError } = await supabase
+          .from('entreprises')
+          .update({
+            nom,
+            ind_tva: Number(row.ind_tva) === 1 ? 1 : 0,
+            mis_a_jour_le: misAJourLe,
+          })
+          .eq('id', entrepriseId);
+
+        if (entrepriseUpdateError) {
+          return jsonResponse(
+            { ok: false, error: entrepriseUpdateError.message || 'Erreur mise a jour entreprise.' },
+            500
+          );
+        }
+
+        const { data: refreshedEntreprise, error: refreshedEntrepriseError } = await supabase
+          .from('entreprises')
+          .select('*')
+          .eq('id', entrepriseId)
+          .maybeSingle();
+
+        if (refreshedEntrepriseError) {
+          return jsonResponse(
+            { ok: false, error: refreshedEntrepriseError.message || 'Erreur chargement entreprise.' },
+            500
+          );
+        }
+
+        if (refreshedEntreprise) {
+          entreprise = refreshedEntreprise as Record<string, unknown>;
+        }
+
+        continue;
+      }
 
       if (tableName === 'ouvrages') {
         scoped = rows.filter((row) => String(row.entreprise_id) === entrepriseId);
@@ -150,7 +258,7 @@ Deno.serve(async (req) => {
       supabase
         .from('profils')
         .select(
-          'id, entreprise_id, prenom, nom, telephone_1, telephone_2, role, identifiant, cree_le, mis_a_jour_le, _synced'
+          'id, entreprise_id, prenom, nom, telephone_1, telephone_2, role, identifiant, date_premier_login, cree_le, mis_a_jour_le, _synced'
         )
         .eq('entreprise_id', entrepriseId),
     ]);
@@ -210,6 +318,7 @@ Deno.serve(async (req) => {
     }
 
     const pushedCounts = {
+      entreprises: Array.isArray(push.entreprises) ? push.entreprises.length : 0,
       ouvrages: Array.isArray(push.ouvrages) ? push.ouvrages.length : 0,
       ouvrage_unites: Array.isArray(push.ouvrage_unites) ? push.ouvrage_unites.length : 0,
       clients: Array.isArray(push.clients) ? push.clients.length : 0,

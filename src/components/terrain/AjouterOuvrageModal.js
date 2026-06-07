@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { ActivityIndicator, Button, Menu, Modal, Portal, Text, TextInput } from 'react-native-paper';
-import { getAllUnitesLocal, getEntrepriseByIdLocal, insertOuvrageWithUniteLocal } from '../../db/querries';
+import { ActivityIndicator, Menu, Modal, Portal, Text, TextInput } from 'react-native-paper';
+import MobileButton from './MobileButton';
+import { getAllUnitesLocal, insertOuvrageWithUniteLocal } from '../../db/querries';
 import { chantierColors } from '../../styles/theme';
 
-const formatUniteLabel = (unite) => `${unite.nom} (${unite.formule})`;
+const formatUniteLabel = (unite) => unite.nom || 'Unité';
 
 export default function AjouterOuvrageModal({
   visible,
@@ -13,7 +14,6 @@ export default function AjouterOuvrageModal({
   onDismiss,
   onCreated,
 }) {
-  const [entrepriseNom, setEntrepriseNom] = useState('');
   const [unites, setUnites] = useState([]);
   const [loadingUnites, setLoadingUnites] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -37,17 +37,12 @@ export default function AjouterOuvrageModal({
     const load = async () => {
       setLoadingUnites(true);
       try {
-        const [entreprise, catalogueUnites] = await Promise.all([
-          getEntrepriseByIdLocal(entrepriseId),
-          getAllUnitesLocal(),
-        ]);
-        setEntrepriseNom(entreprise?.nom || 'Entreprise');
+        const catalogueUnites = await getAllUnitesLocal();
         setUnites(catalogueUnites || []);
       } catch (loadError) {
         console.error('Erreur chargement modal ouvrage:', loadError);
         setUnites([]);
-        setEntrepriseNom('Entreprise');
-        setError('Impossible de charger les unites.');
+        setError('Impossible de charger les unités.');
       } finally {
         setLoadingUnites(false);
       }
@@ -59,15 +54,15 @@ export default function AjouterOuvrageModal({
   const handleSave = async () => {
     setError('');
     if (!metier?.id || !entrepriseId) {
-      setError('Metier ou entreprise manquant.');
+      setError('Métier ou entreprise manquant.');
       return;
     }
     if (!nom.trim()) {
-      setError('Saisissez le nom de l ouvrage.');
+      setError("Saisissez le nom de l'ouvrage.");
       return;
     }
     if (!uniteId) {
-      setError('Choisissez une unite.');
+      setError('Choisissez une unité.');
       return;
     }
 
@@ -97,15 +92,13 @@ export default function AjouterOuvrageModal({
         </Text>
 
         <View style={styles.contextBlock}>
-          <Text style={styles.contextLabel}>Metier</Text>
+          <Text style={styles.contextLabel}>Métier</Text>
           <Text style={styles.contextValue}>{metier?.nom || '—'}</Text>
-          <Text style={styles.contextLabel}>Entreprise</Text>
-          <Text style={styles.contextValue}>{entrepriseNom}</Text>
         </View>
 
         <TextInput
           mode="outlined"
-          label="Nom de l ouvrage"
+          label="Nom de l'ouvrage"
           value={nom}
           onChangeText={setNom}
           style={styles.input}
@@ -114,20 +107,20 @@ export default function AjouterOuvrageModal({
         {loadingUnites ? (
           <ActivityIndicator size="small" color={chantierColors.primary} style={styles.loader} />
         ) : unites.length === 0 ? (
-          <Text style={styles.errorText}>Aucune unite dans le catalogue. Synchronisez depuis Supabase.</Text>
+          <Text style={styles.errorText}>Aucune unité dans le catalogue. Synchronisez depuis Supabase.</Text>
         ) : (
           <Menu
             visible={uniteMenuOpen}
             onDismiss={() => setUniteMenuOpen(false)}
             anchor={
-              <Button
+              <MobileButton
                 mode="outlined"
                 onPress={() => setUniteMenuOpen(true)}
                 style={styles.uniteButton}
                 contentStyle={styles.uniteButtonContent}
               >
-                {selectedUnite ? formatUniteLabel(selectedUnite) : 'Choisir l unite'}
-              </Button>
+                {selectedUnite ? formatUniteLabel(selectedUnite) : "Choisir l'unité"}
+              </MobileButton>
             }
           >
             <ScrollView style={styles.uniteMenuScroll}>
@@ -158,12 +151,12 @@ export default function AjouterOuvrageModal({
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <View style={styles.actions}>
-          <Button mode="outlined" onPress={onDismiss} disabled={saving}>
+          <MobileButton mode="outlined" onPress={onDismiss} disabled={saving}>
             Annuler
-          </Button>
-          <Button mode="contained" onPress={handleSave} loading={saving} disabled={saving}>
-            Creer
-          </Button>
+          </MobileButton>
+          <MobileButton mode="contained" onPress={handleSave} loading={saving} disabled={saving}>
+            Créer
+          </MobileButton>
         </View>
       </Modal>
     </Portal>

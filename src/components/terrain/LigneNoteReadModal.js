@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Button, Modal, Portal, Text } from 'react-native-paper';
+import { Modal, Portal, Text } from 'react-native-paper';
+import MobileButton from './MobileButton';
 import { chantierColors } from '../../styles/theme';
 
 export default function LigneNoteReadModal({ visible, note, ouvrageNom, onDismiss }) {
@@ -17,9 +18,9 @@ export default function LigneNoteReadModal({ visible, note, ouvrageNom, onDismis
         ) : null}
         <Text style={styles.note}>{note || ''}</Text>
         <View style={styles.actions}>
-          <Button mode="contained" onPress={onDismiss}>
+          <MobileButton mode="contained" onPress={onDismiss}>
             Fermer
-          </Button>
+          </MobileButton>
         </View>
       </Modal>
     </Portal>

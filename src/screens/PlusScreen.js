@@ -1,45 +1,79 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
-import { Button, Text } from 'react-native-paper';
-import {
-  FAB_SIZES,
-  FlowActionFab,
-  FlowSmallFab,
-  flowFabColors,
-} from '../components/terrain/TerrainFlowFabs';
+import { Text } from 'react-native-paper';
+import { LosangeLogoBackground } from '../components/terrain/LosangeLogoLoader';
+import PlusMenuButton from '../components/terrain/PlusMenuButton';
+import { FlowActionFab, FlowSmallFab, flowFabColors } from '../components/terrain/TerrainFlowFabs';
+import { getLoggedInProfilViewLocal, isLoggedInAdminLocal } from '../db/querries';
+import { canAccessRapports } from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
 
 const buildSyncSuccessMessage = (result) => {
   const lines = [];
 
   if (result?.mode === 'pull') {
-    lines.push('Donnees Supabase telechargees vers le telephone.');
+    lines.push('Données Supabase téléchargées vers le téléphone.');
+  } else if (result?.mode === 'push_pull_account' || result?.mode === 'push_account') {
+    lines.push('Entreprise et profil synchronisés avec Supabase.');
   } else {
     const pushed = result?.pushedCounts || {};
     lines.push(
-      `Envoi: ${pushed.clients ?? 0} client(s), ${pushed.chantiers ?? 0} chantier(s), ${pushed.releves ?? 0} releve(s), ${pushed.ligne_releves ?? 0} ligne(s).`
+      `Envoi : ${pushed.clients ?? 0} client(s), ${pushed.chantiers ?? 0} chantier(s), ${pushed.releves ?? 0} relevé(s), ${pushed.ligne_releves ?? 0} ligne(s).`
     );
-    lines.push('Puis mise a jour depuis Supabase si le cloud est plus recent.');
+    lines.push('Puis mise à jour depuis Supabase si le cloud est plus récent.');
   }
 
   if (result?.pendingAfter > 0) {
     lines.push(`\n${result.pendingAfter} modification(s) encore en attente.`);
   } else if (result?.mode !== 'pull') {
-    lines.push('\nToutes les modifications sont synchronisees.');
+    lines.push('\nToutes les modifications sont synchronisées.');
   }
 
   const catalogue = result?.catalogue;
   if (catalogue) {
     lines.push(
-      `\nCatalogue: ${catalogue.metiersCount ?? 0} metier(s), ${catalogue.unitesCount ?? 0} unite(s), ${catalogue.ouvragesCount ?? 0} ouvrage(s).`
+      `\nCatalogue : ${catalogue.metiersCount ?? 0} métier(s), ${catalogue.unitesCount ?? 0} unité(s), ${catalogue.ouvragesCount ?? 0} ouvrage(s).`
     );
   }
 
   return lines.join('');
 };
 
-export default function PlusScreen({ onProfilPress, onLogout, onSyncFromSupabase }) {
+export default function PlusScreen({ onProfilPress, onDatabasePress, onRapportsPress, onLogout, onSyncFromSupabase }) {
   const [syncing, setSyncing] = useState(false);
+  const [isPro, setIsPro] = useState(false);
+  const [canShowRapports, setCanShowRapports] = useState(false);
+  const [canSync, setCanSync] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAccountType = async () => {
+      try {
+        const [profil, isAdmin] = await Promise.all([
+          getLoggedInProfilViewLocal(),
+          isLoggedInAdminLocal(),
+        ]);
+        if (!cancelled) {
+          setIsPro(Boolean(profil?.is_pro));
+          setCanShowRapports(canAccessRapports(profil));
+          setCanSync(Boolean(profil?.is_pro) || isAdmin);
+        }
+      } catch (error) {
+        console.error('Erreur chargement type de compte:', error);
+        if (!cancelled) {
+          setIsPro(false);
+          setCanShowRapports(false);
+          setCanSync(false);
+        }
+      }
+    };
+
+    loadAccountType();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const runSync = useCallback(async () => {
     if (!onSyncFromSupabase || syncing) return;
@@ -64,33 +98,40 @@ export default function PlusScreen({ onProfilPress, onLogout, onSyncFromSupabase
 
   return (
     <View style={styles.container}>
+      <LosangeLogoBackground opacity={0.1} />
+      <View style={styles.content}>
       <View style={styles.header}>
         <Text variant="headlineSmall" style={styles.title}>
           Plus
         </Text>
       </View>
 
-      <Button
-        mode="contained"
-        icon="account"
-        onPress={onProfilPress}
-        style={styles.profilButton}
-        contentStyle={styles.profilButtonContent}
-        buttonColor={chantierColors.primary}
-      >
+      <PlusMenuButton icon="account" onPress={onProfilPress}>
         Profil
-      </Button>
+      </PlusMenuButton>
+
+      <PlusMenuButton icon="database" onPress={onDatabasePress}>
+        Base de données
+      </PlusMenuButton>
+
+      {canShowRapports ? (
+        <PlusMenuButton icon="chart-pie" onPress={onRapportsPress}>
+          Rapports
+        </PlusMenuButton>
+      ) : null}
 
       <View style={styles.spacer} />
 
-      <FlowSmallFab
-        icon="sync"
-        side="left"
-        tierFromBottom={0}
-        color="#6B7280"
-        disabled={syncing}
-        onPress={runSync}
-      />
+      {canSync ? (
+        <FlowSmallFab
+          icon="sync"
+          side="left"
+          tierFromBottom={0}
+          color="#6B7280"
+          disabled={syncing}
+          onPress={runSync}
+        />
+      ) : null}
 
       <FlowActionFab
         icon="logout"
@@ -98,6 +139,7 @@ export default function PlusScreen({ onProfilPress, onLogout, onSyncFromSupabase
         smallCountBelow={0}
         onPress={onLogout}
       />
+      </View>
     </View>
   );
 }
@@ -106,8 +148,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: chantierColors.background,
+  },
+  content: {
+    flex: 1,
     paddingHorizontal: 12,
     paddingTop: 10,
+    zIndex: 1,
   },
   header: {
     borderBottomWidth: 1,
@@ -121,12 +167,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: 34,
     marginBottom: 8,
-  },
-  profilButton: {
-    borderRadius: 12,
-  },
-  profilButtonContent: {
-    minHeight: FAB_SIZES.main,
   },
   spacer: {
     flex: 1,

@@ -108,10 +108,16 @@ function integerToFrench(n) {
   return parts.join(' ').replace(/\s+/g, ' ').trim();
 }
 
-export function montantEnLettresFcfa(amount) {
+export function montantEnLettresFcfa(amount, { includeTtcLabel = true } = {}) {
   const value = Math.round(Number(amount) || 0);
   const words = integerToFrench(value);
-  const label = value > 1 ? 'francs CFA TTC' : 'franc CFA TTC';
+  const label = includeTtcLabel
+    ? value > 1
+      ? 'francs CFA TTC'
+      : 'franc CFA TTC'
+    : value > 1
+      ? 'francs CFA'
+      : 'franc CFA';
   const phrase = `${words} ${label}`;
   return phrase.charAt(0).toUpperCase() + phrase.slice(1);
 }

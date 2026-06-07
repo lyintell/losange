@@ -129,3 +129,49 @@ Les devises sont FCFA
 
 - Dans l entree des mesures, montre lxhxn en haut du pave numerique
 - Dans le devis, il ne doit pas avoir de ligne horizontal entre les dimensions du meme ouvrage.
+
+- Sur l ecran choix de metier et choix ouvrage, assure toi que scroll est possible si il y a beaucoup de donnees
+
+- Au lieu de nouvelle dimension, renomme le header nouveau 
+
+- Le logo de l app se trouve dans /prompts/logo.png. Change la couleur du premier losange (jaune) en dark orange (couleur de nos bouton orange dans l'app). Cree un nouveau fichier logo2.png
+
+- Ajoute icon arrow back aux boutons retour (bottom nav)
+
+- Oui logo2.png est le logo de l application. c est aussi l icon lorsque l app est installer. Il 
+Apparait a la page de login. Il apparait aussi comme loading screen (pulsating rapidement) lorsque les ecrans charge. Il apparait en arriere plan (bg avec reduced opacity) dans la page ...Plus
+
+- le nom de l app Losange dans les ecrans, pas losange_NEW
+
+- Dans le formulaire Nouvel ouvrage (cree), Enleve le nom de l entreprise
+
+- Changer la couleur des boutons dans ...Plus de full orange a white avec border orange. on click, orange
+
+- Dans les boutons, augmente la taille des polices pour une meilleur lisibilite. Ne pas deborder hors des boutons
+
+- Les ouvrage lors de nouveau releve en forme de liste centre, par ordre alphabetique, meme police que les boutons (metier)
+- Le nom du metier aligne a gauche
+
+- On clique sur n, meme comportement que l et h (efface automatiquement ce qui est la bas)
+
+- Augment police de l , h et n. Remplace par largeur, hauteur, quantité respectivement
+
+- Lors de la modification (dimensions), Annuler retourne au recapitulatif
+
+- Cards liste des chantiers (2 lignes): 
+        Nom du chantier
+        Nom du Client / telephone 1 
+        Badge corner bottom droite (meme ligne que nom du client)
+
+- Cards liste des clients (1 ligne):
+        Nom du Client / telephone 1
+
+- Corrige le francais a travers l application. Accents, apostrophe, etc. Bon francais. Ne remplace pas les mots
+
+- Ajoute le logo de l entreprise en bg right bottom corner et en header pour facture et PDF. Si compte gratuit ou logo non disponible, logo de l app losange
+
+- Dans liste chantier, badge Relevés au lieu de dimension
+
+- Dans la base de données, ajoute Métier après client. On clique montre la liste des métiers (cards). PAs de page details. L utilisateur peut trier la liste des metiers en hold la card et bougeant dans la liste. Le meme ordre des metier sera respecté lors du choix de metier pour chantier
+
+- Liste des metiers dans ...Plus, scrollable pour montrer tout les metiers

@@ -1,5 +1,7 @@
 import {
+  formatLigneDimensionsLxhN,
   formatLigneMesures,
+  formatLigneNombrePdf,
   formatLigneQuantiteAffichage,
   getLigneNomUnite,
   getLignePrixUnitaireAffichage,
@@ -79,6 +81,10 @@ export function buildDevisTableRows(lignes = []) {
           metierColor: getMetierColor(metierGroup.metierId),
           ouvrageNom: ouvrageGroup.ouvrageNom,
           dimension: formatDevisDimension(ligne),
+          dimensionLxhN: formatLigneDimensionsLxhN(ligne),
+          nombrePdf: formatLigneNombrePdf(ligne),
+          isDimensionLine: isLigneDimension(ligne),
+          note: ligne.note?.trim() || '',
           quantiteLabel: formatDevisQuantite(ligne),
           prixUnitaire: getLignePrixUnitaireAffichage(ligne),
           montant: Number(ligne.montant) || 0,

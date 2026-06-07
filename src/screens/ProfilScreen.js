@@ -1,8 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { Surface, Text } from 'react-native-paper';
-import { FlowBackFab } from '../components/terrain/TerrainFlowFabs';
-import { getLoggedInProfilViewLocal } from '../db/querries';
+import { Alert, Image, Pressable, StyleSheet, View } from 'react-native';
+import { Surface, Text, TextInput } from 'react-native-paper';
+import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
+import TerrainPhotoInput from '../components/terrain/TerrainPhotoInput';
+import {
+  getLoggedInProfilViewLocal,
+  isLoggedInAdminLocal,
+  setEntrepriseLogoLocal,
+  updateEntrepriseAdminLocal,
+} from '../db/querries';
+import { resolveTerrainImageUri } from '../db/terrainImageStorage';
 import { chantierColors } from '../styles/theme';
 
 function AccountBadge({ isPro }) {
@@ -28,26 +35,135 @@ function InfoRow({ label, value }) {
   );
 }
 
-export default function ProfilScreen({ onBack }) {
+function TvaToggle({ value, onChange, disabled = false }) {
+  const isOui = Number(value) === 1;
+
+  return (
+    <View style={styles.tvaToggleRow}>
+      <Pressable
+        disabled={disabled}
+        onPress={() => onChange(1)}
+        style={[styles.tvaOption, isOui && styles.tvaOptionActive]}
+      >
+        <Text style={[styles.tvaOptionText, isOui && styles.tvaOptionTextActive]}>Oui</Text>
+      </Pressable>
+      <Pressable
+        disabled={disabled}
+        onPress={() => onChange(0)}
+        style={[styles.tvaOption, !isOui && styles.tvaOptionActive]}
+      >
+        <Text style={[styles.tvaOptionText, !isOui && styles.tvaOptionTextActive]}>Non</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const formatTvaLabel = (value) => (Number(value) === 1 ? 'Oui' : 'Non');
+
+export default function ProfilScreen({
+  entrepriseId,
+  editing = false,
+  saveRequestId = 0,
+  onAdminStatusChange,
+  onEditingChange,
+  onSaveComplete,
+}) {
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [profil, setProfil] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [entrepriseNom, setEntrepriseNom] = useState('');
+  const [indTva, setIndTva] = useState(0);
+  const [logoPreviewUri, setLogoPreviewUri] = useState(null);
+  const [logoMimeType, setLogoMimeType] = useState(null);
 
   const loadProfil = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await getLoggedInProfilViewLocal();
+      const [data, admin] = await Promise.all([
+        getLoggedInProfilViewLocal(),
+        isLoggedInAdminLocal(),
+      ]);
       setProfil(data);
+      setIsAdmin(admin);
+      setEntrepriseNom(data?.entreprise_nom || '');
+      setIndTva(Number(data?.entreprise_ind_tva) === 1 ? 1 : 0);
+      setLogoPreviewUri(null);
+      setLogoMimeType(null);
+      onAdminStatusChange?.(admin);
     } catch (error) {
       console.error('Erreur chargement profil:', error);
       setProfil(null);
+      setIsAdmin(false);
+      onAdminStatusChange?.(false);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [onAdminStatusChange]);
 
   useEffect(() => {
     loadProfil();
   }, [loadProfil]);
+
+  useEffect(() => {
+    if (!editing || !profil) return;
+    setEntrepriseNom(profil.entreprise_nom || '');
+    setIndTva(Number(profil.entreprise_ind_tva) === 1 ? 1 : 0);
+    setLogoPreviewUri(null);
+    setLogoMimeType(null);
+  }, [editing, profil]);
+
+  const handleSave = useCallback(async () => {
+    if (!isAdmin || !entrepriseId || saving) return;
+
+    const trimmedNom = entrepriseNom.trim();
+    if (!trimmedNom) {
+      Alert.alert('Entreprise', "Le nom de l'entreprise est requis.");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await updateEntrepriseAdminLocal(entrepriseId, {
+        nom: trimmedNom,
+        ind_tva: profil?.is_pro ? indTva : 0,
+      });
+      if (logoPreviewUri && profil?.is_pro) {
+        await setEntrepriseLogoLocal(entrepriseId, logoPreviewUri, { mimeType: logoMimeType });
+      }
+      await loadProfil();
+      onEditingChange?.(false);
+      onSaveComplete?.();
+      Alert.alert('Entreprise', 'Informations enregistrées.');
+    } catch (error) {
+      console.error('Erreur sauvegarde entreprise:', error);
+      Alert.alert('Erreur', error.message || "Impossible d'enregistrer l'entreprise.");
+    } finally {
+      setSaving(false);
+    }
+  }, [
+    entrepriseId,
+    entrepriseNom,
+    indTva,
+    isAdmin,
+    loadProfil,
+    logoMimeType,
+    logoPreviewUri,
+    onEditingChange,
+    onSaveComplete,
+    profil?.is_pro,
+    saving,
+  ]);
+
+  useEffect(() => {
+    if (!saveRequestId || !editing) return;
+    handleSave();
+  }, [saveRequestId, editing, handleSave]);
+
+  const canEditEntreprise = isAdmin && editing;
+  const logoStorageKey = profil?.entreprise_logo || null;
+  const logoDisplayUri =
+    logoPreviewUri || (logoStorageKey ? resolveTerrainImageUri(logoStorageKey) : null);
 
   return (
     <View style={styles.container}>
@@ -62,13 +178,65 @@ export default function ProfilScreen({ onBack }) {
 
       {loading ? (
         <View style={styles.loadingState}>
-          <ActivityIndicator size="large" color={chantierColors.primary} />
+          <LosangeLogoLoader size="large" />
         </View>
       ) : profil ? (
         <Surface style={styles.card} elevation={1}>
-          <InfoRow label="Role" value={profil.role_label} />
-          <InfoRow label="Entreprise" value={profil.entreprise_nom} />
-          <InfoRow label="Prenom" value={profil.prenom} />
+          {!canEditEntreprise && logoDisplayUri ? (
+            <View style={styles.logoPreviewWrap}>
+              <Image source={{ uri: logoDisplayUri }} style={styles.logoPreview} resizeMode="contain" />
+            </View>
+          ) : null}
+          <InfoRow label="Rôle" value={profil.role_label} />
+          {canEditEntreprise ? (
+            <TerrainPhotoInput
+              label="Logo entreprise"
+              previewUri={logoPreviewUri}
+              storageKey={logoPreviewUri ? null : logoStorageKey}
+              disabled={!profil.is_pro || saving}
+              onPicked={({ uri, mimeType }) => {
+                setLogoPreviewUri(uri);
+                setLogoMimeType(mimeType);
+              }}
+              onClear={() => {
+                setLogoPreviewUri(null);
+                setLogoMimeType(null);
+              }}
+            />
+          ) : null}
+          {!canEditEntreprise && !profil.is_pro && isAdmin ? (
+            <Text style={styles.logoHint}>Logo disponible uniquement pour les comptes Pro.</Text>
+          ) : null}
+          {canEditEntreprise ? (
+            <View style={styles.infoRow}>
+              <Text variant="labelLarge" style={styles.infoLabel}>
+                Nom de l'entreprise
+              </Text>
+              <TextInput
+                mode="outlined"
+                value={entrepriseNom}
+                onChangeText={setEntrepriseNom}
+                style={styles.textInput}
+                dense
+              />
+            </View>
+          ) : (
+            <InfoRow label="Entreprise" value={profil.entreprise_nom} />
+          )}
+          {canEditEntreprise ? (
+            <View style={styles.infoRow}>
+              <Text variant="labelLarge" style={styles.infoLabel}>
+                Appliquer TVA
+              </Text>
+              <TvaToggle value={indTva} onChange={setIndTva} disabled={saving || !profil.is_pro} />
+            </View>
+          ) : (
+            <InfoRow label="Appliquer TVA" value={formatTvaLabel(profil.entreprise_ind_tva)} />
+          )}
+          {!profil.is_pro && canEditEntreprise ? (
+            <Text style={styles.logoHint}>TVA disponible uniquement pour les comptes Pro.</Text>
+          ) : null}
+          <InfoRow label="Prénom" value={profil.prenom} />
           <InfoRow label="Nom" value={profil.nom} />
         </Surface>
       ) : (
@@ -78,8 +246,6 @@ export default function ProfilScreen({ onBack }) {
           </Text>
         </Surface>
       )}
-
-      <FlowBackFab onPress={onBack} smallCountBelow={0} />
     </View>
   );
 }
@@ -158,6 +324,51 @@ const styles = StyleSheet.create({
   },
   infoValue: {
     color: chantierColors.text,
+    fontWeight: '600',
+  },
+  textInput: {
+    backgroundColor: chantierColors.surface,
+  },
+  tvaToggleRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  tvaOption: {
+    minWidth: 88,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: chantierColors.border,
+    backgroundColor: chantierColors.surface,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  tvaOptionActive: {
+    borderColor: chantierColors.primary,
+    backgroundColor: '#EFF6FF',
+  },
+  tvaOptionText: {
+    color: chantierColors.text,
+    fontWeight: '700',
+    fontSize: 18,
+  },
+  tvaOptionTextActive: {
+    color: chantierColors.primary,
+  },
+  logoPreviewWrap: {
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  logoPreview: {
+    width: 120,
+    height: 120,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+  },
+  logoHint: {
+    color: chantierColors.muted,
+    fontSize: 13,
     fontWeight: '600',
   },
 });

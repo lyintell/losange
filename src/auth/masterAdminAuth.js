@@ -40,7 +40,7 @@ const readFunctionErrorMessage = async (error, data) => {
 
   const rawMessage = String(error?.message || '');
   if (rawMessage.includes('non-2xx')) {
-    return 'Connexion refusee. Verifiez identifiant/mot de passe, les secrets Supabase et que Verify JWT est desactive sur les fonctions.';
+    return 'Connexion refusée. Vérifiez identifiant/mot de passe, les secrets Supabase et que Verify JWT est désactivé sur les fonctions.';
   }
 
   return rawMessage || 'Erreur Edge Function.';
@@ -50,7 +50,7 @@ const invokeMasterFunction = async (functionName, body) => {
   if (!isSupabaseConfigured()) {
     return {
       ok: false,
-      error: 'Supabase non configure. Verifiez EXPO_PUBLIC_SUPABASE_URL et EXPO_PUBLIC_SUPABASE_ANON_KEY.',
+      error: 'Supabase non configuré. Vérifiez EXPO_PUBLIC_SUPABASE_URL et EXPO_PUBLIC_SUPABASE_ANON_KEY.',
     };
   }
 
@@ -64,7 +64,7 @@ const invokeMasterFunction = async (functionName, body) => {
   }
 
   if (!data?.ok) {
-    return { ok: false, error: data?.error || 'Authentification refusee.' };
+    return { ok: false, error: data?.error || 'Authentification refusée.' };
   }
 
   return { ok: true, token: data.token };

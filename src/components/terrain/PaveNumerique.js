@@ -1,8 +1,9 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Button, Text } from 'react-native-paper';
+import { Text } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { chantierColors } from '../../styles/theme';
+import MobileButton from './MobileButton';
+import { chantierColors, mobileKeypadButtonLabelStyle } from '../../styles/theme';
 
 const TOUCHES = ['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', 'Effacer'];
 
@@ -25,7 +26,7 @@ export default function PaveNumerique({
         {TOUCHES.map((keyValue) => {
           const isBackspace = keyValue === 'Effacer';
           return (
-            <Button
+            <MobileButton
               key={keyValue}
               mode={isBackspace ? 'outlined' : 'contained'}
               onPress={() => onKeyPress?.(keyValue)}
@@ -34,7 +35,7 @@ export default function PaveNumerique({
               textColor={isBackspace ? chantierColors.text : '#FFFFFF'}
               style={styles.key}
               contentStyle={styles.keyContent}
-              labelStyle={isBackspace ? undefined : styles.keyLabel}
+              labelStyle={isBackspace ? undefined : mobileKeypadButtonLabelStyle}
               icon={
                 isBackspace
                   ? ({ size, color }) => (
@@ -44,7 +45,7 @@ export default function PaveNumerique({
               }
             >
               {isBackspace ? '' : keyValue}
-            </Button>
+            </MobileButton>
           );
         })}
       </View>
@@ -97,10 +98,6 @@ const styles = StyleSheet.create({
     borderColor: chantierColors.border,
   },
   keyContent: {
-    minHeight: 58,
-  },
-  keyLabel: {
-    fontSize: 20,
-    fontWeight: '700',
+    minHeight: 60,
   },
 });

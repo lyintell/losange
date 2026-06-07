@@ -1,28 +1,96 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
-import { Button, Text } from 'react-native-paper';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Text } from 'react-native-paper';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import LigneNoteReadModal from '../components/terrain/LigneNoteReadModal';
+import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
+import TerrainImageViewModal from '../components/terrain/TerrainImageViewModal';
 import { LignesReleveGroupedSections } from '../components/terrain/LignesReleveGroupedList';
-import { FlowActionFab, FlowSmallFab, getFabColumnPadding } from '../components/terrain/TerrainFlowFabs';
+import { FlowActionFab, FlowSmallFab, FAB_HORIZONTAL_INSET, getFabColumnPadding } from '../components/terrain/TerrainFlowFabs';
 import {
+  clearChantierPhotoLocal,
+  clearLigneRelevePhotoLocal,
+  getChantierWithClientByIdLocal,
   getEntrepriseByIdLocal,
   getLignesByChantierLocal,
+  getLoggedInProfilViewLocal,
   updateChantierStatusLocal,
   updateLigneReleveIndCompleteLocal,
 } from '../db/querries';
-import { generateDevisPdfFile, downloadDevisPdf, shareDevisPdf } from '../utils/devisExport';
+import { CHANTIER_PHOTO_SLOTS, resolveTerrainImageUri } from '../db/terrainImageStorage';
+import { hidesPriceUiForRole } from '../utils/terrainAccess';
+import {
+  downloadDevisPdf,
+  downloadDimensionsPdf,
+  generateDevisPdfFile,
+  generateDimensionsPdfFile,
+  shareDevisPdf,
+} from '../utils/devisExport';
 import { CHANTIER_STATUS_DEVIS } from '../utils/chantierStatus';
-import { chantierColors } from '../styles/theme';
+import { chantierColors, MOBILE_BUTTON_FONT_SIZE, MOBILE_BUTTON_LINE_HEIGHT } from '../styles/theme';
 
 const DEVIS_MULTI_PRESS_DELAY_MS = 350;
 
-export default function ChantierDetails({ chantier, entrepriseId = null, onModify, onChantierUpdated }) {
+function ExportActionButton({ icon, label, buttonColor, textColor = '#FFFFFF', loading, disabled, onPress }) {
+  const isDisabled = disabled || loading;
+
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={isDisabled}
+      style={({ pressed }) => [
+        styles.exportButton,
+        { backgroundColor: buttonColor },
+        isDisabled && styles.exportButtonDisabled,
+        pressed && !isDisabled && styles.exportButtonPressed,
+      ]}
+    >
+      {loading ? (
+        <ActivityIndicator color={textColor} />
+      ) : (
+        <>
+          <MaterialCommunityIcons name={icon} size={24} color={textColor} />
+          <Text style={[styles.exportButtonLabel, { color: textColor }]}>{label}</Text>
+        </>
+      )}
+    </Pressable>
+  );
+}
+
+export default function ChantierDetails({ chantier, entrepriseId = null, onChantierUpdated }) {
   const [loading, setLoading] = useState(false);
   const [lignes, setLignes] = useState([]);
+  const [chantierData, setChantierData] = useState(chantier);
   const [showPrices, setShowPrices] = useState(false);
   const [exportOverlayVisible, setExportOverlayVisible] = useState(false);
+  const [exportOverlayMode, setExportOverlayMode] = useState('devis');
   const [exporting, setExporting] = useState(false);
   const [noteModal, setNoteModal] = useState({ visible: false, note: '', ouvrageNom: '' });
+  const [hidesDevisUi, setHidesDevisUi] = useState(false);
+  const [isProAccount, setIsProAccount] = useState(false);
+  const [imageModal, setImageModal] = useState({
+    visible: false,
+    uri: null,
+    title: 'Photo',
+    deleteKind: null,
+    deleteTarget: null,
+  });
+  const [deletingImage, setDeletingImage] = useState(false);
+
+  const chantierPhotos = useMemo(
+    () =>
+      CHANTIER_PHOTO_SLOTS.map((slot, index) => ({
+        slot,
+        index: index + 1,
+        storageKey: chantierData?.[slot] || null,
+        uri: chantierData?.[slot] ? resolveTerrainImageUri(chantierData[slot]) : null,
+      })).filter((item) => item.storageKey),
+    [chantierData]
+  );
+
+  useEffect(() => {
+    setChantierData(chantier);
+  }, [chantier]);
 
   const devisPressCountRef = useRef(0);
   const devisPressTimerRef = useRef(null);
@@ -31,8 +99,14 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onModif
     if (!chantier?.id) return;
     try {
       setLoading(true);
-      const data = await getLignesByChantierLocal(chantier.id);
+      const [data, freshChantier] = await Promise.all([
+        getLignesByChantierLocal(chantier.id),
+        getChantierWithClientByIdLocal(chantier.id),
+      ]);
       setLignes(data || []);
+      if (freshChantier) {
+        setChantierData(freshChantier);
+      }
     } catch (error) {
       console.error('Erreur chargement lignes chantier:', error);
       setLignes([]);
@@ -45,6 +119,24 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onModif
     loadLignes();
   }, [loadLignes]);
 
+  useEffect(() => {
+    const loadAccess = async () => {
+      try {
+        const profil = await getLoggedInProfilViewLocal();
+        setHidesDevisUi(hidesPriceUiForRole(profil?.role));
+        setIsProAccount(Boolean(profil?.is_pro));
+        if (hidesPriceUiForRole(profil?.role)) {
+          setShowPrices(false);
+        }
+      } catch (error) {
+        console.error('Erreur chargement acces chantier:', error);
+        setHidesDevisUi(false);
+        setIsProAccount(false);
+      }
+    };
+    loadAccess();
+  }, []);
+
   useEffect(
     () => () => {
       if (devisPressTimerRef.current) clearTimeout(devisPressTimerRef.current);
@@ -53,6 +145,16 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onModif
   );
 
   const handleLignePress = (ligne) => {
+    if (ligne?.photo) {
+      setImageModal({
+        visible: true,
+        uri: resolveTerrainImageUri(ligne.photo),
+        title: ligne.ouvrage_nom || 'Photo ligne',
+        deleteKind: 'ligne',
+        deleteTarget: ligne.id,
+      });
+      return;
+    }
     if (!ligne?.note?.trim()) return;
     setNoteModal({
       visible: true,
@@ -61,7 +163,57 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onModif
     });
   };
 
+  const openChantierPhoto = (photo) => {
+    setImageModal({
+      visible: true,
+      uri: photo.uri,
+      title: `Photo ${photo.index}`,
+      deleteKind: 'chantier',
+      deleteTarget: photo.slot,
+    });
+  };
+
+  const closeImageModal = () => {
+    if (deletingImage) return;
+    setImageModal({
+      visible: false,
+      uri: null,
+      title: 'Photo',
+      deleteKind: null,
+      deleteTarget: null,
+    });
+  };
+
+  const handleDeleteImage = async () => {
+    if (!imageModal.deleteKind || !imageModal.deleteTarget || !chantierData?.id) return;
+
+    try {
+      setDeletingImage(true);
+      if (imageModal.deleteKind === 'chantier') {
+        await clearChantierPhotoLocal(chantierData.id, imageModal.deleteTarget);
+        const updated = { ...chantierData, [imageModal.deleteTarget]: null };
+        setChantierData(updated);
+        onChantierUpdated?.(updated);
+      } else if (imageModal.deleteKind === 'ligne') {
+        await clearLigneRelevePhotoLocal(imageModal.deleteTarget);
+        setLignes((prev) =>
+          prev.map((item) =>
+            item.id === imageModal.deleteTarget ? { ...item, photo: null } : item
+          )
+        );
+      }
+      closeImageModal();
+    } catch (error) {
+      console.error('Erreur suppression photo:', error);
+      Alert.alert('Erreur', error.message || 'Impossible de supprimer la photo.');
+    } finally {
+      setDeletingImage(false);
+    }
+  };
+
   const handleToggleComplete = async (ligne) => {
+    if (!isProAccount) return;
+
     const nextValue = Number(ligne.ind_complete) === 1 ? 0 : 1;
     try {
       await updateLigneReleveIndCompleteLocal(ligne.id, nextValue);
@@ -70,6 +222,7 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onModif
       );
     } catch (error) {
       console.error('Erreur mise a jour ind_complete:', error);
+      Alert.alert('Modification refusée', error.message || 'Action impossible.');
     }
   };
 
@@ -83,15 +236,30 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onModif
 
       if (pressCount >= 2) {
         if (!lignes.length) {
-          Alert.alert('Devis', 'Aucune dimension a inclure dans le devis.');
+          Alert.alert('Devis', 'Aucune dimension à inclure dans le devis.');
           return;
         }
         setShowPrices(true);
+        setExportOverlayMode('devis');
         setExportOverlayVisible(true);
       } else if (pressCount === 1) {
         setShowPrices((prev) => !prev);
       }
     }, DEVIS_MULTI_PRESS_DELAY_MS);
+  };
+
+  const handlePdfPress = () => {
+    if (!lignes.length) {
+      Alert.alert('PDF', 'Aucune dimension à inclure dans le document.');
+      return;
+    }
+    setExportOverlayMode('pdf');
+    setExportOverlayVisible(true);
+  };
+
+  const closeExportOverlay = () => {
+    if (exporting) return;
+    setExportOverlayVisible(false);
   };
 
   const markChantierAsDevis = async () => {
@@ -105,49 +273,65 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onModif
     }
   };
 
-  const runDevisDownload = async () => {
+  const generateExportPdf = async () => {
+    const entreprise = await getEntrepriseByIdLocal(entrepriseId);
+    if (exportOverlayMode === 'pdf') {
+      return generateDimensionsPdfFile({ entreprise, chantier, lignes });
+    }
+    return generateDevisPdfFile({ entreprise, chantier, lignes });
+  };
+
+  const runExportDownload = async () => {
     if (exporting) return;
     if (!lignes.length) {
-      Alert.alert('Devis', 'Aucune dimension a inclure dans le devis.');
+      Alert.alert('Export', 'Aucune dimension à inclure dans le document.');
       return;
     }
 
+    const isPdf = exportOverlayMode === 'pdf';
+
     try {
       setExporting(true);
-      const entreprise = await getEntrepriseByIdLocal(entrepriseId);
-      const uri = await generateDevisPdfFile({ entreprise, chantier, lignes });
-      const result = await downloadDevisPdf(uri, chantier);
+      const uri = await generateExportPdf();
+      const result =
+        exportOverlayMode === 'pdf'
+          ? await downloadDimensionsPdf(uri, chantier)
+          : await downloadDevisPdf(uri, chantier);
       await markChantierAsDevis();
       setExportOverlayVisible(false);
       Alert.alert(
-        'Devis enregistre',
+        isPdf ? 'PDF enregistré' : 'Devis enregistré',
         `${result.fileName}\nDossier : ${result.locationLabel}`
       );
     } catch (error) {
-      console.error('Erreur telechargement devis:', error);
-      Alert.alert('Erreur', error.message || 'Impossible d enregistrer le devis.');
+      console.error('Erreur telechargement export:', error);
+      Alert.alert('Erreur', error.message || "Impossible d'enregistrer le document.");
     } finally {
       setExporting(false);
     }
   };
 
-  const runDevisWhatsApp = async () => {
+  const runExportWhatsApp = async () => {
     if (exporting) return;
     if (!lignes.length) {
-      Alert.alert('Devis', 'Aucune dimension a inclure dans le devis.');
+      Alert.alert('Export', 'Aucune dimension à inclure dans le document.');
       return;
     }
 
+    const isPdf = exportOverlayMode === 'pdf';
+
     try {
       setExporting(true);
-      const entreprise = await getEntrepriseByIdLocal(entrepriseId);
-      const uri = await generateDevisPdfFile({ entreprise, chantier, lignes });
-      await shareDevisPdf(uri, 'Partager le devis sur WhatsApp');
+      const uri = await generateExportPdf();
+      await shareDevisPdf(
+        uri,
+        isPdf ? 'Partager le PDF sur WhatsApp' : 'Partager le devis sur WhatsApp'
+      );
       await markChantierAsDevis();
       setExportOverlayVisible(false);
     } catch (error) {
-      console.error('Erreur partage devis:', error);
-      Alert.alert('Erreur', error.message || 'Impossible de partager le devis.');
+      console.error('Erreur partage export:', error);
+      Alert.alert('Erreur', error.message || 'Impossible de partager le document.');
     } finally {
       setExporting(false);
     }
@@ -157,10 +341,10 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onModif
     <View style={styles.container}>
       <View style={styles.header}>
         <Text variant="headlineSmall" style={styles.title}>
-          {chantier?.nom || 'Detail Chantier'}
+          {chantier?.nom || 'Détail chantier'}
         </Text>
         <Text variant="bodyMedium" style={styles.subTitle}>
-          Client: {chantier?.client_nom || 'Non renseigne'}
+          Client : {chantier?.client_nom || 'Non renseigné'}
         </Text>
       </View>
 
@@ -169,61 +353,90 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onModif
         variant="details"
         showPrices={showPrices}
         onLignePress={handleLignePress}
-        onLigneDoublePress={handleToggleComplete}
+        onLigneDoublePress={isProAccount ? handleToggleComplete : undefined}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadLignes} />}
-        contentContainerStyle={[styles.listContent, { paddingBottom: getFabColumnPadding(1) + 24 }]}
-        ListEmptyComponent={
-          !loading ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Aucune dimension enregistree pour ce chantier.</Text>
+        contentContainerStyle={[
+          styles.listContent,
+          {
+            paddingBottom: getFabColumnPadding(hidesDevisUi ? 0 : 1) + (chantierPhotos.length ? 16 : 24),
+          },
+        ]}
+        ListFooterComponent={
+          chantierPhotos.length ? (
+            <View style={styles.photoFooter}>
+              <View style={styles.photoButtonsRow}>
+                {chantierPhotos.map((photo) => (
+                  <Pressable
+                    key={photo.slot}
+                    onPress={() => openChantierPhoto(photo)}
+                    style={({ pressed }) => [
+                      styles.photoIconButton,
+                      pressed && styles.photoIconButtonPressed,
+                    ]}
+                    accessibilityLabel={`Photo ${photo.index}`}
+                    accessibilityRole="button"
+                  >
+                    <MaterialCommunityIcons
+                      name="image"
+                      size={36}
+                      color={chantierColors.primary}
+                    />
+                  </Pressable>
+                ))}
+              </View>
             </View>
           ) : null
+        }
+        ListEmptyComponent={
+          loading ? (
+            <View style={styles.loadingState}>
+              <LosangeLogoLoader size="large" />
+            </View>
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>Aucune dimension enregistrée pour ce chantier.</Text>
+            </View>
+          )
         }
       />
 
       <FlowActionFab
-        icon="file-document"
-        color={showPrices ? '#0F3D9E' : '#1D4ED8'}
-        smallCountBelow={1}
-        onPress={handleDevisPress}
+        icon="file-pdf-box"
+        color="#C62828"
+        smallCountBelow={hidesDevisUi ? 0 : 1}
+        onPress={handlePdfPress}
       />
-      <FlowSmallFab
-        icon="pencil"
-        tierFromBottom={0}
-        color="#FACC15"
-        iconColor="#000000"
-        onPress={() => onModify?.(chantier, lignes)}
-      />
+      {hidesDevisUi ? null : (
+        <FlowSmallFab
+          icon="file-document"
+          tierFromBottom={0}
+          color={showPrices ? '#0F3D9E' : '#1D4ED8'}
+          onPress={handleDevisPress}
+        />
+      )}
 
       {exportOverlayVisible ? (
         <View style={styles.exportOverlay}>
-          <Pressable style={styles.overlayBackdrop} onPress={() => !exporting && setExportOverlayVisible(false)} />
+          <Pressable style={styles.overlayBackdrop} onPress={closeExportOverlay} />
           <View style={styles.exportActions} pointerEvents="box-none">
-            <Button
-              mode="contained"
+            <ExportActionButton
               icon="download"
-              buttonColor="#1D4ED8"
+              label="Télécharger"
+              buttonColor={exportOverlayMode === 'pdf' ? '#C62828' : '#1D4ED8'}
               loading={exporting}
               disabled={exporting}
-              onPress={runDevisDownload}
-              style={styles.exportButton}
-              contentStyle={styles.exportButtonContent}
-            >
-              Telecharger
-            </Button>
-            <Button
-              mode="contained"
-              icon="whatsapp"
-              buttonColor="#25D366"
-              textColor="#FFFFFF"
-              loading={exporting}
-              disabled={exporting}
-              onPress={runDevisWhatsApp}
-              style={styles.exportButton}
-              contentStyle={styles.exportButtonContent}
-            >
-              WhatsApp
-            </Button>
+              onPress={runExportDownload}
+            />
+            {isProAccount ? (
+              <ExportActionButton
+                icon="whatsapp"
+                label="WhatsApp"
+                buttonColor="#25D366"
+                loading={exporting}
+                disabled={exporting}
+                onPress={runExportWhatsApp}
+              />
+            ) : null}
           </View>
         </View>
       ) : null}
@@ -233,6 +446,15 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onModif
         note={noteModal.note}
         ouvrageNom={noteModal.ouvrageNom}
         onDismiss={() => setNoteModal({ visible: false, note: '', ouvrageNom: '' })}
+      />
+
+      <TerrainImageViewModal
+        visible={imageModal.visible}
+        imageUri={imageModal.uri}
+        title={imageModal.title}
+        onDismiss={closeImageModal}
+        onDelete={imageModal.deleteKind ? handleDeleteImage : undefined}
+        deleting={deletingImage}
       />
     </View>
   );
@@ -266,6 +488,10 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingTop: 4,
   },
+  loadingState: {
+    alignItems: 'center',
+    marginTop: 42,
+  },
   emptyState: {
     alignItems: 'center',
     marginTop: 42,
@@ -273,6 +499,29 @@ const styles = StyleSheet.create({
   emptyText: {
     color: chantierColors.muted,
     textAlign: 'center',
+  },
+  photoFooter: {
+    marginTop: 10,
+    paddingTop: 4,
+    paddingRight: FAB_HORIZONTAL_INSET,
+  },
+  photoButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingRight: FAB_HORIZONTAL_INSET,
+  },
+  photoIconButton: {
+    flex: 1,
+    minHeight: 58,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: chantierColors.border,
+    backgroundColor: chantierColors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoIconButtonPressed: {
+    backgroundColor: '#FFF5F1',
   },
   exportOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -290,8 +539,23 @@ const styles = StyleSheet.create({
   },
   exportButton: {
     borderRadius: 12,
+    minHeight: 60,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    gap: 12,
   },
-  exportButtonContent: {
-    minHeight: 56,
+  exportButtonDisabled: {
+    opacity: 0.7,
+  },
+  exportButtonPressed: {
+    opacity: 0.92,
+  },
+  exportButtonLabel: {
+    fontSize: MOBILE_BUTTON_FONT_SIZE,
+    lineHeight: MOBILE_BUTTON_LINE_HEIGHT,
+    fontWeight: '700',
   },
 });

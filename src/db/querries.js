@@ -1,14 +1,126 @@
 import { ensureLocalDatabaseReady, tableHasColumn } from './localDb';
+import {
+  buildChantierPhotoKey,
+  buildEntrepriseLogoKey,
+  buildLignePhotoKey,
+  CHANTIER_PHOTO_SLOTS,
+  deleteImageFileLocal,
+  persistTerrainImage,
+} from './terrainImageStorage';
 import { getLoggedInProfilLocal, getTerrainSessionLocal } from './terrainSync';
 import { scheduleTerrainSyncAfterWrite } from './terrainSyncScheduler';
+import { canModifyReleveForProfil } from '../utils/terrainAccess';
+import { FREE_TIER_LIMITS, isProAccount } from '../utils/freeTierLimits';
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 import { computeQuantiteLigneReleve } from '../utils/ligneReleveCalcul';
 
 const nowIso = () => new Date().toISOString();
 
+const todayFactureDate = () => new Date().toISOString().slice(0, 10);
+
 const notifyLocalDataChanged = () => {
   scheduleTerrainSyncAfterWrite();
+};
+
+const RELEVE_ACCESS_DENIED_ERROR =
+  "Vous ne pouvez pas modifier un chantier ou relevé que vous n'avez pas pris.";
+
+const buildClientTombstoneFilter = (hasSupprimeLe) =>
+  hasSupprimeLe ? ' AND supprime_le IS NULL' : '';
+
+const countActiveClientsForEntrepriseLocal = async (entrepriseId) => {
+  if (!entrepriseId) return 0;
+  const db = await ensureLocalDatabaseReady();
+  const hasSupprimeLe = await tableHasColumn(db, 'clients', 'supprime_le');
+  const tombstoneFilter = buildClientTombstoneFilter(hasSupprimeLe);
+  const row = await db.getFirstAsync(
+    `SELECT COUNT(*) AS count FROM clients WHERE entreprise_id = ?${tombstoneFilter};`,
+    [entrepriseId]
+  );
+  return Number(row?.count || 0);
+};
+
+const countActiveChantiersForEntrepriseLocal = async (entrepriseId) => {
+  if (!entrepriseId) return 0;
+  const db = await ensureLocalDatabaseReady();
+  const hasSupprimeLe =
+    (await tableHasColumn(db, 'chantiers', 'supprime_le')) &&
+    (await tableHasColumn(db, 'clients', 'supprime_le'));
+  const tombstoneFilter = hasSupprimeLe
+    ? ' AND chantiers.supprime_le IS NULL AND clients.supprime_le IS NULL'
+    : '';
+  const row = await db.getFirstAsync(
+    `
+    SELECT COUNT(*) AS count
+    FROM chantiers
+    JOIN clients ON clients.id = chantiers.client_id
+    WHERE clients.entreprise_id = ?${tombstoneFilter};
+    `,
+    [entrepriseId]
+  );
+  return Number(row?.count || 0);
+};
+
+const countOuvragesForMetierLocal = async (entrepriseId, metierId) => {
+  if (!entrepriseId || !metierId) return 0;
+  const db = await ensureLocalDatabaseReady();
+  const row = await db.getFirstAsync(
+    `SELECT COUNT(*) AS count FROM ouvrages WHERE entreprise_id = ? AND metier_id = ?;`,
+    [entrepriseId, metierId]
+  );
+  return Number(row?.count || 0);
+};
+
+const assertFreeTierClientLimit = async (entrepriseId) => {
+  const profil = await getLoggedInProfilLocal();
+  if (isProAccount(profil)) return;
+
+  const count = await countActiveClientsForEntrepriseLocal(entrepriseId);
+  if (count >= FREE_TIER_LIMITS.maxClients) {
+    throw new Error(
+      `Compte gratuit : maximum ${FREE_TIER_LIMITS.maxClients} clients actifs.`
+    );
+  }
+};
+
+const assertFreeTierChantierLimit = async (entrepriseId) => {
+  const profil = await getLoggedInProfilLocal();
+  if (isProAccount(profil)) return;
+
+  const count = await countActiveChantiersForEntrepriseLocal(entrepriseId);
+  if (count >= FREE_TIER_LIMITS.maxChantiers) {
+    throw new Error(
+      `Compte gratuit : maximum ${FREE_TIER_LIMITS.maxChantiers} chantiers actifs.`
+    );
+  }
+};
+
+const assertFreeTierOuvrageLimit = async (entrepriseId, metierId) => {
+  const profil = await getLoggedInProfilLocal();
+  if (isProAccount(profil)) return;
+
+  const count = await countOuvragesForMetierLocal(entrepriseId, metierId);
+  if (count >= FREE_TIER_LIMITS.maxOuvragesPerMetier) {
+    throw new Error(
+      `Compte gratuit : maximum ${FREE_TIER_LIMITS.maxOuvragesPerMetier} ouvrages par métier.`
+    );
+  }
+};
+
+const assertCanModifyReleveLocal = async (releve) => {
+  const profil = await getLoggedInProfilLocal();
+  if (!canModifyReleveForProfil(profil, releve)) {
+    throw new Error(RELEVE_ACCESS_DENIED_ERROR);
+  }
+};
+
+export const canCurrentUserModifyChantierLocal = async (chantierId) => {
+  if (!chantierId) return false;
+  const profil = await getLoggedInProfilLocal();
+  if (!profil) return false;
+  const releve = await getReleveByChantierLocal(chantierId);
+  return canModifyReleveForProfil(profil, releve);
 };
 
 const getCurrentProfilIdLocal = async () => {
@@ -46,7 +158,7 @@ export const getFirstEntrepriseIdLocal = async () => {
 export const ensureEntrepriseLocale = async () => {
   const entrepriseId = await getFirstEntrepriseIdLocal();
   if (!entrepriseId) {
-    throw new Error('Aucune entreprise locale. Synchronisez les donnees depuis Supabase.');
+    throw new Error('Aucune entreprise locale. Synchronisez les données depuis Supabase.');
   }
   return entrepriseId;
 };
@@ -76,32 +188,45 @@ export const ensureCatalogueLocal = async (entrepriseId = null) => {
   };
 };
 
-/** Metiers du catalogue local (Supabase). Filtre par ouvrages entreprise si disponibles. */
-export const getMetiersForEntrepriseLocal = async (entrepriseId) => {
-  const db = await ensureLocalDatabaseReady();
+/** Tous les metiers du catalogue local (sync Supabase), sans filtre par ouvrages entreprise. */
+export const getMetiersForEntrepriseLocal = async (_entrepriseId = null) => {
+  return getMetiersLocal();
+};
 
-  if (entrepriseId) {
-    const linkedMetiers = await db.getAllAsync(
-      `
-      SELECT DISTINCT m.*
-      FROM metiers m
-      INNER JOIN ouvrages o ON o.metier_id = m.id
-      WHERE o.entreprise_id = ?
-      ORDER BY m.nom ASC;
-      `,
-      [entrepriseId]
-    );
-    if (linkedMetiers.length > 0) {
-      return linkedMetiers;
-    }
-  }
-
-  return db.getAllAsync('SELECT * FROM metiers ORDER BY nom ASC;');
+/** Métiers disponibles lors du choix d'un ouvrage (3 max en compte gratuit). */
+export const getMetiersForSelectionLocal = async (_entrepriseId = null) => {
+  const metiers = await getMetiersLocal();
+  const profil = await getLoggedInProfilLocal();
+  if (isProAccount(profil)) return metiers;
+  return metiers.slice(0, FREE_TIER_LIMITS.maxMetiersSelection);
 };
 
 export const getMetiersLocal = async () => {
   const db = await ensureLocalDatabaseReady();
-  return db.getAllAsync('SELECT * FROM metiers ORDER BY nom ASC;');
+  return db.getAllAsync(`
+    SELECT m.*
+    FROM metiers m
+    LEFT JOIN metiers_ordre mo ON mo.metier_id = m.id
+    ORDER BY
+      CASE WHEN mo.ordre IS NULL THEN 1 ELSE 0 END,
+      mo.ordre ASC,
+      m.nom ASC;
+  `);
+};
+
+export const saveMetiersOrderLocal = async (metierIds = []) => {
+  const db = await ensureLocalDatabaseReady();
+  const ids = (metierIds || []).filter(Boolean);
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM metiers_ordre;');
+    for (let index = 0; index < ids.length; index += 1) {
+      await db.runAsync('INSERT INTO metiers_ordre (metier_id, ordre) VALUES (?, ?);', [
+        ids[index],
+        index,
+      ]);
+    }
+  });
 };
 
 export const createClientChantierReleveFlowLocal = async ({
@@ -114,7 +239,7 @@ export const createClientChantierReleveFlowLocal = async ({
   await ensureCatalogueLocal(resolvedEntrepriseId);
 
   if (!clientNomComplet?.trim() || !clientTelephone?.trim() || !chantierNom?.trim()) {
-    throw new Error('Les champs clientNomComplet, clientTelephone et chantierNom sont requis.');
+    throw new Error('Le nom du client, le téléphone et le nom du chantier sont requis.');
   }
 
   const clientId = await insertClientLocal(
@@ -137,6 +262,8 @@ export const createClientChantierReleveFlowLocal = async ({
  * Crée un nouveau client localement
  */
 export const insertClientLocal = async (entrepriseId, nomComplet, telephone1, telephone2 = null) => {
+  await assertFreeTierClientLimit(entrepriseId);
+
   const db = await ensureLocalDatabaseReady();
   const id = uuidv4();
 
@@ -162,6 +289,14 @@ export const insertChantierLocal = async (
   notes = null
 ) => {
   const db = await ensureLocalDatabaseReady();
+  const clientRow = await db.getFirstAsync(
+    'SELECT entreprise_id FROM clients WHERE id = ?;',
+    [clientId]
+  );
+  if (clientRow?.entreprise_id) {
+    await assertFreeTierChantierLimit(clientRow.entreprise_id);
+  }
+
   const id = uuidv4();
 
   const query = `
@@ -180,11 +315,15 @@ export const insertReleveLocal = async (chantierId, priseParId = null) => {
   const db = await ensureLocalDatabaseReady();
   const id = uuidv4();
 
+  const dateFacture = todayFactureDate();
   const query = `
-    INSERT INTO releves (id, chantier_id, prise_par_id, total_ht_facture, tva_facture, total_ttc_facture, _synced)
-    VALUES (?, ?, ?, 0.0, 18.0, 0.0, 0);
+    INSERT INTO releves (
+      id, chantier_id, prise_par_id, date_facture,
+      total_ht_facture, tva_facture, total_ttc_facture, _synced
+    )
+    VALUES (?, ?, ?, ?, 0.0, 18.0, 0.0, 0);
   `;
-  await db.runAsync(query, [id, chantierId, priseParId]);
+  await db.runAsync(query, [id, chantierId, priseParId, dateFacture]);
   notifyLocalDataChanged();
   return id;
 };
@@ -220,6 +359,9 @@ const getUniteContextByOuvrageUniteId = async (ouvrageUniteId) => {
 };
 
 export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) => {
+  const releve = await getReleveByIdLocal(releveId);
+  await assertCanModifyReleveLocal(releve);
+
   const db = await ensureLocalDatabaseReady();
   const id = uuidv4();
 
@@ -230,6 +372,7 @@ export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) =>
     nombre,
     prixUnitaireApplique,
     note = null,
+    photo = null,
     indComplete = 0,
   } = cotes;
   const uniteContext = await getUniteContextByOuvrageUniteId(ouvrageUniteId);
@@ -247,9 +390,9 @@ export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) =>
 
   const query = `
     INSERT INTO ligne_releves (
-      id, releve_id, ouvrage_unite_id, largeur, hauteur, profondeur, 
-      nombre, quantite, prix_unitaire_applique, montant, note, ind_complete, _synced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
+      id, releve_id, ouvrage_unite_id, largeur, hauteur, profondeur,
+      nombre, quantite, prix_unitaire_applique, montant, note, photo, ind_complete, _synced
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
   `;
 
   await db.runAsync(query, [
@@ -264,6 +407,7 @@ export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) =>
     prixUnitaireApplique,
     montant,
     note?.trim() || null,
+    photo || null,
     Number(indComplete) === 1 ? 1 : 0,
   ]);
 
@@ -281,15 +425,21 @@ const insertLignesForReleveLocal = async (releveId, lignes = []) => {
   for (const ligne of lignes) {
     if (!ligne?.ouvrage_unite_id) continue;
     try {
-      await insertLigneReleveLocal(releveId, ligne.ouvrage_unite_id, {
+      const ligneId = await insertLigneReleveLocal(releveId, ligne.ouvrage_unite_id, {
         largeur: ligne.largeur,
         hauteur: ligne.hauteur,
         profondeur: ligne.profondeur,
         nombre: ligne.nombre,
         prixUnitaireApplique: resolveLignePrixUnitaire(ligne),
         note: ligne.note,
+        photo: ligne.photo_pending_uri ? null : ligne.photo || null,
         indComplete: Number(ligne.ind_complete) === 1 ? 1 : 0,
       });
+      if (ligne.photo_pending_uri) {
+        await setLigneRelevePhotoLocal(ligneId, ligne.photo_pending_uri, {
+          mimeType: ligne.photo_mime_type,
+        });
+      }
     } catch (error) {
       console.warn('Ligne non enregistree:', ligne.ouvrage_unite_id, error);
     }
@@ -330,6 +480,9 @@ export const updateChantierLocal = async (
 };
 
 export const updateChantierStatusLocal = async (chantierId, status) => {
+  if (!(await canCurrentUserModifyChantierLocal(chantierId))) {
+    throw new Error(RELEVE_ACCESS_DENIED_ERROR);
+  }
   const db = await ensureLocalDatabaseReady();
   await db.runAsync(
     `
@@ -343,6 +496,9 @@ export const updateChantierStatusLocal = async (chantierId, status) => {
 };
 
 export const replaceLignesReleveLocal = async (releveId, lignes = []) => {
+  const releve = await getReleveByIdLocal(releveId);
+  await assertCanModifyReleveLocal(releve);
+
   const db = await ensureLocalDatabaseReady();
   const deletedAt = nowIso();
   await db.runAsync(
@@ -359,7 +515,15 @@ export const replaceLignesReleveLocal = async (releveId, lignes = []) => {
 };
 
 export const updateLigneReleveIndCompleteLocal = async (ligneId, indComplete) => {
+  const profil = await getLoggedInProfilLocal();
+  if (!isProAccount(profil)) {
+    throw new Error('Validation OK par ligne réservée aux comptes Pro.');
+  }
+
   const db = await ensureLocalDatabaseReady();
+  const ligneRow = await db.getFirstAsync('SELECT releve_id FROM ligne_releves WHERE id = ?;', [ligneId]);
+  const releve = await getReleveByIdLocal(ligneRow?.releve_id);
+  await assertCanModifyReleveLocal(releve);
   const value = Number(indComplete) === 1 ? 1 : 0;
   await db.runAsync(
     `
@@ -407,6 +571,16 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
   const tombstoneFilter = hasSupprimeLe
     ? ' AND chantiers.supprime_le IS NULL AND clients.supprime_le IS NULL'
     : '';
+  const hasReleveSupprimeLe = await tableHasColumn(db, 'releves', 'supprime_le');
+  const releveTombstoneFilter = hasReleveSupprimeLe ? 'WHERE supprime_le IS NULL' : '';
+  const relevePriseJoin = `
+    LEFT JOIN (
+      SELECT chantier_id, MIN(cree_le) AS prise_le
+      FROM releves
+      ${releveTombstoneFilter}
+      GROUP BY chantier_id
+    ) releve_prise ON releve_prise.chantier_id = chantiers.id
+  `;
 
   const query = entrepriseId
     ? `
@@ -414,9 +588,11 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
       chantiers.*,
       clients.nom_complet as client_nom,
       clients.telephone_1 as client_telephone_1,
-      clients.telephone_2 as client_telephone_2
+      clients.telephone_2 as client_telephone_2,
+      releve_prise.prise_le as prise_le
     FROM chantiers
     JOIN clients ON chantiers.client_id = clients.id
+    ${relevePriseJoin}
     WHERE clients.entreprise_id = ?${tombstoneFilter}
     ORDER BY chantiers.cree_le DESC;
   `
@@ -425,13 +601,79 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
       chantiers.*,
       clients.nom_complet as client_nom,
       clients.telephone_1 as client_telephone_1,
-      clients.telephone_2 as client_telephone_2
+      clients.telephone_2 as client_telephone_2,
+      releve_prise.prise_le as prise_le
     FROM chantiers
     JOIN clients ON chantiers.client_id = clients.id
+    ${relevePriseJoin}
     WHERE 1=1${tombstoneFilter}
     ORDER BY chantiers.cree_le DESC;
   `;
   return entrepriseId ? db.getAllAsync(query, [entrepriseId]) : db.getAllAsync(query);
+};
+
+/**
+ * Données agrégées pour le dashboard Rapports (statut, date de création, montant HT).
+ */
+export const getChantiersReportRowsLocal = async (entrepriseId) => {
+  if (!entrepriseId) return [];
+
+  const db = await ensureLocalDatabaseReady();
+  const hasSupprimeLe =
+    (await tableHasColumn(db, 'chantiers', 'supprime_le')) &&
+    (await tableHasColumn(db, 'clients', 'supprime_le'));
+  const tombstoneFilter = hasSupprimeLe
+    ? ' AND chantiers.supprime_le IS NULL AND clients.supprime_le IS NULL'
+    : '';
+
+  const hasReleveSupprimeLe = await tableHasColumn(db, 'releves', 'supprime_le');
+  const releveJoinFilter = hasReleveSupprimeLe ? ' AND r.supprime_le IS NULL' : '';
+
+  const hasLigneSupprimeLe = await tableHasColumn(db, 'ligne_releves', 'supprime_le');
+  const ligneJoinFilter = hasLigneSupprimeLe ? ' AND lr.supprime_le IS NULL' : '';
+
+  return db.getAllAsync(
+    `
+    SELECT
+      chantiers.id,
+      chantiers.status,
+      chantiers.cree_le,
+      COALESCE(SUM(lr.montant), 0) AS montant_total
+    FROM chantiers
+    JOIN clients ON chantiers.client_id = clients.id
+    LEFT JOIN releves r ON r.chantier_id = chantiers.id${releveJoinFilter}
+    LEFT JOIN ligne_releves lr ON lr.releve_id = r.id${ligneJoinFilter}
+    WHERE clients.entreprise_id = ?${tombstoneFilter}
+    GROUP BY chantiers.id
+    ORDER BY chantiers.cree_le DESC;
+    `,
+    [entrepriseId]
+  );
+};
+
+export const getChantierWithClientByIdLocal = async (chantierId) => {
+  if (!chantierId) return null;
+  const db = await ensureLocalDatabaseReady();
+  const hasSupprimeLe =
+    (await tableHasColumn(db, 'chantiers', 'supprime_le')) &&
+    (await tableHasColumn(db, 'clients', 'supprime_le'));
+  const tombstoneFilter = hasSupprimeLe
+    ? ' AND chantiers.supprime_le IS NULL AND clients.supprime_le IS NULL'
+    : '';
+
+  return db.getFirstAsync(
+    `
+    SELECT
+      chantiers.*,
+      clients.nom_complet AS client_nom,
+      clients.telephone_1 AS client_telephone_1,
+      clients.telephone_2 AS client_telephone_2
+    FROM chantiers
+    JOIN clients ON chantiers.client_id = clients.id
+    WHERE chantiers.id = ?${tombstoneFilter};
+    `,
+    [chantierId]
+  );
 };
 
 /**
@@ -449,7 +691,15 @@ export const getOuvragesByMetierAndEntreprise = async (metierId, entrepriseId) =
 export const getUnitesEtPrixParOuvrage = async (ouvrageId) => {
   const db = await ensureLocalDatabaseReady();
   const query = `
-    SELECT ou.id as ouvrage_unite_id, ou.ouvrage_id, u.formule, u.nom, u.nom_unite, u.ind_dimension, ou.prix_unitaire
+    SELECT
+      ou.id as ouvrage_unite_id,
+      ou.ouvrage_id,
+      ou.unite_id,
+      u.formule,
+      u.nom,
+      u.nom_unite,
+      u.ind_dimension,
+      ou.prix_unitaire
     FROM ouvrage_unites ou
     JOIN unites u ON ou.unite_id = u.id
     WHERE ou.ouvrage_id = ?
@@ -477,13 +727,15 @@ export const insertOuvrageWithUniteLocal = async ({
 }) => {
   const trimmedNom = String(nom || '').trim();
   if (!metierId || !entrepriseId || !trimmedNom || !uniteId) {
-    throw new Error('Metier, entreprise, nom et unite sont requis.');
+    throw new Error('Métier, entreprise, nom et unité sont requis.');
   }
 
   const prix = Number(prixUnitaire);
   if (!Number.isFinite(prix) || prix < 0) {
     throw new Error('Prix unitaire invalide.');
   }
+
+  await assertFreeTierOuvrageLimit(entrepriseId, metierId);
 
   const db = await ensureLocalDatabaseReady();
   const ouvrageId = uuidv4();
@@ -594,7 +846,9 @@ export const getLignesByChantierLocal = async (chantierId) => {
       lr.prix_unitaire_applique,
       lr.montant,
       lr.note,
+      lr.photo,
       lr.ind_complete,
+      r.date_facture as releve_date_facture,
       o.nom as ouvrage_nom,
       m.id as metier_id,
       m.nom as metier_nom,
@@ -613,19 +867,34 @@ export const getLignesByChantierLocal = async (chantierId) => {
 };
 
 export const getReleveIdByChantierLocal = async (chantierId) => {
+  const releve = await getReleveByChantierLocal(chantierId);
+  return releve?.id || null;
+};
+
+export const getReleveByChantierLocal = async (chantierId) => {
   if (!chantierId) return null;
   const db = await ensureLocalDatabaseReady();
   const hasSupprimeLe = await tableHasColumn(db, 'releves', 'supprime_le');
   const tombstoneFilter = hasSupprimeLe ? ' AND supprime_le IS NULL' : '';
-  const row = await db.getFirstAsync(
-    `SELECT id FROM releves WHERE chantier_id = ?${tombstoneFilter} ORDER BY cree_le ASC LIMIT 1;`,
+  return db.getFirstAsync(
+    `SELECT * FROM releves WHERE chantier_id = ?${tombstoneFilter} ORDER BY cree_le ASC LIMIT 1;`,
     [chantierId]
   );
-  return row?.id || null;
+};
+
+export const getReleveByIdLocal = async (releveId) => {
+  if (!releveId) return null;
+  const db = await ensureLocalDatabaseReady();
+  const hasSupprimeLe = await tableHasColumn(db, 'releves', 'supprime_le');
+  const tombstoneFilter = hasSupprimeLe ? ' AND supprime_le IS NULL' : '';
+  return db.getFirstAsync(`SELECT * FROM releves WHERE id = ?${tombstoneFilter};`, [releveId]);
 };
 
 export const deleteChantierLocal = async (chantierId) => {
   if (!chantierId) return;
+  if (!(await canCurrentUserModifyChantierLocal(chantierId))) {
+    throw new Error(RELEVE_ACCESS_DENIED_ERROR);
+  }
   const db = await ensureLocalDatabaseReady();
   const deletedAt = nowIso();
 
@@ -665,6 +934,371 @@ export const getEntrepriseByIdLocal = async (entrepriseId) => {
   return db.getFirstAsync(`SELECT * FROM entreprises WHERE id = ?;`, [entrepriseId]);
 };
 
+export const updateEntrepriseAdminLocal = async (entrepriseId, { nom, ind_tva }) => {
+  if (!(await isLoggedInAdminLocal())) {
+    throw new Error("Seul un administrateur peut modifier l'entreprise.");
+  }
+
+  const trimmedNom = nom?.trim();
+  if (!entrepriseId || !trimmedNom) {
+    throw new Error("Nom de l'entreprise requis.");
+  }
+
+  const profil = await getLoggedInProfilLocal();
+  const tvaValue =
+    isProAccount(profil) && Number(ind_tva) === 1 ? 1 : 0;
+  const db = await ensureLocalDatabaseReady();
+  await db.runAsync(
+    `
+    UPDATE entreprises
+    SET nom = ?, ind_tva = ?, _synced = 0, mis_a_jour_le = datetime('now')
+    WHERE id = ?;
+    `,
+    [trimmedNom, tvaValue, entrepriseId]
+  );
+  notifyLocalDataChanged();
+};
+
+const assertChantierPhotoSlot = (slot) => {
+  if (!CHANTIER_PHOTO_SLOTS.includes(slot)) {
+    throw new Error('Emplacement photo chantier invalide.');
+  }
+};
+
+export const setEntrepriseLogoLocal = async (entrepriseId, sourceUri, { mimeType } = {}) => {
+  if (!entrepriseId) throw new Error('Entreprise requise.');
+  const storageKey = await persistTerrainImage({
+    sourceUri,
+    storageKey: buildEntrepriseLogoKey(entrepriseId),
+    mimeType,
+  });
+  const db = await ensureLocalDatabaseReady();
+  const previous = await db.getFirstAsync('SELECT logo FROM entreprises WHERE id = ?;', [entrepriseId]);
+  await db.runAsync(
+    `
+    UPDATE entreprises
+    SET logo = ?, _synced = 0, mis_a_jour_le = datetime('now')
+    WHERE id = ?;
+    `,
+    [storageKey, entrepriseId]
+  );
+  if (previous?.logo && previous.logo !== storageKey) {
+    await deleteImageFileLocal(previous.logo);
+  }
+  notifyLocalDataChanged();
+  return storageKey;
+};
+
+const getChantierImageContextLocal = async (chantierId) => {
+  const db = await ensureLocalDatabaseReady();
+  return db.getFirstAsync(
+    `
+    SELECT chantiers.id AS chantier_id, clients.entreprise_id
+    FROM chantiers
+    JOIN clients ON clients.id = chantiers.client_id
+    WHERE chantiers.id = ?;
+    `,
+    [chantierId]
+  );
+};
+
+const getLigneImageContextLocal = async (ligneId) => {
+  const db = await ensureLocalDatabaseReady();
+  return db.getFirstAsync(
+    `
+    SELECT
+      ligne_releves.id AS ligne_id,
+      chantiers.id AS chantier_id,
+      clients.entreprise_id
+    FROM ligne_releves
+    JOIN releves ON releves.id = ligne_releves.releve_id
+    JOIN chantiers ON chantiers.id = releves.chantier_id
+    JOIN clients ON clients.id = chantiers.client_id
+    WHERE ligne_releves.id = ?;
+    `,
+    [ligneId]
+  );
+};
+
+export const setChantierPhotoLocal = async (chantierId, slot, sourceUri, { mimeType } = {}) => {
+  assertChantierPhotoSlot(slot);
+  if (!chantierId) throw new Error('Chantier requis.');
+
+  const context = await getChantierImageContextLocal(chantierId);
+  if (!context?.entreprise_id) {
+    throw new Error('Entreprise introuvable pour ce chantier.');
+  }
+
+  const storageKey = await persistTerrainImage({
+    sourceUri,
+    storageKey: buildChantierPhotoKey(context.entreprise_id, chantierId, slot),
+    mimeType,
+  });
+  const db = await ensureLocalDatabaseReady();
+  const previous = await db.getFirstAsync(`SELECT ${slot} AS current_photo FROM chantiers WHERE id = ?;`, [
+    chantierId,
+  ]);
+  await db.runAsync(
+    `
+    UPDATE chantiers
+    SET ${slot} = ?, _synced = 0, mis_a_jour_le = datetime('now')
+    WHERE id = ?;
+    `,
+    [storageKey, chantierId]
+  );
+  if (previous?.current_photo && previous.current_photo !== storageKey) {
+    await deleteImageFileLocal(previous.current_photo);
+  }
+  notifyLocalDataChanged();
+  return storageKey;
+};
+
+export const setLigneRelevePhotoLocal = async (ligneId, sourceUri, { mimeType } = {}) => {
+  if (!ligneId) throw new Error('Ligne relevé requise.');
+
+  const context = await getLigneImageContextLocal(ligneId);
+  if (!context?.entreprise_id || !context?.chantier_id) {
+    throw new Error('Chantier ou entreprise introuvable pour cette ligne.');
+  }
+
+  const storageKey = await persistTerrainImage({
+    sourceUri,
+    storageKey: buildLignePhotoKey(context.entreprise_id, context.chantier_id, ligneId),
+    mimeType,
+  });
+  const db = await ensureLocalDatabaseReady();
+  const previous = await db.getFirstAsync('SELECT photo FROM ligne_releves WHERE id = ?;', [ligneId]);
+  await db.runAsync(
+    `
+    UPDATE ligne_releves
+    SET photo = ?, _synced = 0, mis_a_jour_le = datetime('now')
+    WHERE id = ?;
+    `,
+    [storageKey, ligneId]
+  );
+  if (previous?.photo && previous.photo !== storageKey) {
+    await deleteImageFileLocal(previous.photo);
+  }
+  notifyLocalDataChanged();
+  return storageKey;
+};
+
+export const clearEntrepriseLogoLocal = async (entrepriseId) => {
+  if (!entrepriseId) return;
+  const db = await ensureLocalDatabaseReady();
+  const previous = await db.getFirstAsync('SELECT logo FROM entreprises WHERE id = ?;', [entrepriseId]);
+  await db.runAsync(
+    `
+    UPDATE entreprises
+    SET logo = NULL, _synced = 0, mis_a_jour_le = datetime('now')
+    WHERE id = ?;
+    `,
+    [entrepriseId]
+  );
+  if (previous?.logo) {
+    await deleteImageFileLocal(previous.logo);
+  }
+  notifyLocalDataChanged();
+};
+
+export const clearChantierPhotoLocal = async (chantierId, slot) => {
+  assertChantierPhotoSlot(slot);
+  if (!chantierId) return;
+  const db = await ensureLocalDatabaseReady();
+  const previous = await db.getFirstAsync(`SELECT ${slot} AS current_photo FROM chantiers WHERE id = ?;`, [
+    chantierId,
+  ]);
+  await db.runAsync(
+    `
+    UPDATE chantiers
+    SET ${slot} = NULL, _synced = 0, mis_a_jour_le = datetime('now')
+    WHERE id = ?;
+    `,
+    [chantierId]
+  );
+  if (previous?.current_photo) {
+    await deleteImageFileLocal(previous.current_photo);
+  }
+  notifyLocalDataChanged();
+};
+
+export const clearLigneRelevePhotoLocal = async (ligneId) => {
+  if (!ligneId) return;
+  const db = await ensureLocalDatabaseReady();
+  const previous = await db.getFirstAsync('SELECT photo FROM ligne_releves WHERE id = ?;', [ligneId]);
+  await db.runAsync(
+    `
+    UPDATE ligne_releves
+    SET photo = NULL, _synced = 0, mis_a_jour_le = datetime('now')
+    WHERE id = ?;
+    `,
+    [ligneId]
+  );
+  if (previous?.photo) {
+    await deleteImageFileLocal(previous.photo);
+  }
+  notifyLocalDataChanged();
+};
+
+const applyChantierPendingPhotosLocal = async (chantierId, chantierPhotoUris = {}) => {
+  for (const slot of CHANTIER_PHOTO_SLOTS) {
+    const pending = chantierPhotoUris[slot];
+    if (pending?.uri) {
+      await setChantierPhotoLocal(chantierId, slot, pending.uri, { mimeType: pending.mimeType });
+    } else if (pending === null) {
+      await clearChantierPhotoLocal(chantierId, slot);
+    }
+  }
+};
+
+export const getOuvragesByEntrepriseLocal = async (entrepriseId) => {
+  if (!entrepriseId) return [];
+  const db = await ensureLocalDatabaseReady();
+  return db.getAllAsync(
+    `
+    SELECT
+      o.id,
+      o.nom,
+      o.metier_id,
+      o.entreprise_id,
+      o.cree_le,
+      o.mis_a_jour_le,
+      m.nom AS metier_nom
+    FROM ouvrages o
+    JOIN metiers m ON m.id = o.metier_id
+    WHERE o.entreprise_id = ?
+    ORDER BY m.nom ASC, o.nom ASC;
+    `,
+    [entrepriseId]
+  );
+};
+
+export const getOuvrageByIdLocal = async (ouvrageId) => {
+  if (!ouvrageId) return null;
+  const db = await ensureLocalDatabaseReady();
+  return db.getFirstAsync(
+    `
+    SELECT o.*, m.nom AS metier_nom
+    FROM ouvrages o
+    JOIN metiers m ON m.id = o.metier_id
+    WHERE o.id = ?;
+    `,
+    [ouvrageId]
+  );
+};
+
+export const updateOuvrageLocal = async ({ ouvrageId, nom, unites = [] }) => {
+  const trimmedNom = String(nom || '').trim();
+  if (!ouvrageId || !trimmedNom) {
+    throw new Error('Ouvrage et nom sont requis.');
+  }
+
+  const db = await ensureLocalDatabaseReady();
+  const timestamp = nowIso();
+
+  await db.runAsync(
+    `
+    UPDATE ouvrages
+    SET nom = ?, _synced = 0, mis_a_jour_le = ?
+    WHERE id = ?;
+    `,
+    [trimmedNom, timestamp, ouvrageId]
+  );
+
+  for (const unite of unites) {
+    if (!unite?.ouvrageUniteId) continue;
+    if (!unite?.uniteId) {
+      throw new Error('Unité requise.');
+    }
+    const prix = Number(unite.prixUnitaire);
+    if (!Number.isFinite(prix) || prix < 0) {
+      throw new Error('Prix unitaire invalide.');
+    }
+    await db.runAsync(
+      `
+      UPDATE ouvrage_unites
+      SET unite_id = ?, prix_unitaire = ?, _synced = 0, mis_a_jour_le = ?
+      WHERE id = ? AND ouvrage_id = ?;
+      `,
+      [unite.uniteId, prix, timestamp, unite.ouvrageUniteId, ouvrageId]
+    );
+  }
+
+  notifyLocalDataChanged();
+
+  const ouvrage = await getOuvrageByIdLocal(ouvrageId);
+  const ouvrageUnites = await getUnitesEtPrixParOuvrage(ouvrageId);
+  return { ouvrage, unites: ouvrageUnites };
+};
+
+export const deleteOuvrageLocal = async (ouvrageId) => {
+  if (!ouvrageId) return;
+
+  const db = await ensureLocalDatabaseReady();
+  const hasLigneSupprimeLe = await tableHasColumn(db, 'ligne_releves', 'supprime_le');
+  const ligneTombstoneFilter = hasLigneSupprimeLe ? ' AND lr.supprime_le IS NULL' : '';
+
+  const usageRow = await db.getFirstAsync(
+    `
+    SELECT COUNT(*) AS count
+    FROM ligne_releves lr
+    JOIN ouvrage_unites ou ON ou.id = lr.ouvrage_unite_id
+    WHERE ou.ouvrage_id = ?${ligneTombstoneFilter};
+    `,
+    [ouvrageId]
+  );
+
+  if (Number(usageRow?.count) > 0) {
+    throw new Error('Impossible de supprimer un ouvrage utilisé dans des relevés.');
+  }
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM ouvrage_unites WHERE ouvrage_id = ?;', [ouvrageId]);
+    await db.runAsync('DELETE FROM ouvrages WHERE id = ?;', [ouvrageId]);
+  });
+
+  notifyLocalDataChanged();
+};
+
+export const getClientsByEntrepriseLocal = async (entrepriseId) => {
+  if (!entrepriseId) return [];
+  const db = await ensureLocalDatabaseReady();
+  const hasSupprimeLe = await tableHasColumn(db, 'clients', 'supprime_le');
+  const tombstoneFilter = hasSupprimeLe ? ' AND supprime_le IS NULL' : '';
+  return db.getAllAsync(
+    `
+    SELECT id, entreprise_id, nom_complet, telephone_1, telephone_2, cree_le, mis_a_jour_le
+    FROM clients
+    WHERE entreprise_id = ?${tombstoneFilter}
+    ORDER BY nom_complet ASC;
+    `,
+    [entrepriseId]
+  );
+};
+
+export const getClientByIdLocal = async (clientId) => {
+  if (!clientId) return null;
+  const db = await ensureLocalDatabaseReady();
+  const hasSupprimeLe = await tableHasColumn(db, 'clients', 'supprime_le');
+  const tombstoneFilter = hasSupprimeLe ? ' AND supprime_le IS NULL' : '';
+  return db.getFirstAsync(`SELECT * FROM clients WHERE id = ?${tombstoneFilter};`, [clientId]);
+};
+
+export const deleteClientLocal = async (clientId) => {
+  if (!clientId) return;
+  const db = await ensureLocalDatabaseReady();
+  const deletedAt = nowIso();
+  await db.runAsync(
+    `
+    UPDATE clients
+    SET supprime_le = ?, _synced = 0, mis_a_jour_le = datetime('now')
+    WHERE id = ?;
+    `,
+    [deletedAt, clientId]
+  );
+  notifyLocalDataChanged();
+};
+
 export const searchClientsLocal = async (entrepriseId, query) => {
   if (!entrepriseId || !query?.trim()) return [];
 
@@ -693,6 +1327,7 @@ export const finalizeDimensionDraftLocal = async ({
   chantierAdresse = null,
   chantierStatus = 'D',
   chantierNotes = null,
+  chantierPhotoUris = null,
   chantierId = null,
   releveId = null,
   lignes = [],
@@ -700,12 +1335,16 @@ export const finalizeDimensionDraftLocal = async ({
   const resolvedEntrepriseId = entrepriseId || (await ensureEntrepriseLocale());
 
   if (!clientNom?.trim() || !clientTelephone?.trim() || !chantierNom?.trim()) {
-    throw new Error('Le nom du client, le telephone et le nom du chantier sont requis.');
+    throw new Error('Le nom du client, le téléphone et le nom du chantier sont requis.');
   }
 
   const priseParId = await getCurrentProfilIdLocal();
 
   if (chantierId && releveId) {
+    if (!(await canCurrentUserModifyChantierLocal(chantierId))) {
+      throw new Error(RELEVE_ACCESS_DENIED_ERROR);
+    }
+
     let resolvedClientId = clientId;
     if (resolvedClientId) {
       await updateClientLocal(resolvedClientId, clientNom.trim(), clientTelephone.trim());
@@ -727,6 +1366,9 @@ export const finalizeDimensionDraftLocal = async ({
     );
     await replaceLignesReleveLocal(releveId, lignes);
     await updateRelevePriseParLocal(releveId, priseParId);
+    if (chantierPhotoUris) {
+      await applyChantierPendingPhotosLocal(chantierId, chantierPhotoUris);
+    }
 
     notifyLocalDataChanged();
     return { clientId: resolvedClientId, chantierId, releveId };
@@ -753,6 +1395,9 @@ export const finalizeDimensionDraftLocal = async ({
   const newReleveId = await insertReleveLocal(newChantierId, priseParId);
 
   await insertLignesForReleveLocal(newReleveId, lignes);
+  if (chantierPhotoUris) {
+    await applyChantierPendingPhotosLocal(newChantierId, chantierPhotoUris);
+  }
 
   notifyLocalDataChanged();
   return { clientId: resolvedClientId, chantierId: newChantierId, releveId: newReleveId };

@@ -13,18 +13,25 @@ expo-env.d.ts
 
 # EAS / builds locaux
 .eas/
+build/
 *.apk
 *.aab
 *.ipa
+*.tar.gz
 
-# Native
+# Native (prebuild / signing)
 .kotlin/
+/ios
+/android
+local.properties
 *.orig.*
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
 *.mobileprovision
+*.hprof
 
 # Metro
 .metro-health-check*
@@ -53,10 +60,6 @@ expo.dev
 # TypeScript
 *.tsbuildinfo
 
-# Generated native folders
-/ios
-/android
-
 # Supabase CLI (local dev)
 .supabase/
 supabase/.temp/
@@ -80,5 +83,10 @@ supabase/.branches/
 .cursor/
 .claude/
 
+# Transcripts & brouillons Cursor (pas le code source)
+prompts/transcripts/
+prompts/terminal.txt
+
 # Test & coverage
 coverage/
+.turbo/

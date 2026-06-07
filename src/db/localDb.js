@@ -76,6 +76,8 @@ export const initLocalDatabase = async () => {
       logo TEXT,
       ind_pro INTEGER NOT NULL DEFAULT 0 CHECK (ind_pro IN (0, 1)),
       ind_active INTEGER NOT NULL DEFAULT 1 CHECK (ind_active IN (0, 1)),
+      ind_tva INTEGER NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1)),
+      date_actif_jusqua TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
       _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1))
@@ -91,6 +93,7 @@ export const initLocalDatabase = async () => {
       telephone_2 TEXT,
       role TEXT NOT NULL DEFAULT 'A' CHECK (role IN ('A', 'C', 'S', 'T')),
       identifiant TEXT UNIQUE,
+      date_premier_login TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
       _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1)),
@@ -121,6 +124,9 @@ export const initLocalDatabase = async () => {
       responsable TEXT,
       status TEXT NOT NULL DEFAULT 'D' CHECK (status IN ('D', 'V', 'E', 'X', 'Z')),
       notes TEXT,
+      photo_1 TEXT,
+      photo_2 TEXT,
+      photo_3 TEXT,
       supprime_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
@@ -181,7 +187,7 @@ export const initLocalDatabase = async () => {
       id TEXT PRIMARY KEY NOT NULL,
       chantier_id TEXT NOT NULL,
       prise_par_id TEXT,
-      date_facture TEXT,
+      date_facture TEXT DEFAULT (date('now')),
       total_ht_facture REAL DEFAULT 0.0,
       tva_facture REAL DEFAULT 18.0,
       total_ttc_facture REAL DEFAULT 0.0,
@@ -207,6 +213,7 @@ export const initLocalDatabase = async () => {
       prix_unitaire_applique REAL NOT NULL,
       montant REAL NOT NULL,
       note TEXT,
+      photo TEXT,
       ind_complete INTEGER NOT NULL DEFAULT 0 CHECK (ind_complete IN (0, 1)),
       supprime_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
@@ -233,6 +240,12 @@ export const initLocalDatabase = async () => {
       identifiant TEXT NOT NULL,
       mot_de_passe TEXT,
       updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS metiers_ordre (
+      metier_id TEXT PRIMARY KEY NOT NULL,
+      ordre INTEGER NOT NULL,
+      FOREIGN KEY (metier_id) REFERENCES metiers (id) ON DELETE CASCADE
     );
   `);
 
@@ -261,10 +274,30 @@ export const initLocalDatabase = async () => {
   }
 
   try {
+    await db.execAsync('ALTER TABLE entreprises ADD COLUMN date_actif_jusqua TEXT;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync(
+      'ALTER TABLE entreprises ADD COLUMN ind_tva INTEGER NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1));'
+    );
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
     await db.execAsync('ALTER TABLE profils ADD COLUMN identifiant TEXT;');
     await db.execAsync(
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_profils_identifiant ON profils(identifiant) WHERE identifiant IS NOT NULL;'
     );
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync('ALTER TABLE profils ADD COLUMN date_premier_login TEXT;');
   } catch {
     // Colonne deja presente.
   }
@@ -330,12 +363,58 @@ const ensureSchemaMigrations = async (db) => {
     // Colonne deja presente.
   }
 
+  try {
+    await db.execAsync('ALTER TABLE entreprises ADD COLUMN date_actif_jusqua TEXT;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync(
+      'ALTER TABLE entreprises ADD COLUMN ind_tva INTEGER NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1));'
+    );
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync('ALTER TABLE profils ADD COLUMN date_premier_login TEXT;');
+  } catch {
+    // Colonne deja presente.
+  }
+
   for (const tableName of ['clients', 'chantiers', 'releves', 'ligne_releves']) {
     try {
       await db.execAsync(`ALTER TABLE ${tableName} ADD COLUMN supprime_le TEXT;`);
     } catch {
       // Colonne deja presente.
     }
+  }
+
+  for (const columnName of ['photo_1', 'photo_2', 'photo_3']) {
+    try {
+      await db.execAsync(`ALTER TABLE chantiers ADD COLUMN ${columnName} TEXT;`);
+    } catch {
+      // Colonne deja presente.
+    }
+  }
+
+  try {
+    await db.execAsync('ALTER TABLE ligne_releves ADD COLUMN photo TEXT;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS metiers_ordre (
+        metier_id TEXT PRIMARY KEY NOT NULL,
+        ordre INTEGER NOT NULL,
+        FOREIGN KEY (metier_id) REFERENCES metiers (id) ON DELETE CASCADE
+      );
+    `);
+  } catch {
+    // Table deja presente.
   }
 };
 

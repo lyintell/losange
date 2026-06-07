@@ -1,6 +1,7 @@
 import { assertSupabaseConfigured, isSupabaseConfigured, supabase } from './supabaseClient';
 import { ensureLocalDatabaseReady } from './localDb';
 import {
+  enforceEntrepriseExpiryLocal,
   forceLogoutInactiveEntreprise,
   getTerrainDeviceAccountLocal,
   getLoggedInProfilLocal,
@@ -8,12 +9,17 @@ import {
   revokeTerrainSessionIfEntrepriseInactive,
   upsertRows,
 } from './terrainSync';
-import { applyTerrainPullPayload } from './terrainSyncMerge';
+import { applyTerrainPullPayload, applyTerrainPullPayloadAccountOnly } from './terrainSyncMerge';
+import {
+  hydrateTerrainImagesFromPull,
+  syncPendingTerrainImagesToCloud,
+} from './terrainImageStorage';
 import { hasInternetConnection } from '../utils/network';
 
+const ENTREPRISE_PUSH_TABLES = ['entreprises'];
 const CATALOGUE_PUSH_TABLES = ['ouvrages', 'ouvrage_unites'];
 const TRANSACTIONAL_TABLES = ['clients', 'chantiers', 'releves', 'ligne_releves'];
-const PUSH_ORDER = [...CATALOGUE_PUSH_TABLES, ...TRANSACTIONAL_TABLES];
+const PUSH_ORDER = [...ENTREPRISE_PUSH_TABLES, ...CATALOGUE_PUSH_TABLES, ...TRANSACTIONAL_TABLES];
 
 let syncInProgress = false;
 
@@ -38,12 +44,31 @@ const guardSyncResultForInactiveEntreprise = async (result, entrepriseId) => {
     return forceLogoutInactiveEntreprise(entrepriseId);
   }
 
+  const expiry = await enforceEntrepriseExpiryLocal(entrepriseId);
+  if (expiry.expired) {
+    return forceLogoutInactiveEntreprise(entrepriseId);
+  }
+
   const revoked = await revokeTerrainSessionIfEntrepriseInactive();
   if (revoked.inactive) {
     return { ok: false, forcedLogout: true, error: revoked.error };
   }
 
   return result;
+};
+
+const assertEntrepriseStillActive = async (entrepriseId) => {
+  const expiry = await enforceEntrepriseExpiryLocal(entrepriseId);
+  if (expiry.expired) {
+    return forceLogoutInactiveEntreprise(entrepriseId);
+  }
+
+  const revoked = await revokeTerrainSessionIfEntrepriseInactive();
+  if (revoked.inactive) {
+    return { ok: false, forcedLogout: true, error: revoked.error };
+  }
+
+  return null;
 };
 
 export const isProEntrepriseLocal = async () => {
@@ -53,9 +78,21 @@ export const isProEntrepriseLocal = async () => {
 
 export const getPendingSyncCount = async () => {
   const db = await ensureLocalDatabaseReady();
+  const session = await getLoggedInProfilLocal();
+  const entrepriseId = session?.entreprise_id;
   let total = 0;
 
-  for (const tableName of TRANSACTIONAL_TABLES) {
+  for (const tableName of PUSH_ORDER) {
+    if (tableName === 'entreprises') {
+      if (!entrepriseId) continue;
+      const row = await db.getFirstAsync(
+        `SELECT COUNT(*) AS count FROM entreprises WHERE id = ? AND _synced = 0;`,
+        [entrepriseId]
+      );
+      total += Number(row?.count || 0);
+      continue;
+    }
+
     const row = await db.getFirstAsync(
       `SELECT COUNT(*) AS count FROM ${tableName} WHERE _synced = 0;`
     );
@@ -66,6 +103,10 @@ export const getPendingSyncCount = async () => {
 };
 
 const selectUnsyncedRows = async (db, tableName, entrepriseId) => {
+  if (tableName === 'entreprises') {
+    return db.getAllAsync(`SELECT * FROM entreprises WHERE id = ? AND _synced = 0;`, [entrepriseId]);
+  }
+
   if (tableName === 'ouvrages') {
     return db.getAllAsync(
       `SELECT * FROM ouvrages WHERE entreprise_id = ? AND _synced = 0;`,
@@ -157,13 +198,31 @@ const markTableSynced = async (db, tableName, rows = []) => {
   );
 };
 
-export const runTerrainSyncPushPull = async ({ skipPull = false } = {}) => {
-  if (!isSupabaseConfigured()) {
-    return { ok: false, error: 'Supabase non configure.' };
-  }
+const FREE_PUSH_ORDER = ['entreprises'];
 
-  if (!(await isProEntrepriseLocal())) {
-    return { ok: false, error: 'Synchronisation cloud reservee aux comptes Pro.' };
+export const getPendingAccountSyncCount = async () => {
+  const db = await ensureLocalDatabaseReady();
+  const session = await getLoggedInProfilLocal();
+  const entrepriseId = session?.entreprise_id;
+  if (!entrepriseId) return 0;
+
+  const row = await db.getFirstAsync(
+    `SELECT COUNT(*) AS count FROM entreprises WHERE id = ? AND _synced = 0;`,
+    [entrepriseId]
+  );
+  return Number(row?.count || 0);
+};
+
+const collectFreeTierPushPayload = async (entrepriseId) => {
+  const db = await ensureLocalDatabaseReady();
+  return {
+    entreprises: await selectUnsyncedRows(db, 'entreprises', entrepriseId),
+  };
+};
+
+export const runTerrainSyncFreePushPull = async ({ skipPull = false } = {}) => {
+  if (!isSupabaseConfigured()) {
+    return { ok: false, error: 'Supabase non configuré.' };
   }
 
   if (!(await hasInternetConnection())) {
@@ -171,7 +230,7 @@ export const runTerrainSyncPushPull = async ({ skipPull = false } = {}) => {
   }
 
   if (syncInProgress) {
-    return { ok: false, error: 'Synchronisation deja en cours.' };
+    return { ok: false, error: 'Synchronisation déjà en cours.' };
   }
 
   const device = await getTerrainDeviceAccountLocal();
@@ -191,6 +250,137 @@ export const runTerrainSyncPushPull = async ({ skipPull = false } = {}) => {
   syncInProgress = true;
 
   const emptyPush = {
+    entreprises: [],
+    ouvrages: [],
+    ouvrage_unites: [],
+    clients: [],
+    chantiers: [],
+    releves: [],
+    ligne_releves: [],
+  };
+
+  try {
+    assertSupabaseConfigured();
+    const pendingBefore = await getPendingAccountSyncCount();
+
+    const pullFirst = await supabase.functions.invoke('terrain-sync', {
+      body: {
+        identifiant: device.identifiant,
+        motDePasse: device.mot_de_passe,
+        push: emptyPush,
+      },
+    });
+
+    if (pullFirst.error) {
+      return guardSyncResultForInactiveEntreprise(
+        { ok: false, error: await readFunctionErrorMessage(pullFirst.error, pullFirst.data) },
+        entrepriseId
+      );
+    }
+    if (!pullFirst.data?.ok) {
+      return guardSyncResultForInactiveEntreprise(
+        { ok: false, error: pullFirst.data?.error || 'Téléchargement refusé.' },
+        entrepriseId
+      );
+    }
+    if (!skipPull && pullFirst.data.pull) {
+      await applyTerrainPullPayloadAccountOnly(pullFirst.data.pull);
+      const activeAfterPull = await assertEntrepriseStillActive(entrepriseId);
+      if (activeAfterPull) return activeAfterPull;
+    }
+
+    const push = await collectFreeTierPushPayload(entrepriseId);
+    const { data, error } = await supabase.functions.invoke('terrain-sync', {
+      body: {
+        identifiant: device.identifiant,
+        motDePasse: device.mot_de_passe,
+        push: { ...emptyPush, ...push },
+      },
+    });
+
+    if (error) {
+      return guardSyncResultForInactiveEntreprise(
+        { ok: false, error: await readFunctionErrorMessage(error, data) },
+        entrepriseId
+      );
+    }
+
+    if (!data?.ok) {
+      return guardSyncResultForInactiveEntreprise(
+        { ok: false, error: data?.error || 'Synchronisation refusée.' },
+        entrepriseId
+      );
+    }
+
+    const db = await ensureLocalDatabaseReady();
+    await db.withTransactionAsync(async () => {
+      for (const tableName of FREE_PUSH_ORDER) {
+        await markTableSynced(db, tableName, push[tableName] || []);
+      }
+    });
+
+    if (!skipPull && data.pull) {
+      await applyTerrainPullPayloadAccountOnly(data.pull);
+      const activeAfterPull = await assertEntrepriseStillActive(entrepriseId);
+      if (activeAfterPull) return activeAfterPull;
+    }
+
+    const pendingAfter = await getPendingAccountSyncCount();
+
+    return guardSyncResultForInactiveEntreprise(
+      {
+        ok: true,
+        entrepriseId,
+        mode: skipPull ? 'push_account' : 'push_pull_account',
+        pushedCounts: data.pushedCounts || {},
+        pendingBefore,
+        pendingAfter,
+      },
+      entrepriseId
+    );
+  } catch (syncError) {
+    console.error('Erreur runTerrainSyncFreePushPull:', syncError);
+    return { ok: false, error: syncError.message || 'Synchronisation impossible.' };
+  } finally {
+    syncInProgress = false;
+  }
+};
+
+export const runTerrainSyncPushPull = async ({ skipPull = false } = {}) => {
+  if (!isSupabaseConfigured()) {
+    return { ok: false, error: 'Supabase non configuré.' };
+  }
+
+  if (!(await isProEntrepriseLocal())) {
+    return runTerrainSyncFreePushPull({ skipPull });
+  }
+
+  if (!(await hasInternetConnection())) {
+    return { ok: false, error: 'Connexion internet requise pour synchroniser.' };
+  }
+
+  if (syncInProgress) {
+    return { ok: false, error: 'Synchronisation déjà en cours.' };
+  }
+
+  const device = await getTerrainDeviceAccountLocal();
+  if (!device?.identifiant || !device?.mot_de_passe) {
+    return {
+      ok: false,
+      error: 'Reconnectez-vous en ligne une fois pour activer la synchronisation.',
+    };
+  }
+
+  const session = await getLoggedInProfilLocal();
+  const entrepriseId = session?.entreprise_id;
+  if (!entrepriseId) {
+    return { ok: false, error: 'Session terrain invalide.' };
+  }
+
+  syncInProgress = true;
+
+  const emptyPush = {
+    entreprises: [],
     ouvrages: [],
     ouvrage_unites: [],
     clients: [],
@@ -220,15 +410,19 @@ export const runTerrainSyncPushPull = async ({ skipPull = false } = {}) => {
     }
     if (!pullFirst.data?.ok) {
       return guardSyncResultForInactiveEntreprise(
-        { ok: false, error: pullFirst.data?.error || 'Telechargement refuse.' },
+        { ok: false, error: pullFirst.data?.error || 'Téléchargement refusé.' },
         entrepriseId
       );
     }
     if (!skipPull && pullFirst.data.pull) {
       await applyTerrainPullPayload(pullFirst.data.pull);
+      await hydrateTerrainImagesFromPull(pullFirst.data.pull);
+      const activeAfterPull = await assertEntrepriseStillActive(entrepriseId);
+      if (activeAfterPull) return activeAfterPull;
     }
 
-    // 2. Envoyer les modifications locales encore en attente
+    // 2. Envoyer les images locales, puis les modifications SQLite
+    await syncPendingTerrainImagesToCloud(entrepriseId);
     const push = await collectPushPayload(entrepriseId);
 
     const { data, error } = await supabase.functions.invoke('terrain-sync', {
@@ -248,7 +442,7 @@ export const runTerrainSyncPushPull = async ({ skipPull = false } = {}) => {
 
     if (!data?.ok) {
       return guardSyncResultForInactiveEntreprise(
-        { ok: false, error: data?.error || 'Synchronisation refusee.' },
+        { ok: false, error: data?.error || 'Synchronisation refusée.' },
         entrepriseId
       );
     }
@@ -262,6 +456,9 @@ export const runTerrainSyncPushPull = async ({ skipPull = false } = {}) => {
 
     if (!skipPull && data.pull) {
       await applyTerrainPullPayload(data.pull);
+      await hydrateTerrainImagesFromPull(data.pull);
+      const activeAfterPull = await assertEntrepriseStillActive(entrepriseId);
+      if (activeAfterPull) return activeAfterPull;
     }
 
     const pendingAfter = await getPendingSyncCount();
@@ -295,11 +492,11 @@ export const runTerrainSyncPushPull = async ({ skipPull = false } = {}) => {
 /** Telecharge Supabase vers le local (sans envoyer de modifications locales). */
 export const runTerrainSyncPullOnly = async () => {
   if (!isSupabaseConfigured()) {
-    return { ok: false, error: 'Supabase non configure.' };
+    return { ok: false, error: 'Supabase non configuré.' };
   }
 
   if (!(await isProEntrepriseLocal())) {
-    return { ok: false, error: 'Synchronisation cloud reservee aux comptes Pro.' };
+    return { ok: false, error: 'Synchronisation cloud réservée aux comptes Pro.' };
   }
 
   if (!(await hasInternetConnection())) {
@@ -307,7 +504,7 @@ export const runTerrainSyncPullOnly = async () => {
   }
 
   if (syncInProgress) {
-    return { ok: false, error: 'Synchronisation deja en cours.' };
+    return { ok: false, error: 'Synchronisation déjà en cours.' };
   }
 
   const device = await getTerrainDeviceAccountLocal();
@@ -334,6 +531,7 @@ export const runTerrainSyncPullOnly = async () => {
         identifiant: device.identifiant,
         motDePasse: device.mot_de_passe,
         push: {
+          entreprises: [],
           ouvrages: [],
           ouvrage_unites: [],
           clients: [],
@@ -353,13 +551,16 @@ export const runTerrainSyncPullOnly = async () => {
 
     if (!data?.ok) {
       return guardSyncResultForInactiveEntreprise(
-        { ok: false, error: data?.error || 'Synchronisation refusee.' },
+        { ok: false, error: data?.error || 'Synchronisation refusée.' },
         entrepriseId
       );
     }
 
     if (data.pull) {
       await applyTerrainPullPayload(data.pull);
+      await hydrateTerrainImagesFromPull(data.pull);
+      const activeAfterPull = await assertEntrepriseStillActive(entrepriseId);
+      if (activeAfterPull) return activeAfterPull;
     }
 
     const pendingAfter = await getPendingSyncCount();
@@ -380,13 +581,18 @@ export const runTerrainSyncPullOnly = async () => {
     );
   } catch (syncError) {
     console.error('Erreur runTerrainSyncPullOnly:', syncError);
-    return { ok: false, error: syncError.message || 'Telechargement impossible.' };
+    return { ok: false, error: syncError.message || 'Téléchargement impossible.' };
   } finally {
     syncInProgress = false;
   }
 };
 
 export const runTerrainSyncOnLogin = async () => {
+  const isPro = await isProEntrepriseLocal();
+  if (!isPro) {
+    return runTerrainSyncFreePushPull();
+  }
+
   const pending = await getPendingSyncCount();
   if (pending > 0) {
     return runTerrainSyncPushPull();
@@ -394,4 +600,9 @@ export const runTerrainSyncOnLogin = async () => {
   return runTerrainSyncPullOnly();
 };
 
-export const runTerrainSyncPushOnly = async () => runTerrainSyncPushPull({ skipPull: true });
+export const runTerrainSyncPushOnly = async () => {
+  if (await isProEntrepriseLocal()) {
+    return runTerrainSyncPushPull({ skipPull: true });
+  }
+  return runTerrainSyncFreePushPull({ skipPull: true });
+};

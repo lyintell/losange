@@ -58,6 +58,8 @@ Après modification du code serveur, **redéployer** les deux fonctions.
 
 Connexion mobile via identifiant/mot de passe stockés dans la table `profils` Supabase.
 Rejet si l'entreprise liee a `ind_active !== 1` (« Compte inactif »).
+Comptes Pro : si `date_actif_jusqua` est depassee, `ind_active` passe a 0 automatiquement (login + sync).
+Premier login terrain : `date_premier_login` est renseigne sur le profil.
 
 ### 1. Schema Supabase
 
@@ -73,6 +75,8 @@ Creer un profil terrain dans l'admin web avec :
 ```bash
 supabase functions deploy terrain-login
 ```
+
+Chaque fonction terrain est un seul fichier `index.ts` (pas d'import `_shared/`, sinon echec au bundle Dashboard).
 
 **Désactiver « Verify JWT »** sur `terrain-login` (deja dans `supabase/config.toml`).
 

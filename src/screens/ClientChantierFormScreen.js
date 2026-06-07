@@ -2,8 +2,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Searchbar, Text, TextInput } from 'react-native-paper';
 import { FlowBackFab, getFabColumnPadding } from '../components/terrain/TerrainFlowFabs';
+import TerrainPhotoInput from '../components/terrain/TerrainPhotoInput';
 import { getDraftDimensionFlow } from '../db/mockData';
 import { searchClientsLocal } from '../db/querries';
+import { CHANTIER_PHOTO_SLOTS } from '../db/terrainImageStorage';
 import { chantierColors } from '../styles/theme';
 
 export default function ClientChantierFormScreen({
@@ -26,6 +28,11 @@ export default function ClientChantierFormScreen({
   const [chantierAdresse, setChantierAdresse] = useState('');
   const [chantierNotes, setChantierNotes] = useState('');
   const [chantierStatus, setChantierStatus] = useState('D');
+  const [chantierPhotos, setChantierPhotos] = useState({
+    photo_1: null,
+    photo_2: null,
+    photo_3: null,
+  });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -39,6 +46,19 @@ export default function ClientChantierFormScreen({
     if (draft.chantierAdresse) setChantierAdresse(draft.chantierAdresse);
     if (draft.chantierNotes) setChantierNotes(draft.chantierNotes);
     if (draft.chantierStatus) setChantierStatus(draft.chantierStatus);
+    if (draft.chantierPhotoKeys) {
+      setChantierPhotos({
+        photo_1: draft.chantierPhotoKeys.photo_1
+          ? { storageKey: draft.chantierPhotoKeys.photo_1 }
+          : null,
+        photo_2: draft.chantierPhotoKeys.photo_2
+          ? { storageKey: draft.chantierPhotoKeys.photo_2 }
+          : null,
+        photo_3: draft.chantierPhotoKeys.photo_3
+          ? { storageKey: draft.chantierPhotoKeys.photo_3 }
+          : null,
+      });
+    }
   }, []);
 
   const isFormValid =
@@ -84,6 +104,19 @@ export default function ClientChantierFormScreen({
     setSelectedClientId(null);
   };
 
+  const buildChantierPhotoUris = () => {
+    const payload = {};
+    CHANTIER_PHOTO_SLOTS.forEach((slot) => {
+      const entry = chantierPhotos[slot];
+      if (entry?.uri) {
+        payload[slot] = { uri: entry.uri, mimeType: entry.mimeType };
+      } else if (entry === null) {
+        payload[slot] = null;
+      }
+    });
+    return Object.keys(payload).length ? payload : null;
+  };
+
   const buildPayload = () => ({
     clientId: selectedClientId,
     clientNom: clientNom.trim(),
@@ -92,6 +125,7 @@ export default function ClientChantierFormScreen({
     chantierAdresse: chantierAdresse.trim(),
     chantierStatus,
     chantierNotes: chantierNotes.trim(),
+    chantierPhotoUris: buildChantierPhotoUris(),
   });
 
   const performSave = useCallback(async () => {
@@ -106,13 +140,13 @@ export default function ClientChantierFormScreen({
     } finally {
       setSaving(false);
     }
-  }, [isFormValid, saving, clientNom, clientTelephone, selectedClientId, chantierNom, chantierAdresse, chantierNotes, chantierStatus]);
+  }, [isFormValid, saving, clientNom, clientTelephone, selectedClientId, chantierNom, chantierAdresse, chantierNotes, chantierStatus, chantierPhotos]);
 
   const confirmSave = useCallback(() => {
     if (!isFormValid) return;
     Alert.alert(
       'Enregistrer',
-      'Confirmer l enregistrement du client et du chantier?',
+      'Confirmer l\'enregistrement du client et du chantier ?',
       [
         { text: 'Non', style: 'cancel' },
         { text: 'Oui', onPress: () => performSave() },
@@ -149,7 +183,7 @@ export default function ClientChantierFormScreen({
         </Text>
 
         <Searchbar
-          placeholder="Rechercher par nom ou telephone"
+          placeholder="Rechercher par nom ou téléphone"
           value={searchQuery}
           onChangeText={setSearchQuery}
           style={styles.searchBar}
@@ -184,7 +218,7 @@ export default function ClientChantierFormScreen({
         />
         <TextInput
           mode="outlined"
-          label="Telephone"
+          label="Téléphone"
           value={clientTelephone}
           onChangeText={handleClientTelephoneChange}
           keyboardType="phone-pad"
@@ -219,6 +253,22 @@ export default function ClientChantierFormScreen({
           numberOfLines={4}
           style={[styles.input, styles.notesInput]}
         />
+
+        <Text variant="titleMedium" style={[styles.sectionTitle, styles.sectionTitleSpaced]}>
+          Photos chantier
+        </Text>
+        {CHANTIER_PHOTO_SLOTS.map((slot, index) => (
+          <TerrainPhotoInput
+            key={slot}
+            label={`Photo ${index + 1}`}
+            previewUri={chantierPhotos[slot]?.uri || null}
+            storageKey={chantierPhotos[slot]?.storageKey || null}
+            onPicked={({ uri, mimeType }) =>
+              setChantierPhotos((prev) => ({ ...prev, [slot]: { uri, mimeType } }))
+            }
+            onClear={() => setChantierPhotos((prev) => ({ ...prev, [slot]: null }))}
+          />
+        ))}
       </ScrollView>
 
       <FlowBackFab onPress={onBack} smallCountBelow={0} />

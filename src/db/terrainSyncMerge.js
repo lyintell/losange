@@ -73,7 +73,12 @@ export const applyTerrainPullPayload = async (pull = {}, { forceAll = false } = 
 
   await db.withTransactionAsync(async () => {
     if (pull.entreprise) {
-      await upsertRows(db, 'entreprises', [pull.entreprise]);
+      const localEntreprise = await db.getFirstAsync('SELECT * FROM entreprises WHERE id = ?;', [
+        pull.entreprise.id,
+      ]);
+      if (shouldApplyRemoteRow(localEntreprise, pull.entreprise)) {
+        await upsertRows(db, 'entreprises', [pull.entreprise]);
+      }
     }
     if (pull.profil) {
       await upsertRows(db, 'profils', [pull.profil]);
@@ -85,6 +90,30 @@ export const applyTerrainPullPayload = async (pull = {}, { forceAll = false } = 
 
   await mergeCatalogueFromPull(pull);
   await mergeTransactionalFromPull(pull, { forceAll });
+};
+
+/** Sync compte gratuit : entreprise et profil uniquement. */
+export const applyTerrainPullPayloadAccountOnly = async (pull = {}) => {
+  if (!pull) return;
+
+  const db = await ensureLocalDatabaseReady();
+
+  await db.withTransactionAsync(async () => {
+    if (pull.entreprise) {
+      const localEntreprise = await db.getFirstAsync('SELECT * FROM entreprises WHERE id = ?;', [
+        pull.entreprise.id,
+      ]);
+      if (shouldApplyRemoteRow(localEntreprise, pull.entreprise)) {
+        await upsertRows(db, 'entreprises', [pull.entreprise]);
+      }
+    }
+    if (pull.profil) {
+      await upsertRows(db, 'profils', [pull.profil]);
+    }
+    if (pull.profils?.length) {
+      await upsertRows(db, 'profils', pull.profils);
+    }
+  });
 };
 
 export const countLocalClientsForEntreprise = async (entrepriseId) => {

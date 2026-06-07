@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, Alert, AppState, Platform, StyleSheet, View } from 'react-native';
+import { Alert, AppState, Platform, StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
-import { Button, PaperProvider } from 'react-native-paper';
+import { PaperProvider } from 'react-native-paper';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import BottomNavButton from './src/components/terrain/BottomNavButton';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AdminScreen from './src/screens/web/AdminScreen';
 import ChantierDetails from './src/screens/ChantierDetails';
 import ListeChantiers from './src/screens/ListeChantiers';
@@ -14,6 +15,13 @@ import NouvelleDimensionScreen from './src/screens/NouvelleDimensionScreen';
 import PaveSaisieOneHand from './src/screens/PaveSaisieOneHand';
 import PlusScreen from './src/screens/PlusScreen';
 import ProfilScreen from './src/screens/ProfilScreen';
+import DatabaseScreen from './src/screens/DatabaseScreen';
+import ListeClientsScreen from './src/screens/ListeClientsScreen';
+import ListeMetiersScreen from './src/screens/ListeMetiersScreen';
+import RapportsScreen from './src/screens/RapportsScreen';
+import ClientDetailsScreen from './src/screens/ClientDetailsScreen';
+import ListeOuvragesScreen from './src/screens/ListeOuvragesScreen';
+import OuvrageDetailsScreen from './src/screens/OuvrageDetailsScreen';
 import SelecteurMetierOuvrage from './src/screens/SelecteurMetierOuvrage';
 import { loginMasterAdmin, logoutMasterAdmin, verifyMasterSession } from './src/auth/masterAdminAuth';
 import {
@@ -27,8 +35,16 @@ import {
 import { INACTIVE_ENTREPRISE_ERROR } from './src/db/terrainSync';
 import { initLocalDatabase } from './src/db/localDb';
 import { clearDraftDimensionFlow, getDraftDimensionFlow, setDraftUiStep, startDraftDimensionFlow, startDraftFromChantierEdit } from './src/db/mockData';
-import { deleteChantierLocal, ensureCatalogueLocal, finalizeDimensionDraftLocal, getLignesByChantierLocal, getReleveIdByChantierLocal } from './src/db/querries';
+import {
+  canCurrentUserModifyChantierLocal,
+  deleteChantierLocal,
+  ensureCatalogueLocal,
+  finalizeDimensionDraftLocal,
+  getLignesByChantierLocal,
+  getReleveIdByChantierLocal,
+} from './src/db/querries';
 import { ensureTerrainDeviceFromSession } from './src/db/terrainSync';
+import LosangeLogoLoader from './src/components/terrain/LosangeLogoLoader';
 import { appTheme, chantierColors } from './src/styles/theme';
 
 export default function App() {
@@ -40,20 +56,51 @@ export default function App() {
   const [entrepriseId, setEntrepriseId] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const dimensionFlowNavRef = useRef(null);
-  const [dimensionNavUi, setDimensionNavUi] = useState({ saveDisabled: true, saving: false });
+  const [dimensionNavUi, setDimensionNavUi] = useState({
+    saveDisabled: true,
+    saving: false,
+    primaryLabel: 'Enregistrer',
+    primaryIcon: 'content-save',
+  });
+  const [profilEditing, setProfilEditing] = useState(false);
+  const [profilIsAdmin, setProfilIsAdmin] = useState(false);
+  const [profilSaveRequestId, setProfilSaveRequestId] = useState(0);
+  const [canModifySelectedChantier, setCanModifySelectedChantier] = useState(false);
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [clientsListRefreshToken, setClientsListRefreshToken] = useState(0);
+  const [selectedOuvrage, setSelectedOuvrage] = useState(null);
+  const [ouvragesListRefreshToken, setOuvragesListRefreshToken] = useState(0);
+  const [clientEditRequestId, setClientEditRequestId] = useState(0);
+  const [ouvrageEditRequestId, setOuvrageEditRequestId] = useState(0);
   const bottomNavHeight = 84;
 
   const handleDimensionNavHandlersChange = useCallback((handlers) => {
     dimensionFlowNavRef.current = handlers;
     if (!handlers) {
-      setDimensionNavUi({ saveDisabled: true, saving: false });
+      setDimensionNavUi({
+        saveDisabled: true,
+        saving: false,
+        primaryLabel: 'Enregistrer',
+        primaryIcon: 'content-save',
+      });
       return;
     }
     setDimensionNavUi((prev) => {
-      if (prev.saveDisabled === handlers.saveDisabled && prev.saving === handlers.saving) {
+      const next = {
+        saveDisabled: handlers.saveDisabled,
+        saving: handlers.saving,
+        primaryLabel: handlers.primaryLabel ?? 'Enregistrer',
+        primaryIcon: handlers.primaryIcon ?? 'content-save',
+      };
+      if (
+        prev.saveDisabled === next.saveDisabled &&
+        prev.saving === next.saving &&
+        prev.primaryLabel === next.primaryLabel &&
+        prev.primaryIcon === next.primaryIcon
+      ) {
         return prev;
       }
-      return { saveDisabled: handlers.saveDisabled, saving: handlers.saving };
+      return next;
     });
   }, []);
 
@@ -75,7 +122,12 @@ export default function App() {
       clearDraftDimensionFlow();
       setSelection(null);
       dimensionFlowNavRef.current = null;
-      setDimensionNavUi({ saveDisabled: true, saving: false });
+      setDimensionNavUi({
+        saveDisabled: true,
+        saving: false,
+        primaryLabel: 'Enregistrer',
+        primaryIcon: 'content-save',
+      });
       setScreen('chantiers');
     },
     [entrepriseId]
@@ -91,7 +143,59 @@ export default function App() {
     screen === 'selecteurOuvrage' ||
     screen === 'saisieDimensions';
 
-  const isPlusNavActive = screen === 'plus' || screen === 'profil';
+  const isPlusNavActive =
+    screen === 'plus' ||
+    screen === 'profil' ||
+    screen === 'database' ||
+    screen === 'listeClients' ||
+    screen === 'listeMetiers' ||
+    screen === 'rapports' ||
+    screen === 'clientDetails' ||
+    screen === 'listeOuvrages' ||
+    screen === 'ouvrageDetails';
+  const isPlusHomeScreen = screen === 'plus';
+  const isPlusSubScreen = isPlusNavActive && !isPlusHomeScreen;
+  const isChantierDetailsScreen = screen === 'chantierDetails';
+  const isProfilScreen = screen === 'profil';
+  const isDatabaseScreen = screen === 'database';
+  const isListeClientsScreen = screen === 'listeClients';
+  const isListeMetiersScreen = screen === 'listeMetiers';
+  const isRapportsScreen = screen === 'rapports';
+  const isClientDetailsScreen = screen === 'clientDetails';
+  const isListeOuvragesScreen = screen === 'listeOuvrages';
+  const isOuvrageDetailsScreen = screen === 'ouvrageDetails';
+  const isPlusDetailScreen = isClientDetailsScreen || isOuvrageDetailsScreen;
+  const leftNavIsRetour = isPlusSubScreen || isChantierDetailsScreen;
+
+  useEffect(() => {
+    if (!isProfilScreen) {
+      setProfilEditing(false);
+    }
+  }, [isProfilScreen]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadChantierAccess = async () => {
+      if (!selectedChantier?.id) {
+        if (!cancelled) setCanModifySelectedChantier(false);
+        return;
+      }
+
+      try {
+        const allowed = await canCurrentUserModifyChantierLocal(selectedChantier.id);
+        if (!cancelled) setCanModifySelectedChantier(allowed);
+      } catch (error) {
+        console.error('Erreur verification acces chantier:', error);
+        if (!cancelled) setCanModifySelectedChantier(false);
+      }
+    };
+
+    loadChantierAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedChantier?.id, chantierListRefreshToken]);
 
   const handleForcedInactiveLogout = useCallback((message = INACTIVE_ENTREPRISE_ERROR) => {
     clearDraftDimensionFlow();
@@ -110,12 +214,10 @@ export default function App() {
 
     const intervalId = setInterval(async () => {
       try {
-        const { isProEntrepriseLocal, runTerrainSyncPushPull } = await import('./src/db/terrainSyncPro');
-        if (await isProEntrepriseLocal()) {
-          const result = await runTerrainSyncPushPull();
-          if (result.forcedLogout) {
-            handleForcedInactiveLogout(result.error);
-          }
+        const { runTerrainSyncPushOnly } = await import('./src/db/terrainSyncPro');
+        const result = await runTerrainSyncPushOnly();
+        if (result.forcedLogout) {
+          handleForcedInactiveLogout(result.error);
         }
       } catch (error) {
         console.warn('Sync periodique:', error);
@@ -212,7 +314,7 @@ export default function App() {
       return new Promise((resolve) => {
         Alert.alert(
           'Autre compte',
-          'Un AUTRE COMPTE etait connecté à cet appareil. Ses données seront effacées du téléphone.',
+          "Un AUTRE COMPTE était connecté à cet appareil. Ses données seront effacées du téléphone.",
           [
             { text: 'Non', style: 'cancel', onPress: () => resolve({ ok: false }) },
             {
@@ -252,7 +354,7 @@ export default function App() {
   };
 
   const confirmCancelDimensionFlow = () => {
-    Alert.alert('Annuler', 'Voulez-vous vraiment annuler tout?', [
+    Alert.alert('Annuler', 'Voulez-vous vraiment annuler tout ?', [
       { text: 'Non', style: 'cancel' },
       { text: 'Oui', style: 'destructive', onPress: handleCancelDimensionFlow },
     ]);
@@ -283,13 +385,28 @@ export default function App() {
   }, [handleForcedInactiveLogout]);
 
   const handleEditChantier = useCallback(async (chantier, lignes = []) => {
-    const resolvedLignes =
-      lignes.length > 0 ? lignes : (await getLignesByChantierLocal(chantier.id)) || [];
-    const releveId =
-      resolvedLignes[0]?.releve_id || (await getReleveIdByChantierLocal(chantier.id));
-    const draft = startDraftFromChantierEdit({ chantier, lignes: resolvedLignes, releveId });
-    setSelection(draft);
-    setScreen('nouvelleDimension');
+    if (!chantier?.id) return;
+
+    try {
+      if (!(await canCurrentUserModifyChantierLocal(chantier.id))) {
+        Alert.alert(
+          'Modification refusée',
+          "Vous ne pouvez pas modifier un chantier que vous n'avez pas pris."
+        );
+        return;
+      }
+
+      const resolvedLignes =
+        lignes.length > 0 ? lignes : (await getLignesByChantierLocal(chantier.id)) || [];
+      const releveId =
+        resolvedLignes[0]?.releve_id || (await getReleveIdByChantierLocal(chantier.id));
+      const draft = startDraftFromChantierEdit({ chantier, lignes: resolvedLignes, releveId });
+      setSelection(draft);
+      setScreen('nouvelleDimension');
+    } catch (error) {
+      console.error('Erreur ouverture modification chantier:', error);
+      Alert.alert('Erreur', error.message || "Impossible d'ouvrir la modification.");
+    }
   }, []);
 
   const handleDeleteChantier = useCallback(async (chantier) => {
@@ -299,24 +416,30 @@ export default function App() {
       clearDraftDimensionFlow();
       setSelection(null);
       dimensionFlowNavRef.current = null;
-      setDimensionNavUi({ saveDisabled: true, saving: false });
+      setDimensionNavUi({
+        saveDisabled: true,
+        saving: false,
+        primaryLabel: 'Enregistrer',
+        primaryIcon: 'content-save',
+      });
       setSelectedChantier(null);
       setScreen('chantiers');
     } catch (error) {
       console.error('Erreur suppression chantier:', error);
-      Alert.alert('Erreur', 'Impossible de supprimer ce chantier.');
+      Alert.alert('Erreur', error.message || 'Impossible de supprimer ce chantier.');
     }
   }, []);
 
   return (
     <SafeAreaProvider>
       <PaperProvider theme={appTheme}>
+        <GestureHandlerRootView style={styles.gestureRoot}>
         <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
           <View style={styles.container}>
             <View style={styles.screenContainer}>
               {!authReady && (
                 <View style={styles.webAuthLoading}>
-                  <ActivityIndicator size="large" color={chantierColors.primary} />
+                  <LosangeLogoLoader size="large" />
                   <Text style={styles.webAuthLoadingText}>Verification de la session...</Text>
                 </View>
               )}
@@ -374,14 +497,86 @@ export default function App() {
                 <PlusScreen
                   bottomOffset={bottomNavHeight}
                   onProfilPress={() => setScreen('profil')}
+                  onDatabasePress={() => setScreen('database')}
+                  onRapportsPress={() => setScreen('rapports')}
                   onLogout={handleMobileLogout}
                   onSyncFromSupabase={handleSyncFromSupabase}
                 />
               )}
+              {isLoggedIn && Platform.OS !== 'web' && screen === 'rapports' && (
+                <RapportsScreen
+                  entrepriseId={entrepriseId}
+                  refreshToken={chantierListRefreshToken}
+                />
+              )}
+              {isLoggedIn && Platform.OS !== 'web' && screen === 'database' && (
+                <DatabaseScreen
+                  onListeClientsPress={() => setScreen('listeClients')}
+                  onListeMetiersPress={() => setScreen('listeMetiers')}
+                  onListeOuvragesPress={() => setScreen('listeOuvrages')}
+                />
+              )}
+              {isLoggedIn && Platform.OS !== 'web' && screen === 'listeClients' && (
+                <ListeClientsScreen
+                  entrepriseId={entrepriseId}
+                  refreshToken={clientsListRefreshToken}
+                  onClientPress={(client) => {
+                    setSelectedClient(client);
+                    setScreen('clientDetails');
+                  }}
+                />
+              )}
+              {isLoggedIn && Platform.OS !== 'web' && screen === 'listeMetiers' && (
+                <ListeMetiersScreen entrepriseId={entrepriseId} />
+              )}
+              {isLoggedIn && Platform.OS !== 'web' && screen === 'clientDetails' && (
+                <ClientDetailsScreen
+                  clientId={selectedClient?.id}
+                  editRequestId={clientEditRequestId}
+                  onClientUpdated={(updatedClient) => {
+                    setSelectedClient(updatedClient);
+                    setClientsListRefreshToken((value) => value + 1);
+                  }}
+                  onClientDeleted={() => {
+                    setSelectedClient(null);
+                    setClientsListRefreshToken((value) => value + 1);
+                    setScreen('listeClients');
+                  }}
+                />
+              )}
+              {isLoggedIn && Platform.OS !== 'web' && screen === 'listeOuvrages' && (
+                <ListeOuvragesScreen
+                  entrepriseId={entrepriseId}
+                  refreshToken={ouvragesListRefreshToken}
+                  onOuvragePress={(ouvrage) => {
+                    setSelectedOuvrage(ouvrage);
+                    setScreen('ouvrageDetails');
+                  }}
+                />
+              )}
+              {isLoggedIn && Platform.OS !== 'web' && screen === 'ouvrageDetails' && (
+                <OuvrageDetailsScreen
+                  ouvrageId={selectedOuvrage?.id}
+                  editRequestId={ouvrageEditRequestId}
+                  onOuvrageUpdated={(updatedOuvrage) => {
+                    setSelectedOuvrage(updatedOuvrage);
+                    setOuvragesListRefreshToken((value) => value + 1);
+                  }}
+                  onOuvrageDeleted={() => {
+                    setSelectedOuvrage(null);
+                    setOuvragesListRefreshToken((value) => value + 1);
+                    setScreen('listeOuvrages');
+                  }}
+                />
+              )}
               {isLoggedIn && Platform.OS !== 'web' && screen === 'profil' && (
                 <ProfilScreen
-                  bottomOffset={bottomNavHeight}
-                  onBack={() => setScreen('plus')}
+                  entrepriseId={entrepriseId}
+                  editing={profilEditing}
+                  saveRequestId={profilSaveRequestId}
+                  onAdminStatusChange={setProfilIsAdmin}
+                  onEditingChange={setProfilEditing}
+                  onSaveComplete={() => setProfilSaveRequestId(0)}
                 />
               )}
               {isLoggedIn && Platform.OS !== 'web' && screen === 'chantierDetails' && (
@@ -389,7 +584,6 @@ export default function App() {
                   chantier={selectedChantier}
                   entrepriseId={entrepriseId}
                   bottomOffset={bottomNavHeight}
-                  onModify={handleEditChantier}
                   onChantierUpdated={handleChantierUpdated}
                 />
               )}
@@ -418,17 +612,25 @@ export default function App() {
 
             {isLoggedIn && Platform.OS !== 'web' && (
               <View style={styles.navBottom}>
-                <Button
-                  mode={isDimensionFlow || isChantiersNavActive ? 'contained' : 'outlined'}
-                  icon={({ size, color }) => (
-                    <MaterialCommunityIcons
-                      name={isDimensionFlow ? 'content-save' : 'briefcase'}
-                      size={size}
-                      color={color}
-                    />
-                  )}
-                  style={styles.navButton}
-                  contentStyle={styles.navButtonContent}
+                <BottomNavButton
+                  mode={
+                    isDimensionFlow || leftNavIsRetour || isChantiersNavActive
+                      ? 'contained'
+                      : 'outlined'
+                  }
+                  buttonColor={
+                    leftNavIsRetour && !isDimensionFlow ? '#9CA3AF' : undefined
+                  }
+                  textColor={
+                    leftNavIsRetour && !isDimensionFlow ? '#FFFFFF' : undefined
+                  }
+                  icon={
+                    isDimensionFlow
+                      ? dimensionNavUi.primaryIcon
+                      : leftNavIsRetour
+                        ? 'arrow-left'
+                        : 'briefcase'
+                  }
                   loading={isDimensionFlow && dimensionNavUi.saving}
                   disabled={isDimensionFlow && dimensionNavUi.saveDisabled}
                   onPress={() => {
@@ -436,44 +638,141 @@ export default function App() {
                       dimensionFlowNavRef.current?.onSave?.();
                       return;
                     }
+                    if (isOuvrageDetailsScreen) {
+                      setScreen('listeOuvrages');
+                      return;
+                    }
+                    if (isListeOuvragesScreen) {
+                      setScreen('database');
+                      return;
+                    }
+                    if (isClientDetailsScreen) {
+                      setScreen('listeClients');
+                      return;
+                    }
+                    if (isListeClientsScreen) {
+                      setScreen('database');
+                      return;
+                    }
+                    if (isListeMetiersScreen) {
+                      setScreen('database');
+                      return;
+                    }
+                    if (isRapportsScreen) {
+                      setScreen('plus');
+                      return;
+                    }
+                    if (isDatabaseScreen) {
+                      setScreen('plus');
+                      return;
+                    }
+                    if (isProfilScreen) {
+                      setProfilEditing(false);
+                      setScreen('plus');
+                      return;
+                    }
+                    if (isChantierDetailsScreen) {
+                      setScreen('chantiers');
+                      return;
+                    }
                     setScreen('chantiers');
                   }}
                 >
-                  {isDimensionFlow ? 'Enregistrer' : 'Chantiers'}
-                </Button>
-                <Button
-                  mode={isDimensionFlow ? 'outlined' : isPlusNavActive ? 'contained' : 'outlined'}
-                  icon={({ size, color }) => (
-                    <MaterialCommunityIcons
-                      name={isDimensionFlow ? 'close' : 'dots-horizontal'}
-                      size={size}
-                      color={color}
-                    />
-                  )}
-                  style={styles.navButton}
-                  contentStyle={styles.navButtonContent}
+                  {isDimensionFlow
+                    ? dimensionNavUi.primaryLabel
+                    : isPlusSubScreen
+                      ? 'Retour'
+                      : isChantierDetailsScreen
+                        ? 'Retour aux chantiers'
+                        : 'Chantiers'}
+                </BottomNavButton>
+                <BottomNavButton
+                  mode={
+                    isDimensionFlow
+                      ? 'outlined'
+                      : isPlusNavActive ||
+                          isPlusDetailScreen ||
+                          (isChantierDetailsScreen && canModifySelectedChantier) ||
+                          (isProfilScreen && profilIsAdmin)
+                        ? 'contained'
+                        : 'outlined'
+                  }
+                  icon={
+                    isDimensionFlow
+                      ? 'close'
+                      : isProfilScreen && profilIsAdmin
+                        ? profilEditing
+                          ? 'content-save'
+                          : 'pencil'
+                        : isPlusDetailScreen || (isChantierDetailsScreen && canModifySelectedChantier)
+                          ? 'pencil'
+                          : 'dots-horizontal'
+                  }
                   textColor={isDimensionFlow ? chantierColors.danger : undefined}
                   onPress={() => {
                     if (isDimensionFlow) {
+                      const cancelEdit = dimensionFlowNavRef.current?.onCancel;
+                      if (cancelEdit) {
+                        cancelEdit();
+                        return;
+                      }
                       confirmCancelDimensionFlow();
+                      return;
+                    }
+                    if (isProfilScreen && profilIsAdmin) {
+                      if (profilEditing) {
+                        setProfilSaveRequestId((value) => value + 1);
+                      } else {
+                        setProfilEditing(true);
+                      }
+                      return;
+                    }
+                    if (isChantierDetailsScreen) {
+                      if (selectedChantier && canModifySelectedChantier) {
+                        handleEditChantier(selectedChantier);
+                      }
+                      return;
+                    }
+                    if (isClientDetailsScreen) {
+                      setClientEditRequestId((value) => value + 1);
+                      return;
+                    }
+                    if (isOuvrageDetailsScreen) {
+                      setOuvrageEditRequestId((value) => value + 1);
                       return;
                     }
                     setScreen('plus');
                   }}
                 >
-                  {isDimensionFlow ? 'Annuler' : 'Plus'}
-                </Button>
+                  {isDimensionFlow
+                    ? 'Annuler'
+                    : isProfilScreen && profilIsAdmin
+                      ? profilEditing
+                        ? 'Enregistrer'
+                        : 'Modifier'
+                      : isPlusDetailScreen
+                        ? 'Modifier'
+                        : isChantierDetailsScreen
+                          ? canModifySelectedChantier
+                            ? 'Modifier'
+                            : 'Plus'
+                          : 'Plus'}
+                </BottomNavButton>
               </View>
             )}
             <StatusBar style="dark" />
           </View>
         </SafeAreaView>
+        </GestureHandlerRootView>
       </PaperProvider>
     </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
+  gestureRoot: {
+    flex: 1,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: chantierColors.background,
@@ -498,20 +797,15 @@ const styles = StyleSheet.create({
   navBottom: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 6,
+    alignItems: 'stretch',
+    gap: 8,
     backgroundColor: chantierColors.background,
     borderTopWidth: 1,
     borderTopColor: chantierColors.border,
-    padding: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
     marginHorizontal: 0,
     marginBottom: 0,
-    minHeight: 88,
-  },
-  navButton: {
-    flex: 1,
-  },
-  navButtonContent: {
-    minHeight: 64,
+    minHeight: 96,
   },
 });

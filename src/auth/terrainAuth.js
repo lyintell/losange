@@ -11,7 +11,9 @@ import {
   isLocalTerrainDataEmpty,
   isSameTerrainAccountRegisteredLocally,
   loginTerrainOfflineLocal,
+  enforceEntrepriseExpiryLocal,
   markEntrepriseInactiveLocal,
+  recordProfilFirstLoginLocal,
   revokeTerrainSessionIfEntrepriseInactive,
   saveTerrainSessionLocal,
   syncTerrainBootstrapLocal,
@@ -41,7 +43,7 @@ const readFunctionErrorMessage = async (error, data) => {
 
   const rawMessage = String(error?.message || '');
   if (rawMessage.includes('non-2xx')) {
-    return 'Connexion refusee. Verifiez identifiant/mot de passe et la configuration Supabase.';
+    return 'Connexion refusée. Vérifiez identifiant/mot de passe et la configuration Supabase.';
   }
 
   return rawMessage || 'Erreur de connexion.';
@@ -74,7 +76,7 @@ export const loginTerrain = async (identifiant, motDePasse, { wipeLocal = false 
   if (!isSupabaseConfigured()) {
     return {
       ok: false,
-      error: 'Supabase non configure. Verifiez EXPO_PUBLIC_SUPABASE_URL et EXPO_PUBLIC_SUPABASE_ANON_KEY.',
+      error: 'Supabase non configuré. Vérifiez EXPO_PUBLIC_SUPABASE_URL et EXPO_PUBLIC_SUPABASE_ANON_KEY.',
     };
   }
 
@@ -110,7 +112,7 @@ export const loginTerrain = async (identifiant, motDePasse, { wipeLocal = false 
         return {
           ok: false,
           error:
-            'Catalogue metiers/unites absent. Connectez-vous en ligne pour synchroniser depuis Supabase.',
+            'Catalogue métiers/unités absent. Connectez-vous en ligne pour synchroniser depuis Supabase.',
         };
       }
 
@@ -130,7 +132,7 @@ export const loginTerrain = async (identifiant, motDePasse, { wipeLocal = false 
   }
 
   if (!data?.ok || !data?.payload?.profil || !data?.payload?.entreprise) {
-    return { ok: false, error: data?.error || 'Authentification refusee.' };
+    return { ok: false, error: data?.error || 'Authentification refusée.' };
   }
 
   if (Number(data.payload.entreprise.ind_active) !== 1) {
@@ -141,6 +143,7 @@ export const loginTerrain = async (identifiant, motDePasse, { wipeLocal = false 
 
   try {
     await syncTerrainBootstrapLocal(data.payload);
+    await recordProfilFirstLoginLocal(data.payload.profil.id);
     await saveTerrainSessionLocal({
       profilId: data.payload.profil.id,
       entrepriseId: data.payload.entreprise.id,
@@ -163,7 +166,7 @@ export const loginTerrain = async (identifiant, motDePasse, { wipeLocal = false 
 
     if (remoteClientCount > 0 && localClientCount === 0) {
       throw new Error(
-        'Les clients Supabase n ont pas pu etre enregistres localement. Verifiez les migrations SQLite (supprime_le, notes).'
+        "Les clients Supabase n'ont pas pu être enregistrés localement. Vérifiez les migrations SQLite (supprime_le, notes)."
       );
     }
   } catch (syncError) {
@@ -171,19 +174,19 @@ export const loginTerrain = async (identifiant, motDePasse, { wipeLocal = false 
     await clearTerrainSessionLocal();
     return {
       ok: false,
-      error: syncError.message || 'Impossible de stocker les donnees localement.',
+      error: syncError.message || 'Impossible de stocker les données localement.',
     };
   }
 
-  if (Number(data.payload.entreprise.ind_pro) === 1) {
-    const syncResult = await runTerrainSyncOnLogin();
-    if (syncResult.forcedLogout) {
-      return { ok: false, error: syncResult.error || INACTIVE_ENTREPRISE_ERROR };
-    }
-    if (!syncResult.ok) {
-      console.warn('Sync Pro apres connexion:', syncResult.error);
-    }
-  } else if (remoteClientCount === 0 && (data.payload.chantiers?.length ?? 0) > 0) {
+  const syncResult = await runTerrainSyncOnLogin();
+  if (syncResult.forcedLogout) {
+    return { ok: false, error: syncResult.error || INACTIVE_ENTREPRISE_ERROR };
+  }
+  if (!syncResult.ok) {
+    console.warn('Sync apres connexion:', syncResult.error);
+  }
+
+  if (Number(data.payload.entreprise.ind_pro) !== 1 && remoteClientCount === 0 && (data.payload.chantiers?.length ?? 0) > 0) {
     console.warn(
       'Chantiers Supabase sans clients locaux: verifiez entreprise_id des clients dans Supabase.'
     );
@@ -275,6 +278,12 @@ export const ensureTerrainSessionAllowed = async ({ verifyRemote = false } = {})
     if (entreprise) {
       const db = await ensureLocalDatabaseReady();
       await upsertRows(db, 'entreprises', [entreprise]);
+    }
+
+    const expiry = await enforceEntrepriseExpiryLocal(session.entreprise_id);
+    if (expiry.expired) {
+      await clearTerrainSessionLocal();
+      return { ok: false, forcedLogout: true, error: INACTIVE_ENTREPRISE_ERROR };
     }
 
     return { ok: true, entrepriseId: session.entreprise_id };

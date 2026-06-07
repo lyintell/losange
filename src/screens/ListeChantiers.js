@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated, Easing, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Alert, Animated, Easing, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { Card, FAB, Searchbar, Text } from 'react-native-paper';
 import {
   FAB_SIZES,
@@ -8,7 +8,8 @@ import {
   getFabColumnPadding,
   getMainFabBottom,
 } from '../components/terrain/TerrainFlowFabs';
-import { getChantiersWithClientLocal, updateChantierStatusLocal } from '../db/querries';
+import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
+import { canCurrentUserModifyChantierLocal, getChantiersWithClientLocal, updateChantierStatusLocal } from '../db/querries';
 import { chantierColors } from '../styles/theme';
 import {
   getChantierStatusColor,
@@ -18,6 +19,27 @@ import {
 } from '../utils/chantierStatus';
 
 const MULTI_PRESS_DELAY_MS = 350;
+
+const formatClientPhoneLine = (name, phone) => {
+  const parts = [name, phone].filter(Boolean);
+  return parts.length ? parts.join(' / ') : 'Non renseigné';
+};
+
+const formatPriseLe = (dateValue) => {
+  if (!dateValue) return '';
+  const normalized = String(dateValue).includes('T')
+    ? dateValue
+    : String(dateValue).replace(' ', 'T');
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
 
 function StatutBadge({ statut }) {
   const bgColor = getChantierStatusColor(statut);
@@ -96,6 +118,13 @@ export default function ListeChantiers({
     if (!chantier?.id || chantier.status === nextStatus) return;
 
     try {
+      if (!(await canCurrentUserModifyChantierLocal(chantier.id))) {
+        Alert.alert(
+          'Modification refusée',
+          "Vous ne pouvez pas modifier un chantier que vous n'avez pas pris."
+        );
+        return;
+      }
       await updateChantierStatusLocal(chantier.id, nextStatus);
       setChantiers((prev) =>
         prev.map((item) => (item.id === chantier.id ? { ...item, status: nextStatus } : item))
@@ -169,24 +198,33 @@ export default function ListeChantiers({
                 <Text variant="titleMedium" style={styles.chantierName}>
                   {item.nom}
                 </Text>
-                <Text variant="bodyLarge" style={styles.clientName}>
-                  Client: {item.client_nom || 'Non renseigne'}
-                </Text>
-                <View style={styles.badgeRow}>
-                  <StatutBadge statut={item.status || 'D'} />
+                <View style={styles.clientRow}>
+                  <Text variant="bodyLarge" style={styles.clientLine} numberOfLines={1}>
+                    {formatClientPhoneLine(item.client_nom, item.client_telephone_1)}
+                  </Text>
+                  <View style={styles.badgeColumn}>
+                    <StatutBadge statut={item.status || 'D'} />
+                    {item.prise_le ? (
+                      <Text style={styles.priseLeText}>{formatPriseLe(item.prise_le)}</Text>
+                    ) : null}
+                  </View>
                 </View>
               </Card.Content>
             </Card>
           </Pressable>
         )}
         ListEmptyComponent={
-          !loading ? (
+          loading ? (
+            <View style={styles.loadingState}>
+              <LosangeLogoLoader size="large" />
+            </View>
+          ) : (
             <View style={styles.emptyState}>
               <Text variant="titleMedium" style={styles.emptyText}>
                 Aucun chantier pour le moment.
               </Text>
             </View>
-          ) : null
+          )
         }
       />
 
@@ -270,13 +308,26 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 6,
   },
-  clientName: {
-    color: chantierColors.text,
-    marginBottom: 10,
-  },
-  badgeRow: {
+  clientRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-start',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  clientLine: {
+    flex: 1,
+    color: chantierColors.text,
+  },
+  badgeColumn: {
+    alignItems: 'flex-end',
+    gap: 4,
+    maxWidth: '46%',
+  },
+  priseLeText: {
+    color: chantierColors.muted,
+    fontSize: 11,
+    lineHeight: 14,
+    textAlign: 'right',
   },
   badge: {
     paddingHorizontal: 12,
@@ -286,6 +337,10 @@ const styles = StyleSheet.create({
   badgeText: {
     color: '#FFFFFF',
     fontWeight: '700',
+  },
+  loadingState: {
+    marginTop: 48,
+    alignItems: 'center',
   },
   emptyState: {
     marginTop: 48,

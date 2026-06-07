@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { chantierColors } from '../../styles/theme';
 import {
   formatLigneMesures,
@@ -24,6 +25,7 @@ export default function LigneReleveCard({
 }) {
   const nomUnite = getLigneNomUnite(ligne);
   const hasNote = Boolean(ligne?.note?.trim());
+  const hasPhoto = Boolean(ligne?.photo);
   const isDetails = variant === 'details';
   const isRecap = variant === 'recap';
   const isDetailsLayout = isDetails || isRecap;
@@ -63,13 +65,23 @@ export default function LigneReleveCard({
   const prixUnitaireLabel = isRecap
     ? `P.U. ${formatMontant(getLignePrixUnitaireApplique(ligne))}`
     : `P.U. ${formatMontant(getLignePrixUnitaireAffichage(ligne))}`;
-  const showPrixUnitaire = isRecap || (isDetails && showPrices);
+  const showPrixUnitaire = showPrices && (isRecap || isDetails);
 
   const cardBody = (
     <>
       {completed ? (
         <View style={styles.watermarkWrap} pointerEvents="none">
           <Text style={styles.watermarkOk}>OK</Text>
+        </View>
+      ) : null}
+      {isDetails && hasPhoto ? (
+        <View style={styles.watermarkWrap} pointerEvents="none">
+          <MaterialCommunityIcons
+            name="image"
+            size={64}
+            color={chantierColors.primary}
+            style={styles.watermarkPhotoIcon}
+          />
         </View>
       ) : null}
       <View style={styles.content}>
@@ -138,6 +150,9 @@ const styles = StyleSheet.create({
     fontSize: 64,
     fontWeight: '900',
     letterSpacing: 4,
+  },
+  watermarkPhotoIcon: {
+    opacity: 0.22,
   },
   content: {
     gap: 6,

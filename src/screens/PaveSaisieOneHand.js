@@ -1,23 +1,35 @@
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
+import React, {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
-import { Button, Modal, Portal, Text, TextInput } from 'react-native-paper';
+import { Modal, Portal, Text, TextInput } from 'react-native-paper';
+import MobileButton from '../components/terrain/MobileButton';
+import PaveMetaButton from '../components/terrain/PaveMetaButton';
 import PaveNumerique from '../components/terrain/PaveNumerique';
 import { getFabActionZoneHeight } from '../components/terrain/TerrainFlowFabs';
-import { insertLigneReleveLocal } from '../db/querries';
+import { getLoggedInProfilViewLocal, insertLigneReleveLocal, setLigneRelevePhotoLocal } from '../db/querries';
+import { pickTerrainImage } from '../utils/terrainImagePicker';
 import { chantierColors } from '../styles/theme';
+import { hidesPriceUiForRole } from '../utils/terrainAccess';
 import {
   computeQuantiteLigneReleve,
   getRequiredCotesFromFormula,
 } from '../utils/ligneReleveCalcul';
-import { formatQuantite, formatMontant } from '../utils/formatLigneMesures';
+import { formatQuantite } from '../utils/formatLigneMesures';
 
-const FIELD_SHORT = {
-  largeur: 'l',
-  hauteur: 'h',
-  nombre: 'n',
+const FIELD_LABEL = {
+  largeur: 'Largeur',
+  hauteur: 'Hauteur',
+  nombre: 'Nombre',
 };
 
-const COTE_KEY_HEIGHT = 42;
+const COTE_KEY_HEIGHT = 60;
 const COTE_INACTIVE_BG = '#4B5563';
 const COTE_INACTIVE_BORDER = '#3F4654';
 
@@ -33,6 +45,7 @@ export default forwardRef(function PaveSaisieOneHand(
     onSaveLine,
     onValidityChange,
     hideInternalSaveButton = false,
+    hidePriceUi = false,
     bottomOffset = 0,
     initialValues = null,
     fabSmallCountBelow = 1,
@@ -68,18 +81,22 @@ export default forwardRef(function PaveSaisieOneHand(
       nombre:
         initialValues?.nombre != null && initialValues.nombre !== ''
           ? String(initialValues.nombre)
-          : '0',
+          : '',
     }),
     [initialValues]
   );
 
   const [focusIndex, setFocusIndex] = useState(0);
+  const replaceOnNextKeyRef = useRef(true);
   const [form, setForm] = useState(buildInitialForm);
   const [note, setNote] = useState(initialValues?.note || '');
   const [noteDraft, setNoteDraft] = useState('');
   const [notesModalVisible, setNotesModalVisible] = useState(false);
   const [prixUnitaireDraft, setPrixUnitaireDraft] = useState('');
   const [prixModalVisible, setPrixModalVisible] = useState(false);
+  const [photoPendingUri, setPhotoPendingUri] = useState(initialValues?.photo_pending_uri || null);
+  const [photoMimeType, setPhotoMimeType] = useState(initialValues?.photo_mime_type || null);
+  const [existingPhotoKey, setExistingPhotoKey] = useState(initialValues?.photo || null);
   const [prixUnitaireAppliqueState, setPrixUnitaireAppliqueState] = useState(
     () =>
       initialValues?.prix_unitaire_applique != null
@@ -87,6 +104,31 @@ export default forwardRef(function PaveSaisieOneHand(
         : Number(prixUnitaireApplique) || 0
   );
   const [saving, setSaving] = useState(false);
+  const [resolvedHidePriceUi, setResolvedHidePriceUi] = useState(hidePriceUi);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPriceAccess = async () => {
+      if (hidePriceUi) {
+        if (!cancelled) setResolvedHidePriceUi(true);
+        return;
+      }
+
+      try {
+        const profil = await getLoggedInProfilViewLocal();
+        if (!cancelled) setResolvedHidePriceUi(hidesPriceUiForRole(profil?.role));
+      } catch (error) {
+        console.error('Erreur chargement acces prix:', error);
+        if (!cancelled) setResolvedHidePriceUi(false);
+      }
+    };
+
+    loadPriceAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, [hidePriceUi]);
 
   useEffect(() => {
     setPrixUnitaireAppliqueState(
@@ -98,12 +140,16 @@ export default forwardRef(function PaveSaisieOneHand(
 
   useEffect(() => {
     setFocusIndex(0);
+    replaceOnNextKeyRef.current = true;
   }, [champs.join('|')]);
 
   const focusField = champs[focusIndex] || champs[0];
 
   const selectField = (index) => {
+    const field = champs[index];
+    if (!field) return;
     setFocusIndex(index);
+    replaceOnNextKeyRef.current = true;
   };
 
   const buildPayloadIfValid = useCallback(() => {
@@ -139,10 +185,19 @@ export default forwardRef(function PaveSaisieOneHand(
       quantite,
       prixUnitaireApplique: prixUnitaireAppliqueState,
       note: note.trim() || null,
+      photo_pending_uri: photoPendingUri,
+      photo_mime_type: photoMimeType,
+      photo: photoPendingUri ? null : existingPhotoKey,
     };
-  }, [form, isDimension, uniteFormule, requiredCotes, prixUnitaireAppliqueState, note]);
+  }, [form, isDimension, uniteFormule, requiredCotes, prixUnitaireAppliqueState, note, photoPendingUri, photoMimeType, existingPhotoKey]);
 
   const isFormComplete = Boolean(buildPayloadIfValid());
+
+  useEffect(() => {
+    setPhotoPendingUri(initialValues?.photo_pending_uri || null);
+    setPhotoMimeType(initialValues?.photo_mime_type || null);
+    setExistingPhotoKey(initialValues?.photo || null);
+  }, [initialValues]);
 
   useEffect(() => {
     onValidityChange?.(isFormComplete);
@@ -166,7 +221,13 @@ export default forwardRef(function PaveSaisieOneHand(
   const handleKeyPress = (value) => {
     if (!focusField) return;
     if (value === 'Effacer') {
+      replaceOnNextKeyRef.current = false;
       setForm((prev) => ({ ...prev, [focusField]: prev[focusField].slice(0, -1) }));
+      return;
+    }
+    if (replaceOnNextKeyRef.current) {
+      replaceOnNextKeyRef.current = false;
+      setForm((prev) => ({ ...prev, [focusField]: value }));
       return;
     }
     if (value === '.' && form[focusField].includes('.')) return;
@@ -175,14 +236,14 @@ export default forwardRef(function PaveSaisieOneHand(
 
   const handleSaveLine = async ({ silent = false } = {}) => {
     if (!onSaveLine && (!releveId || !ouvrageUniteId)) {
-      if (!silent) Alert.alert('Contexte incomplet', 'Le releve ou l ouvrage est manquant.');
+      if (!silent) Alert.alert('Contexte incomplet', "Le relevé ou l'ouvrage est manquant.");
       return false;
     }
 
     const payload = buildPayloadIfValid();
     if (!payload) {
       if (!silent) {
-        Alert.alert('Valeurs invalides', 'Renseignez toutes les cotes requises pour cette unite.');
+        Alert.alert('Valeurs invalides', 'Renseignez toutes les cotes requises pour cette unité.');
       }
       return false;
     }
@@ -192,14 +253,21 @@ export default forwardRef(function PaveSaisieOneHand(
       if (onSaveLine) {
         await onSaveLine(payload);
       } else {
-        await insertLigneReleveLocal(releveId, ouvrageUniteId, payload);
+        const ligneId = await insertLigneReleveLocal(releveId, ouvrageUniteId, payload);
+        if (photoPendingUri) {
+          await setLigneRelevePhotoLocal(ligneId, photoPendingUri, { mimeType: photoMimeType });
+        }
         onSaved?.();
       }
 
-      setForm({ largeur: '', hauteur: '', nombre: '0' });
+      setForm({ largeur: '', hauteur: '', nombre: '' });
       setNote('');
+      setPhotoPendingUri(null);
+      setPhotoMimeType(null);
+      setExistingPhotoKey(null);
       setPrixUnitaireAppliqueState(Number(prixUnitaireApplique) || 0);
       setFocusIndex(0);
+      replaceOnNextKeyRef.current = true;
       return true;
     } catch (error) {
       console.error('Erreur insertion ligne releve:', error);
@@ -236,14 +304,6 @@ export default forwardRef(function PaveSaisieOneHand(
     : quantitePreview;
   const quantiteLabel = `Qté =  ${formatQuantite(quantiteAffichage)}${nomUnite ? ` ${nomUnite}` : ''}`;
 
-  const montantPreview = useMemo(() => {
-    const quantite = Number(quantitePreview) || 0;
-    const prix = Number(prixUnitaireAppliqueState) || 0;
-    return Math.round(quantite * prix * 100) / 100;
-  }, [quantitePreview, prixUnitaireAppliqueState]);
-
-  const montantLabel = `Montant = ${formatMontant(montantPreview)}`;
-
   const openNotesModal = () => {
     setNoteDraft(note);
     setNotesModalVisible(true);
@@ -269,6 +329,15 @@ export default forwardRef(function PaveSaisieOneHand(
     setPrixModalVisible(false);
   };
 
+  const handlePickPhoto = async () => {
+    const picked = await pickTerrainImage();
+    if (picked?.uri) {
+      setPhotoPendingUri(picked.uri);
+      setPhotoMimeType(picked.mimeType);
+      setExistingPhotoKey(null);
+    }
+  };
+
   const renderPaveKey = (field, index) => {
     const isActive = focusIndex === index;
     const value = chipDisplayValue(field, index);
@@ -279,8 +348,13 @@ export default forwardRef(function PaveSaisieOneHand(
         onPress={() => selectField(index)}
         style={[styles.paveKey, isActive && styles.paveKeyActive]}
       >
-        <Text style={[styles.paveKeyLetter, isActive && styles.paveKeyLetterActive]}>
-          {FIELD_SHORT[field]}
+        <Text
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.8}
+          style={[styles.paveKeyLabel, isActive && styles.paveKeyLabelActive]}
+        >
+          {FIELD_LABEL[field]}
         </Text>
         <Text style={[styles.paveKeyValue, isActive && styles.paveKeyValueActive]}>{value || '0'}</Text>
       </Pressable>
@@ -307,12 +381,12 @@ export default forwardRef(function PaveSaisieOneHand(
           style={styles.notesInput}
         />
         <View style={styles.notesModalActions}>
-          <Button mode="outlined" onPress={() => setNotesModalVisible(false)}>
+          <MobileButton mode="outlined" onPress={() => setNotesModalVisible(false)}>
             Annuler
-          </Button>
-          <Button mode="contained" onPress={saveNotes}>
+          </MobileButton>
+          <MobileButton mode="contained" onPress={saveNotes}>
             Enregistrer
-          </Button>
+          </MobileButton>
         </View>
       </Modal>
     </Portal>
@@ -326,7 +400,7 @@ export default forwardRef(function PaveSaisieOneHand(
         contentContainerStyle={styles.notesModal}
       >
         <Text variant="titleLarge" style={styles.notesModalTitle}>
-          Prix unitaire applique
+          Prix unitaire appliqué
         </Text>
         <TextInput
           mode="outlined"
@@ -338,12 +412,12 @@ export default forwardRef(function PaveSaisieOneHand(
           right={<TextInput.Affix text="F" />}
         />
         <View style={styles.notesModalActions}>
-          <Button mode="outlined" onPress={() => setPrixModalVisible(false)}>
+          <MobileButton mode="outlined" onPress={() => setPrixModalVisible(false)}>
             Annuler
-          </Button>
-          <Button mode="contained" onPress={savePrix}>
+          </MobileButton>
+          <MobileButton mode="contained" onPress={savePrix}>
             Enregistrer
-          </Button>
+          </MobileButton>
         </View>
       </Modal>
     </Portal>
@@ -353,38 +427,25 @@ export default forwardRef(function PaveSaisieOneHand(
     <View style={styles.bottomPanel}>
       <View style={styles.paveGrid}>{champs.map((field, index) => renderPaveKey(field, index))}</View>
       <View style={styles.metaGrid}>
-        <View style={styles.metaColumn}>
-          <Button
-            mode={note ? 'contained-tonal' : 'outlined'}
-            icon="note-text-outline"
-            onPress={openNotesModal}
-            style={styles.metaButton}
-            contentStyle={styles.paveKeyContent}
-            labelStyle={styles.notesKeyLabel}
-            buttonColor={note ? '#E8F4FD' : chantierColors.surface}
-            textColor={note ? chantierColors.primary : chantierColors.text}
-          >
-            Notes
-          </Button>
-          <Text style={styles.quantiteLine}>{quantiteLabel}</Text>
-        </View>
-        <View style={styles.metaColumn}>
-          <Button
-            mode="outlined"
-            icon="currency-usd"
-            onPress={openPrixModal}
-            style={styles.metaButton}
-            contentStyle={styles.paveKeyContent}
-            labelStyle={styles.notesKeyLabel}
-            buttonColor={chantierColors.surface}
-            textColor={chantierColors.text}
-          >
-            Prix
-          </Button>
-          <Text style={styles.prixLine}>{formatMontant(prixUnitaireAppliqueState)}</Text>
-        </View>
+        <PaveMetaButton
+          icon="note-text-outline"
+          onPress={openNotesModal}
+          active={Boolean(note)}
+          iconOnly
+          style={styles.metaButtonIcon}
+        />
+        {resolvedHidePriceUi ? null : (
+          <PaveMetaButton icon="currency-usd" onPress={openPrixModal} iconOnly style={styles.metaButtonIcon} />
+        )}
+        <PaveMetaButton
+          icon="camera"
+          onPress={handlePickPhoto}
+          active={Boolean(photoPendingUri || existingPhotoKey)}
+          iconOnly
+          style={styles.metaButtonIcon}
+        />
       </View>
-      <Text style={styles.montantLine}>{montantLabel}</Text>
+      <Text style={styles.quantiteLine}>{quantiteLabel}</Text>
     </View>
   );
 
@@ -455,11 +516,13 @@ const styles = StyleSheet.create({
   paveGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: 6,
+    gap: 8,
   },
   paveKey: {
-    width: '31.5%',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '30%',
+    minWidth: 96,
     minHeight: COTE_KEY_HEIGHT,
     borderRadius: 8,
     borderWidth: 1,
@@ -467,27 +530,29 @@ const styles = StyleSheet.create({
     backgroundColor: COTE_INACTIVE_BG,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 2,
+    paddingHorizontal: 4,
+    paddingVertical: 6,
   },
   paveKeyActive: {
     borderWidth: 2,
     borderColor: chantierColors.primary,
     backgroundColor: '#FFF4EF',
   },
-  paveKeyLetter: {
-    fontSize: 12,
+  paveKeyLabel: {
+    fontSize: 16,
     fontWeight: '800',
-    color: 'rgba(255,255,255,0.75)',
-    textTransform: 'lowercase',
+    color: 'rgba(255,255,255,0.85)',
+    textAlign: 'center',
+    width: '100%',
   },
-  paveKeyLetterActive: {
+  paveKeyLabelActive: {
     color: chantierColors.primary,
   },
   paveKeyValue: {
-    fontSize: 17,
+    fontSize: 22,
     fontWeight: '900',
     color: 'rgba(255,255,255,0.95)',
-    marginTop: 1,
+    marginTop: 4,
   },
   paveKeyValueActive: {
     color: chantierColors.text,
@@ -497,38 +562,18 @@ const styles = StyleSheet.create({
   },
   metaGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
     marginTop: 30,
     gap: 10,
   },
-  metaColumn: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 18,
-  },
-  metaButton: {
-    width: '100%',
-    maxWidth: 160,
-    borderColor: chantierColors.border,
+  metaButtonIcon: {
+    flex: 0,
   },
   quantiteLine: {
-    textAlign: 'center',
-    color: '#1D4ED8',
-    fontSize: 18,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  prixLine: {
-    textAlign: 'center',
-    color: chantierColors.danger,
-    fontSize: 18,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  montantLine: {
+    alignSelf: 'stretch',
     textAlign: 'left',
-    color: chantierColors.text,
+    color: '#1D4ED8',
     fontSize: 18,
     fontWeight: '900',
     letterSpacing: 0.5,
@@ -536,10 +581,6 @@ const styles = StyleSheet.create({
   },
   prixInput: {
     marginBottom: 12,
-  },
-  notesKeyLabel: {
-    fontSize: 16,
-    fontWeight: '700',
   },
   notesModal: {
     marginHorizontal: 20,

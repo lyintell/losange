@@ -39,6 +39,8 @@ const TABLE_COLUMNS = {
     'logo',
     'ind_pro',
     'ind_active',
+    'ind_tva',
+    'date_actif_jusqua',
     'cree_le',
     'mis_a_jour_le',
     '_synced',
@@ -52,6 +54,7 @@ const TABLE_COLUMNS = {
     'telephone_2',
     'role',
     'identifiant',
+    'date_premier_login',
     'cree_le',
     'mis_a_jour_le',
     '_synced',
@@ -88,6 +91,9 @@ const TABLE_COLUMNS = {
     'responsable',
     'status',
     'notes',
+    'photo_1',
+    'photo_2',
+    'photo_3',
     'supprime_le',
     'cree_le',
     'mis_a_jour_le',
@@ -119,6 +125,7 @@ const TABLE_COLUMNS = {
     'prix_unitaire_applique',
     'montant',
     'note',
+    'photo',
     'ind_complete',
     'supprime_le',
     'cree_le',
@@ -130,6 +137,7 @@ const TABLE_COLUMNS = {
 const FLAG_COLUMNS = new Set([
   'ind_pro',
   'ind_active',
+  'ind_tva',
   '_synced',
   'ind_dimension',
   'ind_complete',
@@ -209,7 +217,7 @@ export const syncTerrainBootstrapLocal = async (payload) => {
     console.error('Erreur syncTerrainBootstrapLocal:', error);
     throw new Error(
       error?.message ||
-        'Echec enregistrement local. Verifiez metiers, unites, ouvrages et ouvrage_unites dans Supabase.'
+        'Échec enregistrement local. Vérifiez métiers, unités, ouvrages et ouvrage_unites dans Supabase.'
     );
   }
 };
@@ -312,8 +320,60 @@ export const isSameTerrainAccountRegisteredLocally = async (identifiant) => {
 
 export const INACTIVE_ENTREPRISE_ERROR = 'Compte inactif.';
 
+const startOfUtcDayMs = (value) => {
+  if (!value) return null;
+  const parsed = Date.parse(String(value));
+  if (Number.isNaN(parsed)) return null;
+  const date = new Date(parsed);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+};
+
+export const isProEntrepriseExpired = (entreprise) => {
+  if (!entreprise || Number(entreprise.ind_pro) !== 1) return false;
+  const limitMs = startOfUtcDayMs(entreprise.date_actif_jusqua);
+  if (limitMs == null) return false;
+  const todayMs = startOfUtcDayMs(new Date().toISOString());
+  return todayMs > limitMs;
+};
+
+export const enforceEntrepriseExpiryLocal = async (entrepriseId) => {
+  if (!entrepriseId) return { expired: false };
+
+  const db = await ensureLocalDatabaseReady();
+  const row = await db.getFirstAsync(
+    'SELECT id, ind_pro, ind_active, date_actif_jusqua FROM entreprises WHERE id = ?;',
+    [entrepriseId]
+  );
+
+  if (!row || !isProEntrepriseExpired(row)) {
+    return { expired: false };
+  }
+
+  await markEntrepriseInactiveLocal(entrepriseId);
+  return { expired: true, error: INACTIVE_ENTREPRISE_ERROR };
+};
+
+export const recordProfilFirstLoginLocal = async (profilId) => {
+  if (!profilId) return;
+
+  const db = await ensureLocalDatabaseReady();
+  const row = await db.getFirstAsync('SELECT date_premier_login FROM profils WHERE id = ?;', [profilId]);
+  if (row?.date_premier_login) return;
+
+  const now = new Date().toISOString();
+  await db.runAsync('UPDATE profils SET date_premier_login = ?, mis_a_jour_le = ? WHERE id = ?;', [
+    now,
+    now,
+    profilId,
+  ]);
+};
+
 export const isEntrepriseActiveLocal = async (entrepriseId) => {
   if (!entrepriseId) return false;
+
+  const expiry = await enforceEntrepriseExpiryLocal(entrepriseId);
+  if (expiry.expired) return false;
+
   const db = await ensureLocalDatabaseReady();
   const row = await db.getFirstAsync('SELECT ind_active FROM entreprises WHERE id = ?;', [
     entrepriseId,
@@ -327,7 +387,11 @@ export const isInactiveEntrepriseError = (message) =>
 export const markEntrepriseInactiveLocal = async (entrepriseId) => {
   if (!entrepriseId) return;
   const db = await ensureLocalDatabaseReady();
-  await db.runAsync('UPDATE entreprises SET ind_active = 0 WHERE id = ?;', [entrepriseId]);
+  const now = new Date().toISOString();
+  await db.runAsync('UPDATE entreprises SET ind_active = 0, mis_a_jour_le = ? WHERE id = ?;', [
+    now,
+    entrepriseId,
+  ]);
 };
 
 export const revokeTerrainSessionIfEntrepriseInactive = async () => {
@@ -421,7 +485,9 @@ export const getLoggedInProfilLocal = async () => {
     SELECT
       profils.*,
       entreprises.nom AS entreprise_nom,
-      entreprises.ind_pro AS ind_pro
+      entreprises.logo AS entreprise_logo,
+      entreprises.ind_pro AS ind_pro,
+      entreprises.ind_tva AS entreprise_ind_tva
     FROM profils
     LEFT JOIN entreprises ON entreprises.id = profils.entreprise_id
     WHERE profils.id = ?;

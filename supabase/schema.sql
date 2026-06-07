@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS entreprises (
   logo TEXT,
   ind_pro SMALLINT NOT NULL DEFAULT 0 CHECK (ind_pro IN (0, 1)),
   ind_active SMALLINT NOT NULL DEFAULT 1 CHECK (ind_active IN (0, 1)),
+  ind_tva SMALLINT NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1)),
+  date_actif_jusqua TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
@@ -18,6 +20,8 @@ CREATE TABLE IF NOT EXISTS entreprises (
 -- Migration bases Supabase deja deployees
 ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS ind_pro SMALLINT NOT NULL DEFAULT 0 CHECK (ind_pro IN (0, 1));
 ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS ind_active SMALLINT NOT NULL DEFAULT 1 CHECK (ind_active IN (0, 1));
+ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS date_actif_jusqua TIMESTAMPTZ;
+ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS ind_tva SMALLINT NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1));
 
 CREATE TABLE IF NOT EXISTS profils (
   id TEXT PRIMARY KEY,
@@ -29,6 +33,7 @@ CREATE TABLE IF NOT EXISTS profils (
   role TEXT NOT NULL DEFAULT 'A' CHECK (role IN ('A', 'C', 'S', 'T')),
   identifiant TEXT UNIQUE,
   mot_de_passe TEXT,
+  date_premier_login TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
@@ -36,6 +41,7 @@ CREATE TABLE IF NOT EXISTS profils (
 
 ALTER TABLE profils ADD COLUMN IF NOT EXISTS identifiant TEXT UNIQUE;
 ALTER TABLE profils ADD COLUMN IF NOT EXISTS mot_de_passe TEXT;
+ALTER TABLE profils ADD COLUMN IF NOT EXISTS date_premier_login TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS clients (
   id TEXT PRIMARY KEY,
@@ -58,11 +64,18 @@ CREATE TABLE IF NOT EXISTS chantiers (
   responsable TEXT,
   status TEXT NOT NULL DEFAULT 'D' CHECK (status IN ('D', 'V', 'E', 'X', 'Z')),
   notes TEXT,
+  photo_1 TEXT,
+  photo_2 TEXT,
+  photo_3 TEXT,
   supprime_le TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
 );
+
+ALTER TABLE chantiers ADD COLUMN IF NOT EXISTS photo_1 TEXT;
+ALTER TABLE chantiers ADD COLUMN IF NOT EXISTS photo_2 TEXT;
+ALTER TABLE chantiers ADD COLUMN IF NOT EXISTS photo_3 TEXT;
 
 CREATE TABLE IF NOT EXISTS metiers (
   id TEXT PRIMARY KEY,
@@ -107,7 +120,7 @@ CREATE TABLE IF NOT EXISTS releves (
   id TEXT PRIMARY KEY,
   chantier_id TEXT NOT NULL REFERENCES chantiers (id) ON DELETE CASCADE,
   prise_par_id TEXT REFERENCES profils (id) ON DELETE SET NULL,
-  date_facture TEXT,
+  date_facture TEXT DEFAULT to_char(CURRENT_DATE, 'YYYY-MM-DD'),
   total_ht_facture DOUBLE PRECISION DEFAULT 0,
   tva_facture DOUBLE PRECISION DEFAULT 18,
   total_ttc_facture DOUBLE PRECISION DEFAULT 0,
@@ -130,12 +143,25 @@ CREATE TABLE IF NOT EXISTS ligne_releves (
   prix_unitaire_applique DOUBLE PRECISION NOT NULL,
   montant DOUBLE PRECISION NOT NULL,
   note TEXT,
+  photo TEXT,
   ind_complete SMALLINT NOT NULL DEFAULT 0 CHECK (ind_complete IN (0, 1)),
   supprime_le TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
 );
+
+ALTER TABLE ligne_releves ADD COLUMN IF NOT EXISTS photo TEXT;
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'terrain-files',
+  'terrain-files',
+  false,
+  10485760,
+  ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']
+)
+ON CONFLICT (id) DO NOTHING;
 
 -- Politiques permissives pour le developpement (cle anon).
 -- A remplacer par une authentification Supabase en production.

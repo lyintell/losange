@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, View } from 'react-native';
-import { Button, Chip, Text } from 'react-native-paper';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { Chip, Text } from 'react-native-paper';
 import AjouterOuvrageModal from '../components/terrain/AjouterOuvrageModal';
+import MobileButton from '../components/terrain/MobileButton';
+import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
 import {
   FlowActionFab,
   FlowBackFab,
@@ -19,19 +21,20 @@ import {
   updateLigneInDraft,
 } from '../db/mockData';
 import {
-  getMetiersForEntrepriseLocal,
+  getLoggedInProfilViewLocal,
+  getMetiersForSelectionLocal,
   getOuvrageUniteContextLocal,
   getOuvragesByMetierAndEntreprise,
   getUnitesEtPrixParOuvrage,
-  isLoggedInAdminLocal,
 } from '../db/querries';
+import { hidesPriceUiForRole } from '../utils/terrainAccess';
 import PaveSaisieOneHand from './PaveSaisieOneHand';
 import { chantierColors } from '../styles/theme';
 
 const STEP_TITLES = {
-  metier: 'Choix du metier',
-  ouvrage: 'Choix de l ouvrage',
-  dimensions: 'Entrez les dimensions',
+  metier: 'Choix du métier',
+  ouvrage: "Choix de l'ouvrage",
+  dimensions: 'Entrez les relevés',
   recap: 'Données entrées',
 };
 
@@ -66,12 +69,20 @@ export default function NouvelleDimensionScreen({
   const [formComplete, setFormComplete] = useState(false);
   const [editingLigneId, setEditingLigneId] = useState(null);
   const [isAdminRole, setIsAdminRole] = useState(false);
+  const [hidesPriceUi, setHidesPriceUi] = useState(false);
   const [addOuvrageModalVisible, setAddOuvrageModalVisible] = useState(false);
 
   const isEditingLine = Boolean(editingLigneId);
   const editingLigne = useMemo(
     () => draft?.lignes?.find((ligne) => ligne.id === editingLigneId) || null,
     [draft?.lignes, editingLigneId]
+  );
+  const ouvragesSorted = useMemo(
+    () =>
+      [...ouvrages].sort((a, b) =>
+        (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' })
+      ),
+    [ouvrages]
   );
 
   const refreshDraft = useCallback(() => {
@@ -84,15 +95,18 @@ export default function NouvelleDimensionScreen({
   }, []);
 
   useEffect(() => {
-    const loadAdminRole = async () => {
+    const loadProfilAccess = async () => {
       try {
-        setIsAdminRole(await isLoggedInAdminLocal());
+        const profil = await getLoggedInProfilViewLocal();
+        setIsAdminRole(profil?.role === 'A');
+        setHidesPriceUi(hidesPriceUiForRole(profil?.role));
       } catch (error) {
-        console.error('Erreur verification role admin:', error);
+        console.error('Erreur verification acces profil:', error);
         setIsAdminRole(false);
+        setHidesPriceUi(false);
       }
     };
-    loadAdminRole();
+    loadProfilAccess();
   }, []);
 
   useEffect(() => {
@@ -103,7 +117,7 @@ export default function NouvelleDimensionScreen({
       }
       try {
         setLoadingMetiers(true);
-        const data = await getMetiersForEntrepriseLocal(entrepriseId);
+        const data = await getMetiersForSelectionLocal(entrepriseId);
         setMetiers(data || []);
       } catch (error) {
         console.error('Erreur chargement metiers:', error);
@@ -220,6 +234,9 @@ export default function NouvelleDimensionScreen({
         prix_unitaire_applique: prixUnitaireApplique,
         montant: quantite * prixUnitaireApplique,
         note: payload.note || null,
+        photo_pending_uri: payload.photo_pending_uri || null,
+        photo_mime_type: payload.photo_mime_type || null,
+        photo: payload.photo || null,
       };
 
       if (editingLigneId) {
@@ -249,10 +266,17 @@ export default function NouvelleDimensionScreen({
     setStep('dimensions');
   };
 
+  const handleCancelEdit = useCallback(() => {
+    setEditingLigneId(null);
+    updateDraftDimensionFlow({ metier: null, ouvrage: null, ouvrageUnite: null });
+    refreshDraft();
+    setStep('recap');
+  }, [refreshDraft, setStep]);
+
   const handleDeleteLigne = (ligne) => {
     Alert.alert(
       'Supprimer',
-      `Supprimer "${ligne.ouvrage_nom || 'cette entree'}" ?`,
+      `Supprimer "${ligne.ouvrage_nom || 'cette entrée'}" ?`,
       [
         { text: 'Non', style: 'cancel' },
         {
@@ -341,49 +365,80 @@ export default function NouvelleDimensionScreen({
     onFinish?.();
   };
 
+  const handleShowRecapRef = useRef(handleShowRecap);
+  handleShowRecapRef.current = handleShowRecap;
+
   useEffect(() => {
     if (!onNavHandlersChange) return undefined;
 
-    const saveDisabled =
-      step === 'metier' ||
-      step === 'ouvrage' ||
-      step === 'dimensions' ||
-      (step === 'recap' && !draft?.lignes?.length);
+    const isDimensionsStep = step === 'dimensions';
+    const voirDisabled =
+      savingLine ||
+      (isEditingLine ? !formComplete : !formComplete && !draft?.lignes?.length);
+
+    const saveDisabled = isDimensionsStep
+      ? voirDisabled
+      : step === 'metier' ||
+        step === 'ouvrage' ||
+        (step === 'recap' && !draft?.lignes?.length);
 
     onNavHandlersChange({
-      onSave: () => performNavSaveRef.current?.(),
+      onSave: isDimensionsStep
+        ? () => handleShowRecapRef.current?.()
+        : () => performNavSaveRef.current?.(),
+      onCancel: isDimensionsStep && isEditingLine ? handleCancelEdit : null,
       saveDisabled,
       saving: savingLine,
+      primaryLabel: isDimensionsStep ? 'Voir' : 'Enregistrer',
+      primaryIcon: isDimensionsStep ? 'format-list-bulleted' : 'content-save',
     });
 
     return () => onNavHandlersChange(null);
-  }, [step, draft?.lignes?.length, savingLine, onNavHandlersChange]);
+  }, [
+    step,
+    draft?.lignes?.length,
+    savingLine,
+    formComplete,
+    isEditingLine,
+    handleCancelEdit,
+    onNavHandlersChange,
+  ]);
 
   const renderMetierStep = () => (
     <>
-      {!entrepriseId ? (
-        <Text style={styles.infoText}>Entreprise non disponible. Connectez-vous apres synchronisation.</Text>
-      ) : loadingMetiers ? (
-        <ActivityIndicator size="large" color={chantierColors.primary} style={styles.loader} />
-      ) : metiers.length === 0 ? (
-        <Text style={styles.infoText}>Aucun metier disponible. Connectez-vous en ligne pour synchroniser le catalogue depuis Supabase.</Text>
-      ) : (
-        <View style={styles.choiceList}>
-          {metiers.map((metier) => (
-            <Button
-              key={metier.id}
-              mode={draft?.metier?.id === metier.id ? 'contained' : 'outlined'}
-              onPress={() => handleChooseMetier(metier)}
-              style={styles.choiceButton}
-              contentStyle={styles.choiceButtonContent}
-              buttonColor={draft?.metier?.id === metier.id ? chantierColors.primary : chantierColors.surface}
-              textColor={draft?.metier?.id === metier.id ? '#FFFFFF' : chantierColors.text}
-            >
-              {metier.nom}
-            </Button>
-          ))}
-        </View>
-      )}
+      <ScrollView
+        style={styles.stepScroll}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: getFabColumnPadding(0) },
+        ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator
+      >
+        {!entrepriseId ? (
+          <Text style={styles.infoText}>Entreprise non disponible. Connectez-vous après synchronisation.</Text>
+        ) : loadingMetiers ? (
+          <LosangeLogoLoader size="large" containerStyle={styles.loader} />
+        ) : metiers.length === 0 ? (
+          <Text style={styles.infoText}>Aucun métier disponible. Connectez-vous en ligne pour synchroniser le catalogue depuis Supabase.</Text>
+        ) : (
+          <View style={styles.choiceList}>
+            {metiers.map((metier) => (
+              <MobileButton
+                key={metier.id}
+                mode={draft?.metier?.id === metier.id ? 'contained' : 'outlined'}
+                onPress={() => handleChooseMetier(metier)}
+                style={styles.choiceButton}
+                contentStyle={styles.choiceButtonContent}
+                buttonColor={draft?.metier?.id === metier.id ? chantierColors.primary : chantierColors.surface}
+                textColor={draft?.metier?.id === metier.id ? '#FFFFFF' : chantierColors.text}
+              >
+                {metier.nom}
+              </MobileButton>
+            ))}
+          </View>
+        )}
+      </ScrollView>
       <FlowBackFab onPress={onBackToChantiers} smallCountBelow={0} />
     </>
   );
@@ -394,34 +449,39 @@ export default function NouvelleDimensionScreen({
     return (
       <>
         <ScrollView
+          style={styles.stepScroll}
           contentContainerStyle={[
             styles.scrollContent,
             { paddingBottom: getFabColumnPadding(fabSmallCount) },
           ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator
         >
           <Text variant="titleMedium" style={styles.sectionTitle}>
             {draft?.metier?.nom}
           </Text>
           {loadingOuvrages ? (
-            <ActivityIndicator size="large" color={chantierColors.primary} style={styles.loader} />
-          ) : ouvrages.length === 0 ? (
+            <LosangeLogoLoader size="large" containerStyle={styles.loader} />
+          ) : ouvragesSorted.length === 0 ? (
             <Text style={styles.infoText}>
               {isAdminRole
-                ? 'Aucun ouvrage pour ce metier. Utilisez + pour en creer un.'
-                : 'Aucun ouvrage pour votre entreprise. Synchronisez le catalogue ou demandez a un admin d en ajouter.'}
+                ? 'Aucun ouvrage pour ce métier. Utilisez + pour en créer un.'
+                : "Aucun ouvrage pour votre entreprise. Synchronisez le catalogue ou demandez à un admin d'en ajouter."}
             </Text>
           ) : (
-            <View style={styles.chipWrap}>
-              {ouvrages.map((ouvrage) => (
-                <Chip
+            <View style={styles.choiceList}>
+              {ouvragesSorted.map((ouvrage) => (
+                <MobileButton
                   key={ouvrage.id}
-                  selected={draft?.ouvrage?.id === ouvrage.id}
+                  mode={draft?.ouvrage?.id === ouvrage.id ? 'contained' : 'outlined'}
                   onPress={() => handleChooseOuvrage(ouvrage)}
-                  style={styles.chip}
-                  selectedColor={chantierColors.primary}
+                  style={styles.choiceButton}
+                  contentStyle={styles.choiceButtonContent}
+                  buttonColor={draft?.ouvrage?.id === ouvrage.id ? chantierColors.primary : chantierColors.surface}
+                  textColor={draft?.ouvrage?.id === ouvrage.id ? '#FFFFFF' : chantierColors.text}
                 >
                   {ouvrage.nom}
-                </Chip>
+                </MobileButton>
               ))}
             </View>
           )}
@@ -477,6 +537,9 @@ export default function NouvelleDimensionScreen({
           nombre: editingLigne.nombre,
           note: editingLigne.note,
           prix_unitaire_applique: editingLigne.prix_unitaire_applique,
+          photo: editingLigne.photo || null,
+          photo_pending_uri: editingLigne.photo_pending_uri || null,
+          photo_mime_type: editingLigne.photo_mime_type || null,
         }
       : null;
 
@@ -487,13 +550,14 @@ export default function NouvelleDimensionScreen({
             key={editingLigneId || ouvrageUnite?.ouvrage_unite_id || 'saisie'}
             ref={saisieRef}
             hideInternalSaveButton
+            hidePriceUi={hidesPriceUi}
             ouvrageUniteId={ouvrageUnite?.ouvrage_unite_id || ''}
             prixUnitaireApplique={ouvrageUnite?.prix_unitaire || 0}
             isDimension={Number(ouvrageUnite?.ind_dimension) === 1}
             uniteFormule={ouvrageUnite?.formule || ''}
             nomUnite={ouvrageUnite?.nom_unite || ''}
             initialValues={initialValues}
-            fabSmallCountBelow={isEditingLine ? 0 : 1}
+            fabSmallCountBelow={0}
             onSaveLine={handleSaveLine}
             onValidityChange={setFormComplete}
           />
@@ -502,26 +566,13 @@ export default function NouvelleDimensionScreen({
           <FlowActionFab
             icon="plus"
             color={flowFabColors.primary}
-            smallCountBelow={1}
+            smallCountBelow={0}
             onPress={handlePlusPress}
             loading={savingLine}
             disabled={savingLine || !formComplete}
             allowPressWhenDisabled
           />
         ) : null}
-        <FlowSmallFab
-          icon="format-list-bulleted"
-          tierFromBottom={0}
-          side="right"
-          color="#FACC15"
-          iconColor="#000000"
-          preserveOpacityWhenDisabled
-          onPress={handleShowRecap}
-          disabled={
-            savingLine ||
-            (isEditingLine ? !formComplete : !formComplete && !draft?.lignes?.length)
-          }
-        />
       </>
     );
   };
@@ -568,6 +619,7 @@ export default function NouvelleDimensionScreen({
           <LignesReleveGroupedList
             lignes={draft.lignes}
             variant="recap"
+            showPrices={!hidesPriceUi}
             onLignePress={handleEditLigne}
             onLigneDoublePress={handleDeleteLigne}
           />
@@ -580,7 +632,12 @@ export default function NouvelleDimensionScreen({
         onPress={handleContinuerRecap}
       />
       {isEditingChantier ? (
-        <FlowSmallFab icon="delete" tierFromBottom={0} onPress={handleDeleteChantierPress} />
+        <FlowSmallFab
+          icon="delete"
+          tierFromBottom={0}
+          color={flowFabColors.muted}
+          onPress={handleDeleteChantierPress}
+        />
       ) : null}
     </>
   );
@@ -590,7 +647,7 @@ export default function NouvelleDimensionScreen({
       ? 'Récapitulatif'
       : step === 'dimensions' && draft?.ouvrage?.nom
         ? draft.ouvrage.nom
-        : 'Nouvelle dimension';
+        : 'Nouveau relevé';
 
   const stepSubtitle =
     step === 'dimensions' && isEditingLine ? 'Modification' : STEP_TITLES[step];
@@ -644,9 +701,13 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
+    minHeight: 0,
+  },
+  stepScroll: {
+    flex: 1,
   },
   scrollContent: {
-    paddingBottom: 120,
+    flexGrow: 1,
     gap: 12,
   },
   dimensionsContent: {
@@ -655,13 +716,15 @@ const styles = StyleSheet.create({
   },
   choiceList: {
     gap: 10,
-    paddingBottom: getFabColumnPadding(0),
+    width: '100%',
+    alignSelf: 'center',
+    alignItems: 'stretch',
   },
   choiceButton: {
     borderColor: chantierColors.border,
   },
   choiceButtonContent: {
-    minHeight: 62,
+    minHeight: 64,
   },
   chipWrap: {
     flexDirection: 'row',

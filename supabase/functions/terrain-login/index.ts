@@ -31,6 +31,71 @@ const stripProfil = (profil: Record<string, unknown>) => {
   return safeProfil;
 };
 
+const startOfUtcDayMs = (value: string | null | undefined) => {
+  if (!value) return null;
+  const parsed = Date.parse(String(value));
+  if (Number.isNaN(parsed)) return null;
+  const date = new Date(parsed);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+};
+
+const isProEntrepriseExpired = (entreprise: Record<string, unknown> | null | undefined) => {
+  if (!entreprise || Number(entreprise.ind_pro) !== 1) return false;
+  const limitMs = startOfUtcDayMs(entreprise.date_actif_jusqua as string | undefined);
+  if (limitMs == null) return false;
+  const todayMs = startOfUtcDayMs(new Date().toISOString());
+  return (todayMs ?? 0) > limitMs;
+};
+
+const deactivateExpiredProEntreprise = async (
+  supabase: ReturnType<typeof createClient>,
+  entreprise: Record<string, unknown> | null | undefined
+) => {
+  if (!entreprise || !isProEntrepriseExpired(entreprise)) {
+    return { expired: false as const, entreprise };
+  }
+
+  const entrepriseId = String(entreprise.id);
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from('entreprises')
+    .update({ ind_active: 0, mis_a_jour_le: now })
+    .eq('id', entrepriseId);
+
+  if (error) {
+    throw new Error(error.message || 'Impossible de desactiver le compte expire.');
+  }
+
+  return {
+    expired: true as const,
+    entreprise: { ...entreprise, ind_active: 0, mis_a_jour_le: now },
+  };
+};
+
+const recordProfilFirstLogin = async (
+  supabase: ReturnType<typeof createClient>,
+  profil: Record<string, unknown>
+) => {
+  if (profil.date_premier_login) {
+    return profil;
+  }
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('profils')
+    .update({ date_premier_login: now, mis_a_jour_le: now })
+    .eq('id', String(profil.id))
+    .is('date_premier_login', null)
+    .select('*')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message || 'Impossible d enregistrer le premier login.');
+  }
+
+  return data ?? { ...profil, date_premier_login: now, mis_a_jour_le: now };
+};
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -56,7 +121,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: false, error: 'Identifiant ou mot de passe incorrect.' });
     }
 
-    const { data: profilRow, error: profilError } = await supabase
+    let { data: profilRow, error: profilError } = await supabase
       .from('profils')
       .select('*, entreprises(*)')
       .eq('identifiant', identifiant)
@@ -70,10 +135,23 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: false, error: 'Identifiant ou mot de passe incorrect.' });
     }
 
-    const entreprise = profilRow.entreprises as Record<string, unknown> | null;
-    if (!entreprise || Number(entreprise.ind_active) !== 1) {
+    let entreprise = profilRow.entreprises as Record<string, unknown> | null;
+    if (!entreprise) {
       return jsonResponse({ ok: false, error: 'Compte inactif.' });
     }
+
+    const expiryCheck = await deactivateExpiredProEntreprise(supabase, entreprise);
+    if (expiryCheck.expired) {
+      return jsonResponse({ ok: false, error: 'Compte inactif.' });
+    }
+    entreprise = expiryCheck.entreprise as Record<string, unknown>;
+
+    if (Number(entreprise.ind_active) !== 1) {
+      return jsonResponse({ ok: false, error: 'Compte inactif.' });
+    }
+
+    const profilWithFirstLogin = await recordProfilFirstLogin(supabase, profilRow as Record<string, unknown>);
+    profilRow = { ...profilRow, ...profilWithFirstLogin };
 
     const entrepriseId = String(entreprise.id);
 
@@ -90,7 +168,7 @@ Deno.serve(async (req) => {
       supabase.from('clients').select('*').eq('entreprise_id', entrepriseId),
       supabase
         .from('profils')
-        .select('id, entreprise_id, prenom, nom, telephone_1, telephone_2, role, identifiant, cree_le, mis_a_jour_le, _synced')
+        .select('id, entreprise_id, prenom, nom, telephone_1, telephone_2, role, identifiant, date_premier_login, cree_le, mis_a_jour_le, _synced')
         .eq('entreprise_id', entrepriseId),
     ]);
 
