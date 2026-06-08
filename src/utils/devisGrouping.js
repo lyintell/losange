@@ -3,8 +3,9 @@ import {
   formatLigneMesures,
   formatLigneNombrePdf,
   formatLigneQuantiteAffichage,
+  getLigneMontant,
   getLigneNomUnite,
-  getLignePrixUnitaireAffichage,
+  getLignePrixUnitaireApplique,
   isLigneDimension,
 } from './formatLigneMesures';
 import { getMetierColor } from './metierColors';
@@ -86,8 +87,8 @@ export function buildDevisTableRows(lignes = []) {
           isDimensionLine: isLigneDimension(ligne),
           note: ligne.note?.trim() || '',
           quantiteLabel: formatDevisQuantite(ligne),
-          prixUnitaire: getLignePrixUnitaireAffichage(ligne),
-          montant: Number(ligne.montant) || 0,
+          prixUnitaire: getLignePrixUnitaireApplique(ligne),
+          montant: getLigneMontant(ligne),
         });
       });
     });

@@ -23,6 +23,10 @@ import {
 import { ensureLocalDatabaseReady } from '../db/localDb';
 import { runTerrainSyncOnLogin, runTerrainSyncPullOnly, runTerrainSyncPushOnly, runTerrainSyncPushPull } from '../db/terrainSyncPro';
 import { applyTerrainPullPayload, countLocalClientsForEntreprise } from '../db/terrainSyncMerge';
+import {
+  reconcileEntrepriseTierLocal,
+  syncTerrainBootstrapAccountLocal,
+} from '../db/entrepriseTierLocal';
 import { hasInternetConnection } from '../utils/network';
 import { ensureCatalogueLocal } from '../db/querries';
 
@@ -139,10 +143,18 @@ export const loginTerrain = async (identifiant, motDePasse, { wipeLocal = false 
     return { ok: false, error: INACTIVE_ENTREPRISE_ERROR };
   }
 
-  const remoteClientCount = data.payload.clients?.length ?? 0;
+  const remoteEntreprise = data.payload.entreprise;
+  const isProAccount = Number(remoteEntreprise.ind_pro) === 1;
+  const remoteClientCount = isProAccount ? (data.payload.clients?.length ?? 0) : 0;
 
   try {
-    await syncTerrainBootstrapLocal(data.payload);
+    await reconcileEntrepriseTierLocal(remoteEntreprise);
+
+    if (isProAccount) {
+      await syncTerrainBootstrapLocal(data.payload);
+    } else {
+      await syncTerrainBootstrapAccountLocal(data.payload);
+    }
     await recordProfilFirstLoginLocal(data.payload.profil.id);
     await saveTerrainSessionLocal({
       profilId: data.payload.profil.id,
@@ -154,7 +166,7 @@ export const loginTerrain = async (identifiant, motDePasse, { wipeLocal = false 
     const entrepriseId = data.payload.entreprise.id;
     let localClientCount = await countLocalClientsForEntreprise(entrepriseId);
 
-    if (remoteClientCount > 0 && localClientCount === 0) {
+    if (isProAccount && remoteClientCount > 0 && localClientCount === 0) {
       await applyTerrainPullPayload(data.payload, { forceAll: true });
       localClientCount = await countLocalClientsForEntreprise(entrepriseId);
     }
@@ -164,7 +176,7 @@ export const loginTerrain = async (identifiant, motDePasse, { wipeLocal = false 
       console.warn('Catalogue incomplet apres synchronisation Supabase:', catalogue);
     }
 
-    if (remoteClientCount > 0 && localClientCount === 0) {
+    if (isProAccount && remoteClientCount > 0 && localClientCount === 0) {
       throw new Error(
         "Les clients Supabase n'ont pas pu être enregistrés localement. Vérifiez les migrations SQLite (supprime_le, notes)."
       );
@@ -276,8 +288,7 @@ export const ensureTerrainSessionAllowed = async ({ verifyRemote = false } = {})
     }
 
     if (entreprise) {
-      const db = await ensureLocalDatabaseReady();
-      await upsertRows(db, 'entreprises', [entreprise]);
+      await reconcileEntrepriseTierLocal(entreprise);
     }
 
     const expiry = await enforceEntrepriseExpiryLocal(session.entreprise_id);
@@ -300,6 +311,63 @@ export const logoutTerrain = async () => {
     console.warn('Sync avant deconnexion:', error);
   }
   await clearTerrainSessionLocal();
+};
+
+export const changeTerrainPassword = async (motDePasseActuel, nouveauMotDePasse) => {
+  if (!isSupabaseConfigured()) {
+    return {
+      ok: false,
+      error: 'Supabase non configuré. Vérifiez EXPO_PUBLIC_SUPABASE_URL et EXPO_PUBLIC_SUPABASE_ANON_KEY.',
+    };
+  }
+
+  const trimmedCurrent = String(motDePasseActuel ?? '');
+  const trimmedNew = String(nouveauMotDePasse ?? '').trim();
+
+  if (!trimmedCurrent || !trimmedNew) {
+    return { ok: false, error: 'Mot de passe actuel et nouveau mot de passe requis.' };
+  }
+
+  if (trimmedNew.length < 4) {
+    return { ok: false, error: 'Le nouveau mot de passe est trop court.' };
+  }
+
+  if (!(await hasInternetConnection())) {
+    return { ok: false, error: 'Connexion internet requise pour changer le mot de passe.' };
+  }
+
+  const device = await getTerrainDeviceAccountLocal();
+  const session = await getTerrainSessionLocal();
+  if (!device?.identifiant || !session?.profil_id) {
+    return { ok: false, error: 'Session terrain invalide. Reconnectez-vous.' };
+  }
+
+  assertSupabaseConfigured();
+
+  const { data, error } = await supabase.functions.invoke('terrain-change-password', {
+    body: {
+      identifiant: device.identifiant,
+      motDePasseActuel: trimmedCurrent,
+      nouveauMotDePasse: trimmedNew,
+    },
+  });
+
+  if (error) {
+    return { ok: false, error: await readFunctionErrorMessage(error, data) };
+  }
+
+  if (!data?.ok) {
+    return { ok: false, error: data?.error || 'Impossible de changer le mot de passe.' };
+  }
+
+  await saveTerrainSessionLocal({
+    profilId: session.profil_id,
+    entrepriseId: session.entreprise_id,
+    identifiant: device.identifiant,
+    motDePasse: trimmedNew,
+  });
+
+  return { ok: true };
 };
 
 export const syncTerrainDataFromSupabase = async () => runTerrainSyncPushPull();

@@ -28,12 +28,23 @@ export function getLignePrixUnitaireApplique(ligne) {
   return Number(ligne?.prix_unitaire_applique) || 0;
 }
 
-/** ind_dimension = 1 : colonne P.U. affiche le montant ligne, pas le prix unitaire applique. */
+/** P.U catalogue ouvrage_unite (reference, distinct du P.U applique editable). */
+export function getLignePrixUnitaireCatalogue(ligne) {
+  return Number(ligne?.prix_unitaire ?? ligne?.ouvrage_unite_prix_unitaire) || 0;
+}
+
+/** Colonne P.U dans les ecrans terrain (details, recap, pave). */
 export function getLignePrixUnitaireAffichage(ligne) {
-  if (isLigneDimension(ligne)) {
-    return Number(ligne?.montant) || 0;
+  return getLignePrixUnitaireApplique(ligne);
+}
+
+/** Montant = P.U applique x n (nombre). */
+export function getLigneMontant(ligne) {
+  const stored = Number(ligne?.montant);
+  if (Number.isFinite(stored) && ligne?.montant != null && ligne?.montant !== '') {
+    return roundQuantite(stored);
   }
-  return Number(ligne?.prix_unitaire_applique) || 0;
+  return roundQuantite(getLignePrixUnitaireApplique(ligne) * (Number(ligne?.nombre) || 0));
 }
 
 export function formatLigneMesures(ligne) {
@@ -74,8 +85,7 @@ export function formatLigneNombrePdf(ligne) {
 }
 
 export function formatMontant(value) {
-  const amount = Math.round((Number(value) || 0) * 100) / 100;
-  return `${amount.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} F`;
+  return formatMontantFcfa(value);
 }
 
 export function formatMontantFcfa(value) {

@@ -9,3 +9,9 @@ verify_jwt = false
 
 [functions.terrain-sync]
 verify_jwt = false
+
+[functions.terrain-change-password]
+verify_jwt = false
+
+[functions.master-admin-crud]
+verify_jwt = false

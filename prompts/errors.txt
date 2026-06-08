@@ -100,3 +100,10 @@ to your top-level package.json.
     at Object.transform (C:\Users\oumar\Documents\PROJECTS\MY_APPS\DEV\losange_NEW\node_modules\expo\node_modules\@expo\metro-config\build\transform-worker\metro-transform-worker.js:583:12)
     at Object.transform (C:\Users\oumar\Documents\PROJECTS\MY_APPS\DEV\losange_NEW\node_modules\expo\node_modules\@expo\metro-config\build\transform-worker\transform-worker.js:178:19)
 
+11. Erreur enregistrement client/chantier: Error: Network request failed. Although it's been saved
+
+10. Lors de telecharger PDF et telecharger Devis dans production, j ai:
+Call to function ExponentFileSyst em.createSAFFileAsync has been rejected.
+-> Caused by Java.io.IOException: Location'Content://com.android.externalstorage.document/tree/primary...
+
+Share whatsapp work fine

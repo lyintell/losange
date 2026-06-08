@@ -175,3 +175,15 @@ Apparait a la page de login. Il apparait aussi comme loading screen (pulsating r
 - Dans la base de données, ajoute Métier après client. On clique montre la liste des métiers (cards). PAs de page details. L utilisateur peut trier la liste des metiers en hold la card et bougeant dans la liste. Le meme ordre des metier sera respecté lors du choix de metier pour chantier
 
 - Liste des metiers dans ...Plus, scrollable pour montrer tout les metiers
+
+- La devise dans l application est FCFA partout. Pas D euro (exemple Rapports).
+
+- Dans rapport, relevés au lieu de dimensions. Ne montre pas l ecriture dans le chart. Legende suffit.
+
+- Dans rapport, montant HT seulement (pas TTC)
+
+- Enleve categorie Annulé du rapport.
+
+- Corrige Chantier card. Relevé au lieu de dimension badge
+
+- JE ne comprends pas le modal de synchronisation. Simplifié les le content et concise.

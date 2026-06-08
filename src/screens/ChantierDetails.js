@@ -297,7 +297,9 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onChant
         exportOverlayMode === 'pdf'
           ? await downloadDimensionsPdf(uri, chantier)
           : await downloadDevisPdf(uri, chantier);
-      await markChantierAsDevis();
+      if (!isPdf) {
+        await markChantierAsDevis();
+      }
       setExportOverlayVisible(false);
       Alert.alert(
         isPdf ? 'PDF enregistré' : 'Devis enregistré',
@@ -325,9 +327,12 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onChant
       const uri = await generateExportPdf();
       await shareDevisPdf(
         uri,
-        isPdf ? 'Partager le PDF sur WhatsApp' : 'Partager le devis sur WhatsApp'
+        isPdf ? 'Partager le PDF sur WhatsApp' : 'Partager le devis sur WhatsApp',
+        { chantier, mode: isPdf ? 'pdf' : 'devis' }
       );
-      await markChantierAsDevis();
+      if (!isPdf) {
+        await markChantierAsDevis();
+      }
       setExportOverlayVisible(false);
     } catch (error) {
       console.error('Erreur partage export:', error);

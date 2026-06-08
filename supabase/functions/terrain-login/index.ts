@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { filterTransactionalRowsForProPull } from './entrepriseTier.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -154,76 +155,112 @@ Deno.serve(async (req) => {
     profilRow = { ...profilRow, ...profilWithFirstLogin };
 
     const entrepriseId = String(entreprise.id);
+    const isProAccount = Number(entreprise.ind_pro) === 1;
 
-    const [
-      metiersResult,
-      unitesResult,
-      ouvragesResult,
-      clientsResult,
-      profilsResult,
-    ] = await Promise.all([
+    const [metiersResult, unitesResult, profilsResult] = await Promise.all([
       supabase.from('metiers').select('*'),
       supabase.from('unites').select('*'),
-      supabase.from('ouvrages').select('*').eq('entreprise_id', entrepriseId),
-      supabase.from('clients').select('*').eq('entreprise_id', entrepriseId),
       supabase
         .from('profils')
         .select('id, entreprise_id, prenom, nom, telephone_1, telephone_2, role, identifiant, date_premier_login, cree_le, mis_a_jour_le, _synced')
         .eq('entreprise_id', entrepriseId),
     ]);
 
-    const queryError =
-      metiersResult.error ||
-      unitesResult.error ||
-      ouvragesResult.error ||
-      clientsResult.error ||
-      profilsResult.error;
+    const queryError = metiersResult.error || unitesResult.error || profilsResult.error;
 
     if (queryError) {
       return jsonResponse({ ok: false, error: queryError.message || 'Erreur chargement des donnees.' }, 500);
     }
 
-    const ouvrages = ouvragesResult.data ?? [];
+    if (!isProAccount) {
+      return jsonResponse({
+        ok: true,
+        payload: {
+          entreprise,
+          profil: stripProfil(profilRow as Record<string, unknown>),
+          profils: profilsResult.data ?? [],
+          metiers: metiersResult.data ?? [],
+          unites: unitesResult.data ?? [],
+          ouvrages: [],
+          ouvrage_unites: [],
+          clients: [],
+          chantiers: [],
+          releves: [],
+          ligne_releves: [],
+        },
+      });
+    }
+
+    const [ouvragesResult, clientsResult] = await Promise.all([
+      supabase.from('ouvrages').select('*').eq('entreprise_id', entrepriseId).is('supprime_le', null),
+      supabase.from('clients').select('*').eq('entreprise_id', entrepriseId).is('supprime_le', null),
+    ]);
+
+    if (ouvragesResult.error || clientsResult.error) {
+      return jsonResponse(
+        { ok: false, error: ouvragesResult.error?.message || clientsResult.error?.message || 'Erreur chargement.' },
+        500
+      );
+    }
+
+    const proActivatedLe = entreprise.pro_activated_le as string | null | undefined;
+    let ouvrages = filterTransactionalRowsForProPull(ouvragesResult.data ?? [], proActivatedLe);
+    let clients = filterTransactionalRowsForProPull(clientsResult.data ?? [], proActivatedLe);
     const ouvrageIds = ouvrages.map((item) => item.id);
-    const clients = clientsResult.data ?? [];
     const clientIds = clients.map((item) => item.id);
 
     let ouvrageUnites: Record<string, unknown>[] = [];
     if (ouvrageIds.length > 0) {
-      const { data, error } = await supabase.from('ouvrage_unites').select('*').in('ouvrage_id', ouvrageIds);
+      const { data, error } = await supabase
+        .from('ouvrage_unites')
+        .select('*')
+        .in('ouvrage_id', ouvrageIds)
+        .is('supprime_le', null);
       if (error) {
         return jsonResponse({ ok: false, error: error.message || 'Erreur chargement ouvrage_unites.' }, 500);
       }
-      ouvrageUnites = data ?? [];
+      ouvrageUnites = filterTransactionalRowsForProPull(data ?? [], proActivatedLe);
     }
 
     let chantiers: Record<string, unknown>[] = [];
     if (clientIds.length > 0) {
-      const { data, error } = await supabase.from('chantiers').select('*').in('client_id', clientIds);
+      const { data, error } = await supabase
+        .from('chantiers')
+        .select('*')
+        .in('client_id', clientIds)
+        .is('supprime_le', null);
       if (error) {
         return jsonResponse({ ok: false, error: error.message || 'Erreur chargement chantiers.' }, 500);
       }
-      chantiers = data ?? [];
+      chantiers = filterTransactionalRowsForProPull(data ?? [], proActivatedLe);
     }
 
     const chantierIds = chantiers.map((item) => String(item.id));
     let releves: Record<string, unknown>[] = [];
     if (chantierIds.length > 0) {
-      const { data, error } = await supabase.from('releves').select('*').in('chantier_id', chantierIds);
+      const { data, error } = await supabase
+        .from('releves')
+        .select('*')
+        .in('chantier_id', chantierIds)
+        .is('supprime_le', null);
       if (error) {
         return jsonResponse({ ok: false, error: error.message || 'Erreur chargement releves.' }, 500);
       }
-      releves = data ?? [];
+      releves = filterTransactionalRowsForProPull(data ?? [], proActivatedLe);
     }
 
     const releveIds = releves.map((item) => String(item.id));
     let ligneReleves: Record<string, unknown>[] = [];
     if (releveIds.length > 0) {
-      const { data, error } = await supabase.from('ligne_releves').select('*').in('releve_id', releveIds);
+      const { data, error } = await supabase
+        .from('ligne_releves')
+        .select('*')
+        .in('releve_id', releveIds)
+        .is('supprime_le', null);
       if (error) {
         return jsonResponse({ ok: false, error: error.message || 'Erreur chargement ligne_releves.' }, 500);
       }
-      ligneReleves = data ?? [];
+      ligneReleves = filterTransactionalRowsForProPull(data ?? [], proActivatedLe);
     }
 
     return jsonResponse({

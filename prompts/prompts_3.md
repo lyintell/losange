@@ -107,3 +107,36 @@ montrant les info pertinentes:
         - Pie chart: Nombre total de chantier par status
         - Bar chart: Nombre de chantiers par mois par status (stacked barchart), max 1 year back from current month
         - Ajoute un bouton, on clique change Nombre en Montant des charts
+
+26. Dans un compte PRO existant (app) la liste des metiers ne s affiche pas dans le menu Plus (base de données).
+
+27. Les boutons Supprimer, aussi bien mobile que master web ne sont pas entrain de suprimer dans supabase.
+
+28. Dans l ecran profil modifier, permet a tous les utilisateurs de changer leur mot de passe.
+Masque logo entreprise pour les comptes gratuit, et compte non-Admin pour pro.
+Assure toi que l ecran est scrollable si formulaire depase bottom bar.
+
+29. Dans entre de releve (pave), permettre de scroll. Aussi, montrer le montant (Qte x PU) apres PU (en noir)
+
+30. Puisque Ouvrage peut etre modifier depuis mobile, ajoute supprime_le a ouvrage et ouvrage_unite
+
+31.
+L ecran master ne montre pas pro_activated_le et pro_downgraded_le dans les details de l entreprise.
+Aussi j ai change de gratuit en pro rien ne s est passe dans la base de donnees supabase
+
+32.
+Ne required pas le logo pour generer le devis ou PDF. Si logo n est pas disponible, utilise le logo the l application. J obtient error presentement lorsque j essaie d obtenir devis ou PDF pour une entreprise qui n a pas charge de logo.
+
+33.
+Lorsque ind_dimension = 1, P.U applique est calcule comme formule x 1 (lxhx1). Cependant, on peut changer P.U applique. ceci est different de P.U
+
+34. Non, le calcul est mauvais.
+Dans le pave PU applique (ligne releve) est comme suit par defaut:
+- Si ind_dimension = 0, P.U applique = P.U
+- Si ind_dimension = 1, P.U applique = P.U x l x h
+
+Dans les ecran pave, recapitulatif et detail, P.U affiche est P.U applique.
+Dans le devis, P.U affiche est P.U applique et Montant = P.U applique x n
+
+35. Pour devis, telecharger et whatsapp, nom du fichier est : devis_client_date.pdf
+    Pour pdf, telecharger et whatsapp, nom du fichier est : releves_client_date.pdf

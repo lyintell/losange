@@ -9,7 +9,8 @@ import {
   getMainFabBottom,
 } from '../components/terrain/TerrainFlowFabs';
 import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
-import { canCurrentUserModifyChantierLocal, getChantiersWithClientLocal, updateChantierStatusLocal } from '../db/querries';
+import { canCurrentUserModifyChantierLocal, getChantiersWithClientLocal, getLoggedInProfilViewLocal, updateChantierStatusLocal } from '../db/querries';
+import { canCreateReleveOrLigne } from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
 import {
   getChantierStatusColor,
@@ -41,6 +42,15 @@ const formatPriseLe = (dateValue) => {
   });
 };
 
+const formatPriseParLine = (dateValue, priseParNom) => {
+  const date = formatPriseLe(dateValue);
+  const prisePar = String(priseParNom || '').trim();
+  if (date && prisePar) return `${date} (prise par ${prisePar})`;
+  if (date) return date;
+  if (prisePar) return `(prise par ${prisePar})`;
+  return '';
+};
+
 function StatutBadge({ statut }) {
   const bgColor = getChantierStatusColor(statut);
   const label = getChantierStatusLabel(statut);
@@ -63,6 +73,7 @@ export default function ListeChantiers({
   const [chantiers, setChantiers] = useState([]);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [canCreateReleve, setCanCreateReleve] = useState(true);
   const pulseAnim = React.useRef(new Animated.Value(1)).current;
   const pressCountRef = useRef(0);
   const pressTimerRef = useRef(null);
@@ -83,6 +94,29 @@ export default function ListeChantiers({
     loadChantiers();
   }, [loadChantiers, refreshToken]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAccess = async () => {
+      try {
+        const profil = await getLoggedInProfilViewLocal();
+        if (!cancelled) {
+          setCanCreateReleve(canCreateReleveOrLigne(profil));
+        }
+      } catch (error) {
+        console.error('Erreur chargement acces creation releve:', error);
+        if (!cancelled) {
+          setCanCreateReleve(true);
+        }
+      }
+    };
+
+    loadAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(
     () => () => {
       if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
@@ -91,6 +125,8 @@ export default function ListeChantiers({
   );
 
   useEffect(() => {
+    if (!canCreateReleve) return undefined;
+
     const pulse = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
@@ -112,7 +148,7 @@ export default function ListeChantiers({
     return () => {
       pulse.stop();
     };
-  }, [pulseAnim]);
+  }, [pulseAnim, canCreateReleve]);
 
   const applyChantierStatus = useCallback(async (chantier, nextStatus) => {
     if (!chantier?.id || chantier.status === nextStatus) return;
@@ -190,29 +226,34 @@ export default function ListeChantiers({
         data={filteredChantiers}
         keyExtractor={(item) => item.id}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadChantiers} />}
-        contentContainerStyle={[styles.listContent, { paddingBottom: getFabColumnPadding(1) + 24 }]}
-        renderItem={({ item }) => (
-          <Pressable onPress={() => handleChantierPress(item)}>
-            <Card style={styles.card} mode="elevated">
-              <Card.Content>
-                <Text variant="titleMedium" style={styles.chantierName}>
-                  {item.nom}
-                </Text>
-                <View style={styles.clientRow}>
+        contentContainerStyle={[
+          styles.listContent,
+          { paddingBottom: getFabColumnPadding(canCreateReleve ? 1 : 0) + 24 },
+        ]}
+        renderItem={({ item }) => {
+          const priseParLine = formatPriseParLine(item.prise_le, item.prise_par_nom);
+
+          return (
+            <Pressable onPress={() => handleChantierPress(item)}>
+              <Card style={styles.card} mode="elevated">
+                <Card.Content>
+                  <View style={styles.titleRow}>
+                    <Text variant="titleMedium" style={styles.chantierName}>
+                      {item.nom}
+                    </Text>
+                    <StatutBadge statut={item.status || 'D'} />
+                  </View>
                   <Text variant="bodyLarge" style={styles.clientLine} numberOfLines={1}>
                     {formatClientPhoneLine(item.client_nom, item.client_telephone_1)}
                   </Text>
-                  <View style={styles.badgeColumn}>
-                    <StatutBadge statut={item.status || 'D'} />
-                    {item.prise_le ? (
-                      <Text style={styles.priseLeText}>{formatPriseLe(item.prise_le)}</Text>
-                    ) : null}
-                  </View>
-                </View>
-              </Card.Content>
-            </Card>
-          </Pressable>
-        )}
+                  {priseParLine ? (
+                    <Text style={styles.priseLeText}>{priseParLine}</Text>
+                  ) : null}
+                </Card.Content>
+              </Card>
+            </Pressable>
+          );
+        }}
         ListEmptyComponent={
           loading ? (
             <View style={styles.loadingState}>
@@ -228,23 +269,25 @@ export default function ListeChantiers({
         }
       />
 
-      <Animated.View
-        style={[
-          styles.pulseWrapper,
-          { bottom: getMainFabBottom(1) },
-          { transform: [{ scale: pulseAnim }] },
-        ]}
-      >
-        <FAB
-          icon="plus"
-          style={styles.fab}
-          color="#FFFFFF"
-          customSize={FAB_SIZES.main}
-          loading={creating}
-          disabled={creating}
-          onPress={onCreatePress}
-        />
-      </Animated.View>
+      {canCreateReleve ? (
+        <Animated.View
+          style={[
+            styles.pulseWrapper,
+            { bottom: getMainFabBottom(1) },
+            { transform: [{ scale: pulseAnim }] },
+          ]}
+        >
+          <FAB
+            icon="plus"
+            style={styles.fab}
+            color="#FFFFFF"
+            customSize={FAB_SIZES.main}
+            loading={creating}
+            disabled={creating}
+            onPress={onCreatePress}
+          />
+        </Animated.View>
+      ) : null}
       <FlowSmallFab
         icon="magnify"
         tierFromBottom={0}
@@ -303,31 +346,27 @@ const styles = StyleSheet.create({
     borderColor: chantierColors.border,
     paddingVertical: 6,
   },
-  chantierName: {
-    color: chantierColors.text,
-    fontWeight: '800',
-    marginBottom: 6,
-  },
-  clientRow: {
+  titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
+    marginBottom: 6,
   },
-  clientLine: {
+  chantierName: {
     flex: 1,
     color: chantierColors.text,
+    fontWeight: '800',
   },
-  badgeColumn: {
-    alignItems: 'flex-end',
-    gap: 4,
-    maxWidth: '46%',
+  clientLine: {
+    color: chantierColors.text,
+    marginBottom: 4,
   },
   priseLeText: {
     color: chantierColors.muted,
-    fontSize: 11,
-    lineHeight: 14,
-    textAlign: 'right',
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 2,
   },
   badge: {
     paddingHorizontal: 12,

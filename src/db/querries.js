@@ -13,7 +13,10 @@ import { canModifyReleveForProfil } from '../utils/terrainAccess';
 import { FREE_TIER_LIMITS, isProAccount } from '../utils/freeTierLimits';
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
-import { computeQuantiteLigneReleve } from '../utils/ligneReleveCalcul';
+import {
+  computeMontantLigneReleve,
+  computeQuantiteLigneReleve,
+} from '../utils/ligneReleveCalcul';
 
 const nowIso = () => new Date().toISOString();
 
@@ -65,8 +68,10 @@ const countActiveChantiersForEntrepriseLocal = async (entrepriseId) => {
 const countOuvragesForMetierLocal = async (entrepriseId, metierId) => {
   if (!entrepriseId || !metierId) return 0;
   const db = await ensureLocalDatabaseReady();
+  const hasSupprimeLe = await tableHasColumn(db, 'ouvrages', 'supprime_le');
+  const tombstoneFilter = hasSupprimeLe ? ' AND supprime_le IS NULL' : '';
   const row = await db.getFirstAsync(
-    `SELECT COUNT(*) AS count FROM ouvrages WHERE entreprise_id = ? AND metier_id = ?;`,
+    `SELECT COUNT(*) AS count FROM ouvrages WHERE entreprise_id = ? AND metier_id = ?${tombstoneFilter};`,
     [entrepriseId, metierId]
   );
   return Number(row?.count || 0);
@@ -172,8 +177,10 @@ export const ensureCatalogueLocal = async (entrepriseId = null) => {
 
   let ouvragesCount = null;
   if (entrepriseId) {
+    const hasOuvrageSupprimeLe = await tableHasColumn(db, 'ouvrages', 'supprime_le');
+    const ouvrageTombstoneFilter = hasOuvrageSupprimeLe ? ' AND supprime_le IS NULL' : '';
     const ouvragesRow = await db.getFirstAsync(
-      'SELECT COUNT(*) AS count FROM ouvrages WHERE entreprise_id = ?;',
+      `SELECT COUNT(*) AS count FROM ouvrages WHERE entreprise_id = ?${ouvrageTombstoneFilter};`,
       [entrepriseId]
     );
     ouvragesCount = Number(ouvragesRow?.count || 0);
@@ -189,13 +196,13 @@ export const ensureCatalogueLocal = async (entrepriseId = null) => {
 };
 
 /** Tous les metiers du catalogue local (sync Supabase), sans filtre par ouvrages entreprise. */
-export const getMetiersForEntrepriseLocal = async (_entrepriseId = null) => {
-  return getMetiersLocal();
+export const getMetiersForEntrepriseLocal = async (entrepriseId = null) => {
+  return loadMetiersWithCatalogueRefreshLocal(entrepriseId);
 };
 
 /** Métiers disponibles lors du choix d'un ouvrage (3 max en compte gratuit). */
-export const getMetiersForSelectionLocal = async (_entrepriseId = null) => {
-  const metiers = await getMetiersLocal();
+export const getMetiersForSelectionLocal = async (entrepriseId = null) => {
+  const metiers = await loadMetiersWithCatalogueRefreshLocal(entrepriseId);
   const profil = await getLoggedInProfilLocal();
   if (isProAccount(profil)) return metiers;
   return metiers.slice(0, FREE_TIER_LIMITS.maxMetiersSelection);
@@ -203,7 +210,7 @@ export const getMetiersForSelectionLocal = async (_entrepriseId = null) => {
 
 export const getMetiersLocal = async () => {
   const db = await ensureLocalDatabaseReady();
-  return db.getAllAsync(`
+  const orderedQuery = `
     SELECT m.*
     FROM metiers m
     LEFT JOIN metiers_ordre mo ON mo.metier_id = m.id
@@ -211,7 +218,39 @@ export const getMetiersLocal = async () => {
       CASE WHEN mo.ordre IS NULL THEN 1 ELSE 0 END,
       mo.ordre ASC,
       m.nom ASC;
-  `);
+  `;
+
+  try {
+    return await db.getAllAsync(orderedQuery);
+  } catch (error) {
+    console.warn('Chargement métiers sans ordre local:', error);
+    return db.getAllAsync('SELECT * FROM metiers ORDER BY nom ASC;');
+  }
+};
+
+/** Charge les métiers ; tente un pull catalogue Supabase si vide (compte Pro). */
+export const loadMetiersWithCatalogueRefreshLocal = async (entrepriseId = null) => {
+  let metiers = await getMetiersLocal();
+  if (metiers.length > 0) return metiers;
+
+  const profil = await getLoggedInProfilLocal();
+  if (!isProAccount(profil)) return metiers;
+
+  try {
+    const { refreshCatalogueFromCloudLocal } = await import('./terrainSyncPro');
+    const result = await refreshCatalogueFromCloudLocal();
+    if (!result.ok) {
+      console.warn('Catalogue métiers non rechargé:', result.error);
+    }
+  } catch (error) {
+    console.warn('Erreur rechargement catalogue métiers:', error);
+  }
+
+  metiers = await getMetiersLocal();
+  if (metiers.length === 0 && entrepriseId) {
+    await ensureCatalogueLocal(entrepriseId);
+  }
+  return metiers;
 };
 
 export const saveMetiersOrderLocal = async (metierIds = []) => {
@@ -347,12 +386,14 @@ export const updateRelevePriseParLocal = async (releveId, priseParId) => {
  */
 const getUniteContextByOuvrageUniteId = async (ouvrageUniteId) => {
   const db = await ensureLocalDatabaseReady();
+  const hasSupprimeLe = await tableHasColumn(db, 'ouvrage_unites', 'supprime_le');
+  const tombstoneFilter = hasSupprimeLe ? ' AND ou.supprime_le IS NULL' : '';
   return db.getFirstAsync(
     `
     SELECT u.ind_dimension, u.formule
     FROM ouvrage_unites ou
     JOIN unites u ON u.id = ou.unite_id
-    WHERE ou.id = ?;
+    WHERE ou.id = ?${tombstoneFilter};
     `,
     [ouvrageUniteId]
   );
@@ -385,8 +426,10 @@ export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) =>
     nombre,
   });
 
-  // Calcul automatique du montant (Quantité x Prix Appliqué)
-  const montant = quantite * prixUnitaireApplique;
+  const montant = computeMontantLigneReleve({
+    prixUnitaireApplique,
+    nombre: nombre || 1,
+  });
 
   const query = `
     INSERT INTO ligne_releves (
@@ -572,14 +615,24 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
     ? ' AND chantiers.supprime_le IS NULL AND clients.supprime_le IS NULL'
     : '';
   const hasReleveSupprimeLe = await tableHasColumn(db, 'releves', 'supprime_le');
-  const releveTombstoneFilter = hasReleveSupprimeLe ? 'WHERE supprime_le IS NULL' : '';
+  const releveTombstoneClause = hasReleveSupprimeLe ? 'AND r2.supprime_le IS NULL' : '';
   const relevePriseJoin = `
     LEFT JOIN (
-      SELECT chantier_id, MIN(cree_le) AS prise_le
-      FROM releves
-      ${releveTombstoneFilter}
-      GROUP BY chantier_id
+      SELECT
+        r.chantier_id,
+        r.cree_le AS prise_le,
+        r.prise_par_id
+      FROM releves r
+      WHERE ${hasReleveSupprimeLe ? 'r.supprime_le IS NULL AND ' : ''}r.id = (
+        SELECT r2.id
+        FROM releves r2
+        WHERE r2.chantier_id = r.chantier_id
+        ${releveTombstoneClause}
+        ORDER BY r2.cree_le ASC, r2.id ASC
+        LIMIT 1
+      )
     ) releve_prise ON releve_prise.chantier_id = chantiers.id
+    LEFT JOIN profils prise_par ON prise_par.id = releve_prise.prise_par_id
   `;
 
   const query = entrepriseId
@@ -589,12 +642,13 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
       clients.nom_complet as client_nom,
       clients.telephone_1 as client_telephone_1,
       clients.telephone_2 as client_telephone_2,
-      releve_prise.prise_le as prise_le
+      releve_prise.prise_le as prise_le,
+      TRIM(COALESCE(prise_par.prenom, '') || ' ' || COALESCE(prise_par.nom, '')) as prise_par_nom
     FROM chantiers
     JOIN clients ON chantiers.client_id = clients.id
     ${relevePriseJoin}
     WHERE clients.entreprise_id = ?${tombstoneFilter}
-    ORDER BY chantiers.cree_le DESC;
+    ORDER BY COALESCE(releve_prise.prise_le, chantiers.cree_le) DESC;
   `
     : `
     SELECT
@@ -602,12 +656,13 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
       clients.nom_complet as client_nom,
       clients.telephone_1 as client_telephone_1,
       clients.telephone_2 as client_telephone_2,
-      releve_prise.prise_le as prise_le
+      releve_prise.prise_le as prise_le,
+      TRIM(COALESCE(prise_par.prenom, '') || ' ' || COALESCE(prise_par.nom, '')) as prise_par_nom
     FROM chantiers
     JOIN clients ON chantiers.client_id = clients.id
     ${relevePriseJoin}
     WHERE 1=1${tombstoneFilter}
-    ORDER BY chantiers.cree_le DESC;
+    ORDER BY COALESCE(releve_prise.prise_le, chantiers.cree_le) DESC;
   `;
   return entrepriseId ? db.getAllAsync(query, [entrepriseId]) : db.getAllAsync(query);
 };
@@ -638,12 +693,13 @@ export const getChantiersReportRowsLocal = async (entrepriseId) => {
       chantiers.id,
       chantiers.status,
       chantiers.cree_le,
-      COALESCE(SUM(lr.montant), 0) AS montant_total
+      COALESCE(SUM(lr.montant), 0) AS montant_total_ht
     FROM chantiers
     JOIN clients ON chantiers.client_id = clients.id
     LEFT JOIN releves r ON r.chantier_id = chantiers.id${releveJoinFilter}
     LEFT JOIN ligne_releves lr ON lr.releve_id = r.id${ligneJoinFilter}
     WHERE clients.entreprise_id = ?${tombstoneFilter}
+      AND chantiers.status != 'Z'
     GROUP BY chantiers.id
     ORDER BY chantiers.cree_le DESC;
     `,
@@ -681,7 +737,9 @@ export const getChantierWithClientByIdLocal = async (chantierId) => {
  */
 export const getOuvragesByMetierAndEntreprise = async (metierId, entrepriseId) => {
   const db = await ensureLocalDatabaseReady();
-  const query = `SELECT * FROM ouvrages WHERE metier_id = ? AND entreprise_id = ? ORDER BY nom ASC;`;
+  const hasSupprimeLe = await tableHasColumn(db, 'ouvrages', 'supprime_le');
+  const tombstoneFilter = hasSupprimeLe ? ' AND supprime_le IS NULL' : '';
+  const query = `SELECT * FROM ouvrages WHERE metier_id = ? AND entreprise_id = ?${tombstoneFilter} ORDER BY nom ASC;`;
   return await db.getAllAsync(query, [metierId, entrepriseId]);
 };
 
@@ -690,6 +748,8 @@ export const getOuvragesByMetierAndEntreprise = async (metierId, entrepriseId) =
  */
 export const getUnitesEtPrixParOuvrage = async (ouvrageId) => {
   const db = await ensureLocalDatabaseReady();
+  const hasSupprimeLe = await tableHasColumn(db, 'ouvrage_unites', 'supprime_le');
+  const tombstoneFilter = hasSupprimeLe ? ' AND ou.supprime_le IS NULL' : '';
   const query = `
     SELECT
       ou.id as ouvrage_unite_id,
@@ -702,7 +762,7 @@ export const getUnitesEtPrixParOuvrage = async (ouvrageId) => {
       ou.prix_unitaire
     FROM ouvrage_unites ou
     JOIN unites u ON ou.unite_id = u.id
-    WHERE ou.ouvrage_id = ?
+    WHERE ou.ouvrage_id = ?${tombstoneFilter}
     ORDER BY u.nom ASC;
   `;
   return await db.getAllAsync(query, [ouvrageId]);
@@ -775,6 +835,10 @@ export const getOuvrageUniteContextLocal = async (ouvrageUniteId) => {
   if (!ouvrageUniteId) return null;
 
   const db = await ensureLocalDatabaseReady();
+  const hasOuvrageUniteSupprimeLe = await tableHasColumn(db, 'ouvrage_unites', 'supprime_le');
+  const hasOuvrageSupprimeLe = await tableHasColumn(db, 'ouvrages', 'supprime_le');
+  const ouTombstoneFilter = hasOuvrageUniteSupprimeLe ? ' AND ou.supprime_le IS NULL' : '';
+  const oTombstoneFilter = hasOuvrageSupprimeLe ? ' AND o.supprime_le IS NULL' : '';
   const row = await db.getFirstAsync(
     `
     SELECT
@@ -795,7 +859,7 @@ export const getOuvrageUniteContextLocal = async (ouvrageUniteId) => {
     JOIN unites u ON u.id = ou.unite_id
     JOIN ouvrages o ON o.id = ou.ouvrage_id
     JOIN metiers m ON m.id = o.metier_id
-    WHERE ou.id = ?;
+    WHERE ou.id = ?${ouTombstoneFilter}${oTombstoneFilter};
     `,
     [ouvrageUniteId]
   );
@@ -1154,6 +1218,8 @@ const applyChantierPendingPhotosLocal = async (chantierId, chantierPhotoUris = {
 export const getOuvragesByEntrepriseLocal = async (entrepriseId) => {
   if (!entrepriseId) return [];
   const db = await ensureLocalDatabaseReady();
+  const hasSupprimeLe = await tableHasColumn(db, 'ouvrages', 'supprime_le');
+  const tombstoneFilter = hasSupprimeLe ? ' AND o.supprime_le IS NULL' : '';
   return db.getAllAsync(
     `
     SELECT
@@ -1166,7 +1232,7 @@ export const getOuvragesByEntrepriseLocal = async (entrepriseId) => {
       m.nom AS metier_nom
     FROM ouvrages o
     JOIN metiers m ON m.id = o.metier_id
-    WHERE o.entreprise_id = ?
+    WHERE o.entreprise_id = ?${tombstoneFilter}
     ORDER BY m.nom ASC, o.nom ASC;
     `,
     [entrepriseId]
@@ -1176,12 +1242,14 @@ export const getOuvragesByEntrepriseLocal = async (entrepriseId) => {
 export const getOuvrageByIdLocal = async (ouvrageId) => {
   if (!ouvrageId) return null;
   const db = await ensureLocalDatabaseReady();
+  const hasSupprimeLe = await tableHasColumn(db, 'ouvrages', 'supprime_le');
+  const tombstoneFilter = hasSupprimeLe ? ' AND o.supprime_le IS NULL' : '';
   return db.getFirstAsync(
     `
     SELECT o.*, m.nom AS metier_nom
     FROM ouvrages o
     JOIN metiers m ON m.id = o.metier_id
-    WHERE o.id = ?;
+    WHERE o.id = ?${tombstoneFilter};
     `,
     [ouvrageId]
   );
@@ -1252,9 +1320,48 @@ export const deleteOuvrageLocal = async (ouvrageId) => {
     throw new Error('Impossible de supprimer un ouvrage utilisé dans des relevés.');
   }
 
+  const hasOuvrageSupprimeLe = await tableHasColumn(db, 'ouvrages', 'supprime_le');
+  const hasOuvrageUniteSupprimeLe = await tableHasColumn(db, 'ouvrage_unites', 'supprime_le');
+  const ouvrageLookupFilter = hasOuvrageSupprimeLe ? ' AND supprime_le IS NULL' : '';
+  const ouvrage = await db.getFirstAsync(
+    `SELECT id, entreprise_id FROM ouvrages WHERE id = ?${ouvrageLookupFilter};`,
+    [ouvrageId]
+  );
+  if (!ouvrage?.entreprise_id) return;
+
+  const deletedAt = nowIso();
+  const ouUniteTombstoneFilter = hasOuvrageUniteSupprimeLe ? ' AND supprime_le IS NULL' : '';
   await db.withTransactionAsync(async () => {
-    await db.runAsync('DELETE FROM ouvrage_unites WHERE ouvrage_id = ?;', [ouvrageId]);
-    await db.runAsync('DELETE FROM ouvrages WHERE id = ?;', [ouvrageId]);
+    if (hasOuvrageUniteSupprimeLe) {
+      await db.runAsync(
+        `
+        UPDATE ouvrage_unites
+        SET supprime_le = ?, _synced = 0, mis_a_jour_le = datetime('now')
+        WHERE ouvrage_id = ?${ouUniteTombstoneFilter};
+        `,
+        [deletedAt, ouvrageId]
+      );
+    }
+    if (hasOuvrageSupprimeLe) {
+      await db.runAsync(
+        `
+        UPDATE ouvrages
+        SET supprime_le = ?, _synced = 0, mis_a_jour_le = datetime('now')
+        WHERE id = ?;
+        `,
+        [deletedAt, ouvrageId]
+      );
+    } else {
+      await db.runAsync(
+        `
+        INSERT OR REPLACE INTO pending_cloud_deletes (table_name, record_id, entreprise_id)
+        VALUES ('ouvrages', ?, ?);
+        `,
+        [ouvrageId, ouvrage.entreprise_id]
+      );
+      await db.runAsync('DELETE FROM ouvrage_unites WHERE ouvrage_id = ?;', [ouvrageId]);
+      await db.runAsync('DELETE FROM ouvrages WHERE id = ?;', [ouvrageId]);
+    }
   });
 
   notifyLocalDataChanged();
@@ -1288,14 +1395,47 @@ export const deleteClientLocal = async (clientId) => {
   if (!clientId) return;
   const db = await ensureLocalDatabaseReady();
   const deletedAt = nowIso();
-  await db.runAsync(
-    `
-    UPDATE clients
-    SET supprime_le = ?, _synced = 0, mis_a_jour_le = datetime('now')
-    WHERE id = ?;
-    `,
-    [deletedAt, clientId]
-  );
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `
+      UPDATE ligne_releves
+      SET supprime_le = ?, _synced = 0, mis_a_jour_le = datetime('now')
+      WHERE releve_id IN (
+        SELECT releves.id
+        FROM releves
+        JOIN chantiers ON chantiers.id = releves.chantier_id
+        WHERE chantiers.client_id = ?
+      );
+      `,
+      [deletedAt, clientId]
+    );
+    await db.runAsync(
+      `
+      UPDATE releves
+      SET supprime_le = ?, _synced = 0, mis_a_jour_le = datetime('now')
+      WHERE chantier_id IN (SELECT id FROM chantiers WHERE client_id = ?);
+      `,
+      [deletedAt, clientId]
+    );
+    await db.runAsync(
+      `
+      UPDATE chantiers
+      SET supprime_le = ?, _synced = 0, mis_a_jour_le = datetime('now')
+      WHERE client_id = ?;
+      `,
+      [deletedAt, clientId]
+    );
+    await db.runAsync(
+      `
+      UPDATE clients
+      SET supprime_le = ?, _synced = 0, mis_a_jour_le = datetime('now')
+      WHERE id = ?;
+      `,
+      [deletedAt, clientId]
+    );
+  });
+
   notifyLocalDataChanged();
 };
 

@@ -8,7 +8,6 @@ import {
   formatLigneQuantiteAffichage,
   formatMontant,
   getLigneNomUnite,
-  getLignePrixUnitaireAffichage,
   getLignePrixUnitaireApplique,
 } from '../../utils/formatLigneMesures';
 
@@ -25,7 +24,7 @@ export default function LigneReleveCard({
 }) {
   const nomUnite = getLigneNomUnite(ligne);
   const hasNote = Boolean(ligne?.note?.trim());
-  const hasPhoto = Boolean(ligne?.photo);
+  const hasPhoto = Boolean(ligne?.photo || ligne?.photo_pending_uri);
   const isDetails = variant === 'details';
   const isRecap = variant === 'recap';
   const isDetailsLayout = isDetails || isRecap;
@@ -62,9 +61,7 @@ export default function LigneReleveCard({
   const ouvrageLabel = `${ligne.ouvrage_nom || 'Ouvrage'}${isDetailsLayout && hasNote ? ' **' : ''}`;
 
   const quantiteLabel = `Qté ${formatLigneQuantiteAffichage(ligne)}${nomUnite ? ` ${nomUnite}` : ''}`;
-  const prixUnitaireLabel = isRecap
-    ? `P.U. ${formatMontant(getLignePrixUnitaireApplique(ligne))}`
-    : `P.U. ${formatMontant(getLignePrixUnitaireAffichage(ligne))}`;
+  const prixUnitaireLabel = `P.U. ${formatMontant(getLignePrixUnitaireApplique(ligne))}`;
   const showPrixUnitaire = showPrices && (isRecap || isDetails);
 
   const cardBody = (
@@ -74,7 +71,7 @@ export default function LigneReleveCard({
           <Text style={styles.watermarkOk}>OK</Text>
         </View>
       ) : null}
-      {isDetails && hasPhoto ? (
+      {isDetailsLayout && hasPhoto ? (
         <View style={styles.watermarkWrap} pointerEvents="none">
           <MaterialCommunityIcons
             name="image"

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Image, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Surface, Text, TextInput } from 'react-native-paper';
+import { changeTerrainPassword } from '../auth/terrainAuth';
 import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
 import TerrainPhotoInput from '../components/terrain/TerrainPhotoInput';
 import {
@@ -64,6 +65,7 @@ export default function ProfilScreen({
   entrepriseId,
   editing = false,
   saveRequestId = 0,
+  bottomOffset = 0,
   onAdminStatusChange,
   onEditingChange,
   onSaveComplete,
@@ -76,6 +78,9 @@ export default function ProfilScreen({
   const [indTva, setIndTva] = useState(0);
   const [logoPreviewUri, setLogoPreviewUri] = useState(null);
   const [logoMimeType, setLogoMimeType] = useState(null);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   const loadProfil = useCallback(async () => {
     try {
@@ -111,37 +116,88 @@ export default function ProfilScreen({
     setIndTva(Number(profil.entreprise_ind_tva) === 1 ? 1 : 0);
     setLogoPreviewUri(null);
     setLogoMimeType(null);
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
   }, [editing, profil]);
 
-  const handleSave = useCallback(async () => {
-    if (!isAdmin || !entrepriseId || saving) return;
+  useEffect(() => {
+    if (editing) return;
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+  }, [editing]);
 
-    const trimmedNom = entrepriseNom.trim();
-    if (!trimmedNom) {
-      Alert.alert('Entreprise', "Le nom de l'entreprise est requis.");
+  const handleSave = useCallback(async () => {
+    if (saving) return;
+
+    const canEditEntreprise = isAdmin && editing;
+    const wantsPasswordChange = Boolean(
+      currentPassword.trim() || newPassword.trim() || confirmPassword.trim()
+    );
+
+    if (canEditEntreprise) {
+      const trimmedNom = entrepriseNom.trim();
+      if (!trimmedNom) {
+        Alert.alert('Entreprise', "Le nom de l'entreprise est requis.");
+        return;
+      }
+    } else if (!wantsPasswordChange) {
+      Alert.alert('Profil', 'Aucune modification à enregistrer.');
       return;
+    }
+
+    if (wantsPasswordChange) {
+      if (!currentPassword.trim()) {
+        Alert.alert('Mot de passe', 'Indiquez votre mot de passe actuel.');
+        return;
+      }
+      if (!newPassword.trim()) {
+        Alert.alert('Mot de passe', 'Indiquez le nouveau mot de passe.');
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        Alert.alert('Mot de passe', 'La confirmation ne correspond pas.');
+        return;
+      }
     }
 
     try {
       setSaving(true);
-      await updateEntrepriseAdminLocal(entrepriseId, {
-        nom: trimmedNom,
-        ind_tva: profil?.is_pro ? indTva : 0,
-      });
-      if (logoPreviewUri && profil?.is_pro) {
-        await setEntrepriseLogoLocal(entrepriseId, logoPreviewUri, { mimeType: logoMimeType });
+
+      if (canEditEntreprise && entrepriseId) {
+        await updateEntrepriseAdminLocal(entrepriseId, {
+          nom: entrepriseNom.trim(),
+          ind_tva: profil?.is_pro ? indTva : 0,
+        });
+        if (logoPreviewUri && profil?.is_pro) {
+          await setEntrepriseLogoLocal(entrepriseId, logoPreviewUri, { mimeType: logoMimeType });
+        }
       }
+
+      if (wantsPasswordChange) {
+        const passwordResult = await changeTerrainPassword(currentPassword, newPassword);
+        if (!passwordResult.ok) {
+          throw new Error(passwordResult.error || 'Impossible de changer le mot de passe.');
+        }
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+      }
+
       await loadProfil();
       onEditingChange?.(false);
       onSaveComplete?.();
-      Alert.alert('Entreprise', 'Informations enregistrées.');
+      Alert.alert('Profil', 'Modifications enregistrées.');
     } catch (error) {
-      console.error('Erreur sauvegarde entreprise:', error);
-      Alert.alert('Erreur', error.message || "Impossible d'enregistrer l'entreprise.");
+      console.error('Erreur sauvegarde profil:', error);
+      Alert.alert('Erreur', error.message || 'Impossible d’enregistrer les modifications.');
     } finally {
       setSaving(false);
     }
   }, [
+    confirmPassword,
+    currentPassword,
     entrepriseId,
     entrepriseNom,
     indTva,
@@ -149,10 +205,12 @@ export default function ProfilScreen({
     loadProfil,
     logoMimeType,
     logoPreviewUri,
+    newPassword,
     onEditingChange,
     onSaveComplete,
     profil?.is_pro,
     saving,
+    editing,
   ]);
 
   useEffect(() => {
@@ -161,6 +219,7 @@ export default function ProfilScreen({
   }, [saveRequestId, editing, handleSave]);
 
   const canEditEntreprise = isAdmin && editing;
+  const canShowLogo = Boolean(profil?.is_pro && isAdmin);
   const logoStorageKey = profil?.entreprise_logo || null;
   const logoDisplayUri =
     logoPreviewUri || (logoStorageKey ? resolveTerrainImageUri(logoStorageKey) : null);
@@ -181,64 +240,113 @@ export default function ProfilScreen({
           <LosangeLogoLoader size="large" />
         </View>
       ) : profil ? (
-        <Surface style={styles.card} elevation={1}>
-          {!canEditEntreprise && logoDisplayUri ? (
-            <View style={styles.logoPreviewWrap}>
-              <Image source={{ uri: logoDisplayUri }} style={styles.logoPreview} resizeMode="contain" />
-            </View>
-          ) : null}
-          <InfoRow label="Rôle" value={profil.role_label} />
-          {canEditEntreprise ? (
-            <TerrainPhotoInput
-              label="Logo entreprise"
-              previewUri={logoPreviewUri}
-              storageKey={logoPreviewUri ? null : logoStorageKey}
-              disabled={!profil.is_pro || saving}
-              onPicked={({ uri, mimeType }) => {
-                setLogoPreviewUri(uri);
-                setLogoMimeType(mimeType);
-              }}
-              onClear={() => {
-                setLogoPreviewUri(null);
-                setLogoMimeType(null);
-              }}
-            />
-          ) : null}
-          {!canEditEntreprise && !profil.is_pro && isAdmin ? (
-            <Text style={styles.logoHint}>Logo disponible uniquement pour les comptes Pro.</Text>
-          ) : null}
-          {canEditEntreprise ? (
-            <View style={styles.infoRow}>
-              <Text variant="labelLarge" style={styles.infoLabel}>
-                Nom de l'entreprise
-              </Text>
-              <TextInput
-                mode="outlined"
-                value={entrepriseNom}
-                onChangeText={setEntrepriseNom}
-                style={styles.textInput}
-                dense
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomOffset + 20 }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Surface style={styles.card} elevation={1}>
+            {canShowLogo && !canEditEntreprise && logoDisplayUri ? (
+              <View style={styles.logoPreviewWrap}>
+                <Image source={{ uri: logoDisplayUri }} style={styles.logoPreview} resizeMode="contain" />
+              </View>
+            ) : null}
+            <InfoRow label="Rôle" value={profil.role_label} />
+            {canEditEntreprise && canShowLogo ? (
+              <TerrainPhotoInput
+                label="Logo entreprise"
+                previewUri={logoPreviewUri}
+                storageKey={logoPreviewUri ? null : logoStorageKey}
+                disabled={saving}
+                onPicked={({ uri, mimeType }) => {
+                  setLogoPreviewUri(uri);
+                  setLogoMimeType(mimeType);
+                }}
+                onClear={() => {
+                  setLogoPreviewUri(null);
+                  setLogoMimeType(null);
+                }}
               />
-            </View>
-          ) : (
-            <InfoRow label="Entreprise" value={profil.entreprise_nom} />
-          )}
-          {canEditEntreprise ? (
-            <View style={styles.infoRow}>
-              <Text variant="labelLarge" style={styles.infoLabel}>
-                Appliquer TVA
-              </Text>
-              <TvaToggle value={indTva} onChange={setIndTva} disabled={saving || !profil.is_pro} />
-            </View>
-          ) : (
-            <InfoRow label="Appliquer TVA" value={formatTvaLabel(profil.entreprise_ind_tva)} />
-          )}
-          {!profil.is_pro && canEditEntreprise ? (
-            <Text style={styles.logoHint}>TVA disponible uniquement pour les comptes Pro.</Text>
-          ) : null}
-          <InfoRow label="Prénom" value={profil.prenom} />
-          <InfoRow label="Nom" value={profil.nom} />
-        </Surface>
+            ) : null}
+            {canEditEntreprise ? (
+              <View style={styles.infoRow}>
+                <Text variant="labelLarge" style={styles.infoLabel}>
+                  Nom de l'entreprise
+                </Text>
+                <TextInput
+                  mode="outlined"
+                  value={entrepriseNom}
+                  onChangeText={setEntrepriseNom}
+                  style={styles.textInput}
+                  dense
+                />
+              </View>
+            ) : (
+              <InfoRow label="Entreprise" value={profil.entreprise_nom} />
+            )}
+            {canEditEntreprise ? (
+              <View style={styles.infoRow}>
+                <Text variant="labelLarge" style={styles.infoLabel}>
+                  Appliquer TVA
+                </Text>
+                <TvaToggle value={indTva} onChange={setIndTva} disabled={saving || !profil.is_pro} />
+              </View>
+            ) : (
+              <InfoRow label="Appliquer TVA" value={formatTvaLabel(profil.entreprise_ind_tva)} />
+            )}
+            {!profil.is_pro && canEditEntreprise ? (
+              <Text style={styles.fieldHint}>TVA disponible uniquement pour les comptes Pro.</Text>
+            ) : null}
+            <InfoRow label="Prénom" value={profil.prenom} />
+            <InfoRow label="Nom" value={profil.nom} />
+            {profil.identifiant ? <InfoRow label="Identifiant" value={profil.identifiant} /> : null}
+
+            {editing ? (
+              <View style={styles.passwordSection}>
+                <Text variant="titleMedium" style={styles.passwordTitle}>
+                  Mot de passe
+                </Text>
+                <TextInput
+                  mode="outlined"
+                  label="Mot de passe actuel"
+                  value={currentPassword}
+                  onChangeText={setCurrentPassword}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={styles.textInput}
+                  dense
+                  disabled={saving}
+                />
+                <TextInput
+                  mode="outlined"
+                  label="Nouveau mot de passe"
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={styles.textInput}
+                  dense
+                  disabled={saving}
+                />
+                <TextInput
+                  mode="outlined"
+                  label="Confirmer le mot de passe"
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={styles.textInput}
+                  dense
+                  disabled={saving}
+                />
+              </View>
+            ) : null}
+          </Surface>
+        </ScrollView>
       ) : (
         <Surface style={styles.card} elevation={1}>
           <Text variant="bodyLarge" style={styles.emptyText}>
@@ -297,6 +405,12 @@ const styles = StyleSheet.create({
   },
   badgeTextFree: {
     color: chantierColors.muted,
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
   },
   loadingState: {
     flex: 1,
@@ -366,9 +480,20 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: '#F3F4F6',
   },
-  logoHint: {
+  fieldHint: {
     color: chantierColors.muted,
     fontSize: 13,
     fontWeight: '600',
+  },
+  passwordSection: {
+    gap: 10,
+    marginTop: 4,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: chantierColors.border,
+  },
+  passwordTitle: {
+    color: chantierColors.text,
+    fontWeight: '800',
   },
 });

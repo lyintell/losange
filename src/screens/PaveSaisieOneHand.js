@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Modal, Portal, Text, TextInput } from 'react-native-paper';
 import MobileButton from '../components/terrain/MobileButton';
 import PaveMetaButton from '../components/terrain/PaveMetaButton';
@@ -16,12 +16,18 @@ import { getFabActionZoneHeight } from '../components/terrain/TerrainFlowFabs';
 import { getLoggedInProfilViewLocal, insertLigneReleveLocal, setLigneRelevePhotoLocal } from '../db/querries';
 import { pickTerrainImage } from '../utils/terrainImagePicker';
 import { chantierColors } from '../styles/theme';
-import { hidesPriceUiForRole } from '../utils/terrainAccess';
 import {
+  canEditChantierCotesInPave,
+  canEditPrixUnitaireApplique,
+  hidesPriceUiForRole,
+} from '../utils/terrainAccess';
+import {
+  computeMontantLigneReleve,
+  computePrixUnitaireAppliqueDefault,
   computeQuantiteLigneReleve,
   getRequiredCotesFromFormula,
 } from '../utils/ligneReleveCalcul';
-import { formatQuantite } from '../utils/formatLigneMesures';
+import { formatMontant, formatQuantite, roundQuantite } from '../utils/formatLigneMesures';
 
 const FIELD_LABEL = {
   largeur: 'Largeur',
@@ -97,30 +103,40 @@ export default forwardRef(function PaveSaisieOneHand(
   const [photoPendingUri, setPhotoPendingUri] = useState(initialValues?.photo_pending_uri || null);
   const [photoMimeType, setPhotoMimeType] = useState(initialValues?.photo_mime_type || null);
   const [existingPhotoKey, setExistingPhotoKey] = useState(initialValues?.photo || null);
-  const [prixUnitaireAppliqueState, setPrixUnitaireAppliqueState] = useState(
-    () =>
-      initialValues?.prix_unitaire_applique != null
-        ? Number(initialValues.prix_unitaire_applique) || 0
-        : Number(prixUnitaireApplique) || 0
-  );
+  const cataloguePu = Number(prixUnitaireApplique) || 0;
+  const [prixUnitaireAppliqueState, setPrixUnitaireAppliqueState] = useState(() => {
+    if (initialValues?.prix_unitaire_applique != null) {
+      return Number(initialValues.prix_unitaire_applique) || 0;
+    }
+    return cataloguePu;
+  });
+  const prixManuallyEditedRef = useRef(initialValues?.prix_unitaire_applique != null);
   const [saving, setSaving] = useState(false);
   const [resolvedHidePriceUi, setResolvedHidePriceUi] = useState(hidePriceUi);
+  const [canEditPuApplique, setCanEditPuApplique] = useState(!hidePriceUi);
+  const [lockDimensionCotes, setLockDimensionCotes] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     const loadPriceAccess = async () => {
-      if (hidePriceUi) {
-        if (!cancelled) setResolvedHidePriceUi(true);
-        return;
-      }
-
       try {
         const profil = await getLoggedInProfilViewLocal();
-        if (!cancelled) setResolvedHidePriceUi(hidesPriceUiForRole(profil?.role));
+        const roleHidesPrice = hidesPriceUiForRole(profil?.role);
+        const canEdit = canEditPrixUnitaireApplique(profil);
+        const canEditCotes = canEditChantierCotesInPave(profil);
+        if (!cancelled) {
+          setResolvedHidePriceUi(hidePriceUi || roleHidesPrice);
+          setCanEditPuApplique(canEdit && !hidePriceUi);
+          setLockDimensionCotes(!canEditCotes);
+        }
       } catch (error) {
         console.error('Erreur chargement acces prix:', error);
-        if (!cancelled) setResolvedHidePriceUi(false);
+        if (!cancelled) {
+          setResolvedHidePriceUi(hidePriceUi);
+          setCanEditPuApplique(!hidePriceUi);
+          setLockDimensionCotes(false);
+        }
       }
     };
 
@@ -130,31 +146,73 @@ export default forwardRef(function PaveSaisieOneHand(
     };
   }, [hidePriceUi]);
 
-  useEffect(() => {
-    setPrixUnitaireAppliqueState(
-      initialValues?.prix_unitaire_applique != null
-        ? Number(initialValues.prix_unitaire_applique) || 0
-        : Number(prixUnitaireApplique) || 0
-    );
-  }, [initialValues?.prix_unitaire_applique, prixUnitaireApplique, ouvrageUniteId]);
+  const isCoteFieldLocked = useCallback(
+    (field) => lockDimensionCotes && (field === 'largeur' || field === 'hauteur'),
+    [lockDimensionCotes]
+  );
+
+  const defaultPuApplique = useMemo(() => {
+    try {
+      return computePrixUnitaireAppliqueDefault({
+        indDimension: isDimensionMode ? 1 : 0,
+        prixUnitaire: cataloguePu,
+        formule: uniteFormule,
+        largeur: form.largeur,
+        hauteur: form.hauteur,
+        profondeur: null,
+      });
+    } catch {
+      return isDimensionMode ? 0 : cataloguePu;
+    }
+  }, [cataloguePu, form.hauteur, form.largeur, isDimensionMode, uniteFormule]);
 
   useEffect(() => {
-    setFocusIndex(0);
+    if (initialValues?.prix_unitaire_applique != null) {
+      setPrixUnitaireAppliqueState(Number(initialValues.prix_unitaire_applique) || 0);
+      prixManuallyEditedRef.current = true;
+      return;
+    }
+    prixManuallyEditedRef.current = false;
+  }, [initialValues?.prix_unitaire_applique, ouvrageUniteId]);
+
+  useEffect(() => {
+    if (initialValues?.prix_unitaire_applique != null) return;
+    if (prixManuallyEditedRef.current) return;
+    setPrixUnitaireAppliqueState(defaultPuApplique);
+  }, [defaultPuApplique, initialValues?.prix_unitaire_applique]);
+
+  useEffect(() => {
+    if (lockDimensionCotes) {
+      const nombreIndex = champs.indexOf('nombre');
+      setFocusIndex(nombreIndex >= 0 ? nombreIndex : 0);
+    } else {
+      setFocusIndex(0);
+    }
     replaceOnNextKeyRef.current = true;
-  }, [champs.join('|')]);
+  }, [champs.join('|'), lockDimensionCotes]);
 
   const focusField = champs[focusIndex] || champs[0];
 
   const selectField = (index) => {
     const field = champs[index];
-    if (!field) return;
+    if (!field || isCoteFieldLocked(field)) return;
     setFocusIndex(index);
     replaceOnNextKeyRef.current = true;
   };
 
   const buildPayloadIfValid = useCallback(() => {
-    const largeur = parseFloat(form.largeur || '0');
-    const hauteur = parseFloat(form.hauteur || '0');
+    const resolveLockedCote = (field, formValue) => {
+      if (!isCoteFieldLocked(field)) {
+        return parseFloat(formValue || '0');
+      }
+      if (initialValues?.[field] != null && initialValues[field] !== '') {
+        return parseFloat(initialValues[field]) || 0;
+      }
+      return parseFloat(formValue || '0');
+    };
+
+    const largeur = resolveLockedCote('largeur', form.largeur);
+    const hauteur = resolveLockedCote('hauteur', form.hauteur);
     const nombre = parseInt(form.nombre?.trim() || '0', 10);
 
     if (requiredCotes.needsLargeur && (!form.largeur?.trim() || !largeur)) return null;
@@ -189,7 +247,19 @@ export default forwardRef(function PaveSaisieOneHand(
       photo_mime_type: photoMimeType,
       photo: photoPendingUri ? null : existingPhotoKey,
     };
-  }, [form, isDimension, uniteFormule, requiredCotes, prixUnitaireAppliqueState, note, photoPendingUri, photoMimeType, existingPhotoKey]);
+  }, [
+    form,
+    isDimension,
+    uniteFormule,
+    requiredCotes,
+    prixUnitaireAppliqueState,
+    note,
+    photoPendingUri,
+    photoMimeType,
+    existingPhotoKey,
+    initialValues,
+    isCoteFieldLocked,
+  ]);
 
   const isFormComplete = Boolean(buildPayloadIfValid());
 
@@ -218,8 +288,16 @@ export default forwardRef(function PaveSaisieOneHand(
     }
   }, [form.hauteur, form.largeur, form.nombre, isDimension, uniteFormule]);
 
+  const montantPreview = useMemo(() => {
+    const nombre = parseInt(form.nombre?.trim() || '0', 10) || 0;
+    return computeMontantLigneReleve({
+      prixUnitaireApplique: prixUnitaireAppliqueState,
+      nombre,
+    });
+  }, [form.nombre, prixUnitaireAppliqueState]);
+
   const handleKeyPress = (value) => {
-    if (!focusField) return;
+    if (!focusField || isCoteFieldLocked(focusField)) return;
     if (value === 'Effacer') {
       replaceOnNextKeyRef.current = false;
       setForm((prev) => ({ ...prev, [focusField]: prev[focusField].slice(0, -1) }));
@@ -265,7 +343,8 @@ export default forwardRef(function PaveSaisieOneHand(
       setPhotoPendingUri(null);
       setPhotoMimeType(null);
       setExistingPhotoKey(null);
-      setPrixUnitaireAppliqueState(Number(prixUnitaireApplique) || 0);
+      prixManuallyEditedRef.current = false;
+      setPrixUnitaireAppliqueState(isDimensionMode ? 0 : cataloguePu);
       setFocusIndex(0);
       replaceOnNextKeyRef.current = true;
       return true;
@@ -302,7 +381,7 @@ export default forwardRef(function PaveSaisieOneHand(
   const quantiteAffichage = isDimensionMode
     ? parseInt(form.nombre?.trim() || '0', 10) || 0
     : quantitePreview;
-  const quantiteLabel = `Qté =  ${formatQuantite(quantiteAffichage)}${nomUnite ? ` ${nomUnite}` : ''}`;
+  const quantiteLabel = `Qté = ${formatQuantite(quantiteAffichage)}${nomUnite ? ` ${nomUnite}` : ''}`;
 
   const openNotesModal = () => {
     setNoteDraft(note);
@@ -315,17 +394,20 @@ export default forwardRef(function PaveSaisieOneHand(
   };
 
   const openPrixModal = () => {
+    if (!canEditPuApplique) return;
     setPrixUnitaireDraft(String(prixUnitaireAppliqueState || 0));
     setPrixModalVisible(true);
   };
 
   const savePrix = () => {
+    if (!canEditPuApplique) return;
     const parsed = parseFloat(String(prixUnitaireDraft).replace(',', '.'));
     if (Number.isNaN(parsed) || parsed < 0) {
       Alert.alert('Prix invalide', 'Saisissez un prix unitaire valide.');
       return;
     }
     setPrixUnitaireAppliqueState(parsed);
+    prixManuallyEditedRef.current = true;
     setPrixModalVisible(false);
   };
 
@@ -339,14 +421,20 @@ export default forwardRef(function PaveSaisieOneHand(
   };
 
   const renderPaveKey = (field, index) => {
-    const isActive = focusIndex === index;
+    const isLocked = isCoteFieldLocked(field);
+    const isActive = !isLocked && focusIndex === index;
     const value = chipDisplayValue(field, index);
 
     return (
       <Pressable
         key={field}
         onPress={() => selectField(index)}
-        style={[styles.paveKey, isActive && styles.paveKeyActive]}
+        disabled={isLocked}
+        style={[
+          styles.paveKey,
+          isLocked && styles.paveKeyLocked,
+          isActive && styles.paveKeyActive,
+        ]}
       >
         <Text
           numberOfLines={1}
@@ -400,7 +488,10 @@ export default forwardRef(function PaveSaisieOneHand(
         contentContainerStyle={styles.notesModal}
       >
         <Text variant="titleLarge" style={styles.notesModalTitle}>
-          Prix unitaire appliqué
+          P.U. appliqué
+        </Text>
+        <Text style={styles.prixModalHint}>
+          Par défaut : P.U catalogue, ou P.U × l × h si dimension. Montant = P.U. appliqué × n.
         </Text>
         <TextInput
           mode="outlined"
@@ -434,9 +525,9 @@ export default forwardRef(function PaveSaisieOneHand(
           iconOnly
           style={styles.metaButtonIcon}
         />
-        {resolvedHidePriceUi ? null : (
+        {canEditPuApplique && !resolvedHidePriceUi ? (
           <PaveMetaButton icon="currency-usd" onPress={openPrixModal} iconOnly style={styles.metaButtonIcon} />
-        )}
+        ) : null}
         <PaveMetaButton
           icon="camera"
           onPress={handlePickPhoto}
@@ -445,7 +536,15 @@ export default forwardRef(function PaveSaisieOneHand(
           style={styles.metaButtonIcon}
         />
       </View>
-      <Text style={styles.quantiteLine}>{quantiteLabel}</Text>
+      <View style={styles.summaryRow}>
+        <Text style={styles.quantiteLine}>{quantiteLabel}</Text>
+        {!resolvedHidePriceUi ? (
+          <>
+            <Text style={styles.puLine}>P.U. = {formatMontant(prixUnitaireAppliqueState)}</Text>
+            <Text style={styles.montantLine}>MT = {formatMontant(montantPreview)}</Text>
+          </>
+        ) : null}
+      </View>
     </View>
   );
 
@@ -453,38 +552,48 @@ export default forwardRef(function PaveSaisieOneHand(
     const fabZoneHeight = getFabActionZoneHeight(fabSmallCountBelow);
 
     return (
-      <View style={styles.containerEmbedded}>
-        <View style={styles.topKeypadBlock}>
-          <PaveNumerique
-            onKeyPress={handleKeyPress}
-            disabled={saving}
-            measuresLine={mesuresFormatees}
-            placement="top"
-          />
-        </View>
-        <View style={styles.embeddedSpacer} />
-        <View style={[styles.bottomBlock, { paddingBottom: fabZoneHeight }]}>
+      <>
+        <ScrollView
+          style={styles.containerEmbedded}
+          contentContainerStyle={[styles.scrollContentEmbedded, { paddingBottom: fabZoneHeight }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.topKeypadBlock}>
+            <PaveNumerique
+              onKeyPress={handleKeyPress}
+              disabled={saving}
+              measuresLine={mesuresFormatees}
+              placement="top"
+            />
+          </View>
           {renderBottomPanel()}
-        </View>
+        </ScrollView>
         {renderNotesModal()}
         {renderPrixModal()}
-      </View>
+      </>
     );
   }
 
   return (
-    <View style={[styles.container, { paddingBottom: bottomOffset + 8 }]}>
-      <PaveNumerique
-        onKeyPress={handleKeyPress}
-        disabled={saving}
-        measuresLine={mesuresFormatees}
-        placement="top"
-      />
-      <View style={styles.embeddedSpacer} />
-      {renderBottomPanel()}
+    <>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[styles.scrollContentEmbedded, { paddingBottom: bottomOffset + 8 }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <PaveNumerique
+          onKeyPress={handleKeyPress}
+          disabled={saving}
+          measuresLine={mesuresFormatees}
+          placement="top"
+        />
+        {renderBottomPanel()}
+      </ScrollView>
       {renderNotesModal()}
       {renderPrixModal()}
-    </View>
+    </>
   );
 });
 
@@ -498,16 +607,13 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
   },
+  scrollContentEmbedded: {
+    flexGrow: 1,
+    paddingHorizontal: 12,
+  },
   topKeypadBlock: {
     flexShrink: 0,
-  },
-  embeddedSpacer: {
-    flex: 1,
-    minHeight: 0,
-  },
-  bottomBlock: {
-    flexShrink: 0,
-    paddingHorizontal: 12,
+    marginHorizontal: -12,
   },
   bottomPanel: {
     paddingTop: 4,
@@ -537,6 +643,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: chantierColors.primary,
     backgroundColor: '#FFF4EF',
+  },
+  paveKeyLocked: {
+    opacity: 0.55,
   },
   paveKeyLabel: {
     fontSize: 16,
@@ -570,17 +679,40 @@ const styles = StyleSheet.create({
   metaButtonIcon: {
     flex: 0,
   },
+  summaryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    columnGap: 14,
+    rowGap: 6,
+    marginTop: 18,
+  },
   quantiteLine: {
-    alignSelf: 'stretch',
-    textAlign: 'left',
+    color: chantierColors.text,
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  puLine: {
+    color: chantierColors.text,
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  montantLine: {
     color: '#1D4ED8',
     fontSize: 18,
     fontWeight: '900',
     letterSpacing: 0.5,
-    marginTop: 18,
   },
   prixInput: {
     marginBottom: 12,
+  },
+  prixModalHint: {
+    color: chantierColors.muted,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 10,
   },
   notesModal: {
     marginHorizontal: 20,

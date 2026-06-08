@@ -41,6 +41,8 @@ const TABLE_COLUMNS = {
     'ind_active',
     'ind_tva',
     'date_actif_jusqua',
+    'pro_activated_le',
+    'pro_downgraded_le',
     'cree_le',
     'mis_a_jour_le',
     '_synced',
@@ -69,8 +71,17 @@ const TABLE_COLUMNS = {
     'cree_le',
     'mis_a_jour_le',
   ],
-  ouvrages: ['id', 'metier_id', 'entreprise_id', 'nom', 'cree_le', 'mis_a_jour_le', '_synced'],
-  ouvrage_unites: ['id', 'ouvrage_id', 'unite_id', 'prix_unitaire', 'cree_le', 'mis_a_jour_le', '_synced'],
+  ouvrages: ['id', 'metier_id', 'entreprise_id', 'nom', 'supprime_le', 'cree_le', 'mis_a_jour_le', '_synced'],
+  ouvrage_unites: [
+    'id',
+    'ouvrage_id',
+    'unite_id',
+    'prix_unitaire',
+    'supprime_le',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
   clients: [
     'id',
     'entreprise_id',
@@ -165,7 +176,13 @@ const normalizeRow = (tableName, row) => {
     const value = row[column];
     if (FLAG_COLUMNS.has(column)) {
       normalized[column] = coerceFlag(value);
-    } else if (column === 'cree_le' || column === 'mis_a_jour_le') {
+    } else if (
+      column === 'cree_le' ||
+      column === 'mis_a_jour_le' ||
+      column === 'supprime_le' ||
+      column === 'pro_activated_le' ||
+      column === 'pro_downgraded_le'
+    ) {
       normalized[column] = coerceTimestamp(value);
     } else {
       normalized[column] = value;
@@ -173,6 +190,14 @@ const normalizeRow = (tableName, row) => {
   });
   return normalized;
 };
+
+/** Normalise les lignes SQLite avant envoi cloud (types, colonnes connues, _synced=1). */
+export const serializeRowsForCloudPush = (tableName, rows = []) =>
+  rows.map((rawRow) => {
+    const row = normalizeRow(tableName, rawRow);
+    row._synced = 1;
+    return row;
+  });
 
 export const upsertRows = async (db, tableName, rows = []) => {
   if (!rows.length) return;

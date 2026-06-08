@@ -41,10 +41,17 @@ import {
   ensureCatalogueLocal,
   finalizeDimensionDraftLocal,
   getLignesByChantierLocal,
+  getLoggedInProfilViewLocal,
   getReleveIdByChantierLocal,
+  isLoggedInAdminLocal,
 } from './src/db/querries';
 import { ensureTerrainDeviceFromSession } from './src/db/terrainSync';
 import LosangeLogoLoader from './src/components/terrain/LosangeLogoLoader';
+import {
+  canAccessDatabaseOuvrages,
+  canCreateReleveOrLigne,
+  canManageDatabaseOuvrages,
+} from './src/utils/terrainAccess';
 import { appTheme, chantierColors } from './src/styles/theme';
 
 export default function App() {
@@ -64,6 +71,9 @@ export default function App() {
   });
   const [profilEditing, setProfilEditing] = useState(false);
   const [profilIsAdmin, setProfilIsAdmin] = useState(false);
+  const [isLoggedInAdmin, setIsLoggedInAdmin] = useState(false);
+  const [canManageOuvrages, setCanManageOuvrages] = useState(false);
+  const [canAccessOuvragesDb, setCanAccessOuvragesDb] = useState(false);
   const [profilSaveRequestId, setProfilSaveRequestId] = useState(0);
   const [canModifySelectedChantier, setCanModifySelectedChantier] = useState(false);
   const [selectedClient, setSelectedClient] = useState(null);
@@ -164,7 +174,9 @@ export default function App() {
   const isClientDetailsScreen = screen === 'clientDetails';
   const isListeOuvragesScreen = screen === 'listeOuvrages';
   const isOuvrageDetailsScreen = screen === 'ouvrageDetails';
-  const isPlusDetailScreen = isClientDetailsScreen || isOuvrageDetailsScreen;
+  const canModifyPlusDetail =
+    (isClientDetailsScreen && isLoggedInAdmin) ||
+    (isOuvrageDetailsScreen && (isLoggedInAdmin || canManageOuvrages));
   const leftNavIsRetour = isPlusSubScreen || isChantierDetailsScreen;
 
   useEffect(() => {
@@ -172,6 +184,60 @@ export default function App() {
       setProfilEditing(false);
     }
   }, [isProfilScreen]);
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setIsLoggedInAdmin(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadAdminAccess = async () => {
+      try {
+        const [isAdmin, profil] = await Promise.all([
+          isLoggedInAdminLocal(),
+          getLoggedInProfilViewLocal(),
+        ]);
+        if (!cancelled) {
+          setIsLoggedInAdmin(isAdmin);
+          setCanManageOuvrages(canManageDatabaseOuvrages(profil));
+          setCanAccessOuvragesDb(canAccessDatabaseOuvrages(profil));
+        }
+      } catch (error) {
+        console.error('Erreur verification role admin:', error);
+        if (!cancelled) {
+          setIsLoggedInAdmin(false);
+          setCanManageOuvrages(false);
+          setCanAccessOuvragesDb(false);
+        }
+      }
+    };
+
+    loadAdminAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoggedIn, screen]);
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    if (!isLoggedInAdmin && screen === 'listeMetiers') {
+      setScreen('database');
+      return;
+    }
+
+    if (!canAccessOuvragesDb && (screen === 'listeOuvrages' || screen === 'ouvrageDetails')) {
+      setScreen('database');
+      return;
+    }
+
+    if (!isLoggedInAdmin && screen === 'clientDetails') {
+      setSelectedClient(null);
+      setScreen('listeClients');
+    }
+  }, [isLoggedIn, isLoggedInAdmin, canAccessOuvragesDb, screen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -269,6 +335,15 @@ export default function App() {
         const session = await restoreTerrainSession();
         if (session.ok) {
           await ensureTerrainDeviceFromSession();
+          const catalogue = await ensureCatalogueLocal(session.entrepriseId);
+          if (!catalogue.ok) {
+            try {
+              const { refreshCatalogueFromCloudLocal } = await import('./src/db/terrainSyncPro');
+              await refreshCatalogueFromCloudLocal();
+            } catch (catalogueError) {
+              console.warn('Catalogue non recharge au demarrage:', catalogueError);
+            }
+          }
           setIsLoggedIn(true);
           setEntrepriseId(session.entrepriseId);
           setScreen('chantiers');
@@ -339,7 +414,12 @@ export default function App() {
     setChantierListRefreshToken((value) => value + 1);
   }, []);
 
-  const handleCreatePress = () => {
+  const handleCreatePress = async () => {
+    const profil = await getLoggedInProfilViewLocal();
+    if (!canCreateReleveOrLigne(profil)) {
+      Alert.alert('Accès refusé', 'Votre compte ne peut pas créer de nouveau relevé.');
+      return;
+    }
     const draft = startDraftDimensionFlow();
     setSelection(draft);
     setScreen('nouvelleDimension');
@@ -574,6 +654,7 @@ export default function App() {
                   entrepriseId={entrepriseId}
                   editing={profilEditing}
                   saveRequestId={profilSaveRequestId}
+                  bottomOffset={bottomNavHeight}
                   onAdminStatusChange={setProfilIsAdmin}
                   onEditingChange={setProfilEditing}
                   onSaveComplete={() => setProfilSaveRequestId(0)}
@@ -691,20 +772,20 @@ export default function App() {
                     isDimensionFlow
                       ? 'outlined'
                       : isPlusNavActive ||
-                          isPlusDetailScreen ||
+                          canModifyPlusDetail ||
                           (isChantierDetailsScreen && canModifySelectedChantier) ||
-                          (isProfilScreen && profilIsAdmin)
+                          isProfilScreen
                         ? 'contained'
                         : 'outlined'
                   }
                   icon={
                     isDimensionFlow
                       ? 'close'
-                      : isProfilScreen && profilIsAdmin
+                      : isProfilScreen
                         ? profilEditing
                           ? 'content-save'
                           : 'pencil'
-                        : isPlusDetailScreen || (isChantierDetailsScreen && canModifySelectedChantier)
+                        : canModifyPlusDetail || (isChantierDetailsScreen && canModifySelectedChantier)
                           ? 'pencil'
                           : 'dots-horizontal'
                   }
@@ -719,7 +800,7 @@ export default function App() {
                       confirmCancelDimensionFlow();
                       return;
                     }
-                    if (isProfilScreen && profilIsAdmin) {
+                    if (isProfilScreen) {
                       if (profilEditing) {
                         setProfilSaveRequestId((value) => value + 1);
                       } else {
@@ -734,11 +815,15 @@ export default function App() {
                       return;
                     }
                     if (isClientDetailsScreen) {
-                      setClientEditRequestId((value) => value + 1);
+                      if (isLoggedInAdmin) {
+                        setClientEditRequestId((value) => value + 1);
+                      }
                       return;
                     }
                     if (isOuvrageDetailsScreen) {
-                      setOuvrageEditRequestId((value) => value + 1);
+                      if (isLoggedInAdmin || canManageOuvrages) {
+                        setOuvrageEditRequestId((value) => value + 1);
+                      }
                       return;
                     }
                     setScreen('plus');
@@ -746,11 +831,11 @@ export default function App() {
                 >
                   {isDimensionFlow
                     ? 'Annuler'
-                    : isProfilScreen && profilIsAdmin
+                    : isProfilScreen
                       ? profilEditing
                         ? 'Enregistrer'
                         : 'Modifier'
-                      : isPlusDetailScreen
+                      : canModifyPlusDetail
                         ? 'Modifier'
                         : isChantierDetailsScreen
                           ? canModifySelectedChantier

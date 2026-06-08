@@ -22,14 +22,21 @@ supabase secrets set MASTER_ADMIN_PASSWORD="2620-LosangE#"
 supabase secrets set MASTER_SESSION_SECRET="votre-cle-aleatoire-longue"
 supabase functions deploy master-admin-login
 supabase functions deploy master-admin-verify
+supabase functions deploy master-admin-crud
+supabase functions deploy terrain-login
+supabase functions deploy terrain-sync
+supabase functions deploy terrain-change-password
 ```
+
+Chaque fonction peut avoir plusieurs fichiers dans son dossier (ex. `master-admin-crud/entrepriseTier.ts`). **Ne pas** importer depuis `../_shared/` : le bundler Supabase ne l'inclut pas au déploiement.
 
 ### Via Dashboard
 
-1. **Edge Functions** → créer `master-admin-login` et `master-admin-verify`
-2. Coller le code (1 fichier : `masterSession.ts` + `index.ts` fusionnés, sans import)
-3. **Désactiver « Verify JWT »** sur chaque fonction (sinon 401 avant exécution)
-4. Deploy
+1. **Edge Functions** → créer la fonction
+2. Pour les fonctions sans import local (`master-admin-login`, etc.) : coller `index.ts` seul
+3. Pour `master-admin-crud`, `terrain-login`, `terrain-sync` : ajouter aussi `entrepriseTier.ts` dans le même dossier de la fonction, **ou** déployer via CLI
+4. **Désactiver « Verify JWT »** sur chaque fonction (sinon 401 avant exécution)
+5. Deploy
 
 ## 3. Tester dans le Dashboard
 
@@ -104,6 +111,7 @@ Push des enregistrements `_synced = 0` (ouvrages, ouvrage_unites, clients, chant
 ```bash
 supabase db push
 supabase functions deploy terrain-sync
+supabase functions deploy master-admin-crud
 ```
 
 Body exemple :
@@ -119,6 +127,9 @@ Body exemple :
     "chantiers": [],
     "releves": [],
     "ligne_releves": []
+  },
+  "delete": {
+    "ouvrages": []
   }
 }
 ```

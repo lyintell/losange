@@ -1,7 +1,7 @@
 export const CHANTIER_STATUS_CYCLE = ['D', 'V', 'E', 'X'];
 
 export const CHANTIER_STATUS_LABELS = {
-  D: 'Dimension',
+  D: 'Relevé',
   V: 'Devis',
   E: 'En cours',
   X: 'Terminé',
@@ -39,7 +39,7 @@ export const getNextChantierStatusOnDoubleTap = (currentStatus) => {
   return CHANTIER_STATUS_CYCLE[(index + 1) % CHANTIER_STATUS_CYCLE.length];
 };
 
-/** Triple-clic : tout statut -> Annulé ; depuis Annulé -> Dimension. */
+/** Triple-clic : tout statut -> Annulé ; depuis Annulé -> Relevé. */
 export const getNextChantierStatusOnTripleTap = (currentStatus) => {
   const status = currentStatus || 'D';
   return status === 'Z' ? 'D' : 'Z';

@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS entreprises (
   ind_active SMALLINT NOT NULL DEFAULT 1 CHECK (ind_active IN (0, 1)),
   ind_tva SMALLINT NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1)),
   date_actif_jusqua TIMESTAMPTZ,
+  pro_activated_le TIMESTAMPTZ,
+  pro_downgraded_le TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
@@ -22,6 +24,8 @@ ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS ind_pro SMALLINT NOT NULL DEFAU
 ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS ind_active SMALLINT NOT NULL DEFAULT 1 CHECK (ind_active IN (0, 1));
 ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS date_actif_jusqua TIMESTAMPTZ;
 ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS ind_tva SMALLINT NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1));
+ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS pro_activated_le TIMESTAMPTZ;
+ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS pro_downgraded_le TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS profils (
   id TEXT PRIMARY KEY,
@@ -91,6 +95,7 @@ CREATE TABLE IF NOT EXISTS ouvrages (
   metier_id TEXT NOT NULL REFERENCES metiers (id) ON DELETE CASCADE,
   entreprise_id TEXT NOT NULL REFERENCES entreprises (id) ON DELETE CASCADE,
   nom TEXT NOT NULL,
+  supprime_le TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
@@ -111,6 +116,7 @@ CREATE TABLE IF NOT EXISTS ouvrage_unites (
   ouvrage_id TEXT NOT NULL REFERENCES ouvrages (id) ON DELETE CASCADE,
   unite_id TEXT NOT NULL REFERENCES unites (id) ON DELETE CASCADE,
   prix_unitaire DOUBLE PRECISION NOT NULL DEFAULT 0,
+  supprime_le TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))

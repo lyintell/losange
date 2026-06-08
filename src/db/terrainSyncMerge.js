@@ -1,8 +1,8 @@
 import { ensureLocalDatabaseReady } from './localDb';
 import { upsertRows } from './terrainSync';
 
-const TRANSACTIONAL_TABLES = ['clients', 'chantiers', 'releves', 'ligne_releves'];
-const CATALOGUE_TABLES = ['metiers', 'unites', 'ouvrages', 'ouvrage_unites'];
+const TRANSACTIONAL_TABLES = ['ouvrages', 'ouvrage_unites', 'clients', 'chantiers', 'releves', 'ligne_releves'];
+const CATALOGUE_TABLES = ['metiers', 'unites'];
 
 export const parseSyncTimestamp = (value) => {
   if (!value) return 0;
@@ -13,6 +13,11 @@ export const parseSyncTimestamp = (value) => {
 export const shouldApplyRemoteRow = (localRow, remoteRow) => {
   if (!remoteRow) return false;
   if (!localRow) return true;
+
+  const localPendingDelete = Boolean(localRow.supprime_le) && Number(localRow._synced) === 0;
+  if (localPendingDelete && !remoteRow.supprime_le) {
+    return false;
+  }
 
   const remoteTs = parseSyncTimestamp(remoteRow.mis_a_jour_le);
   const localTs = parseSyncTimestamp(localRow.mis_a_jour_le);

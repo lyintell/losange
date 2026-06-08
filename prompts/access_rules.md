@@ -29,5 +29,39 @@
 - Rapport disabled dans Plus
 
 
-3. Compte Pro:
-- Rapport visible pour Admin et Commercial 
+3. Lorsque un compte change de Gratuit a pro, la sync commence seulement a partir du moment ou le changement se passe (Ecran master).
+Lorsque un compte change de Pro a gratuit, alors tous ses donnees supprimable sont supprimer (supprime_le set) automatiquement sur le cloud et les privileges sont enleve (max client et chantier appliqué, logo, etc).
+Developpe un plan pour implementer ceci pour ma validation
+
+Sauvegarde le plan dans /prompts/upgrade_downgrade.md et implemente le. Je valide les 5 points en utilisant tes recommendations
+
+4. Compte pro, Rapport disabled pour user C et T
+
+5. Base de donnees -> Metier et Ouvrages doit etre visible seulement pour A 
+Base de donnees -> Client details, Modifier et Supprimer doivent etre disabled pour tout compte sauf A
+
+
+6. 
+C et T peuvent cree de nouvel ouvrage dans l ecran nouveau releve / modifier releve
+
+Lors de la creation d ouvrage (nouveau releve), si nom de l ouvrage existe deja (ignorer capital / minuscule), disabled le bouton valider.
+
+7.
+Lorsque C ou T crée nouvel ouvrage, par defaut, P.U = 1 et ne peut pas etre changé
+C et T ne peuvent pas modifier P.U appliqué dans pave
+
+8.
+Devis Telecharger ou Whatsapp change status en Devis.
+PDF Telecharger ou Whatsapp ne doit pas changer le status
+
+9. Liste de chantier
+- Card : ajoute prise par xxx . ie. date (prise par xxx)
+- Trier liste par date.
+
+10. 
+Compte S:
+- Please Disable + cree nouveau releve et + ajouter ligne releve.
+Cependant peut modifier information Client / chantier. Peut aussi modifier prix unitaire appliqué par ligne de releve. Ne peut pas modifier largeur et hauteur dans pavé. Peut modifier nombre. 
+
+Peut voir et modifier ouvrages (dans base de données).
+

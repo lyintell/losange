@@ -105,12 +105,13 @@ export default function ClientChantierFormScreen({
   };
 
   const buildChantierPhotoUris = () => {
+    const draft = getDraftDimensionFlow();
     const payload = {};
     CHANTIER_PHOTO_SLOTS.forEach((slot) => {
       const entry = chantierPhotos[slot];
       if (entry?.uri) {
         payload[slot] = { uri: entry.uri, mimeType: entry.mimeType };
-      } else if (entry === null) {
+      } else if (entry === null && draft?.chantierPhotoKeys?.[slot]) {
         payload[slot] = null;
       }
     });

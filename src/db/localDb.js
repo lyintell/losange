@@ -14,45 +14,99 @@ export const tableHasColumn = async (db, tableName, columnName) => {
   return rows.some((row) => row.name === columnName);
 };
 
-/** Supprime ind_unitaire (DROP COLUMN ou recréation de table si SQLite le refuse). */
-const migrateUnitesDropIndUnitaire = async (db) => {
-  if (!(await tableHasColumn(db, 'unites', 'ind_unitaire'))) {
-    return;
-  }
+/** Met a jour la table unites (nom_unite, formule, suppression ind_unitaire). */
+const migrateUnitesToCurrentSchema = async (db) => {
+  const tableExists = await db.getFirstAsync(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'unites';`
+  );
+  if (!tableExists) return;
 
-  try {
-    await db.execAsync('ALTER TABLE unites DROP COLUMN ind_unitaire;');
-    if (!(await tableHasColumn(db, 'unites', 'ind_unitaire'))) {
-      return;
-    }
-  } catch {
-    // DROP COLUMN non supporté ou refusé : recréation de la table.
-  }
+  const hasNomUnite = await tableHasColumn(db, 'unites', 'nom_unite');
+  const hasFormule = await tableHasColumn(db, 'unites', 'formule');
+  const hasNom = await tableHasColumn(db, 'unites', 'nom');
+  const hasSymbole = await tableHasColumn(db, 'unites', 'symbole');
+  const hasIndDimension = await tableHasColumn(db, 'unites', 'ind_dimension');
+  const hasIndUnitaire = await tableHasColumn(db, 'unites', 'ind_unitaire');
+
+  const needsRebuild =
+    !hasNomUnite ||
+    !hasFormule ||
+    !hasNom ||
+    !hasIndDimension ||
+    hasSymbole ||
+    hasIndUnitaire;
+
+  if (!needsRebuild) return;
+
+  const formuleExpr = hasFormule
+    ? 'formule'
+    : hasNom
+      ? 'nom'
+      : hasSymbole
+        ? "COALESCE(symbole, 'l*h')"
+        : "'l*h'";
+  const nomExpr = hasNom
+    ? 'nom'
+    : hasSymbole
+      ? 'symbole'
+      : hasFormule
+        ? 'formule'
+        : "'Unité'";
+  const nomUniteExpr = hasNomUnite
+    ? 'nom_unite'
+    : hasSymbole
+      ? "substr(COALESCE(symbole, nom, formule, 'u'), 1, 10)"
+      : hasNom
+        ? "substr(COALESCE(nom, formule, 'u'), 1, 10)"
+        : hasFormule
+          ? "substr(COALESCE(formule, 'u'), 1, 10)"
+          : "'u'";
+  const indDimensionExpr = hasIndDimension
+    ? 'ind_dimension'
+    : hasIndUnitaire
+      ? 'ind_unitaire'
+      : '0';
+  const creeLeExpr = (await tableHasColumn(db, 'unites', 'cree_le')) ? 'cree_le' : "datetime('now')";
+  const misAJourLeExpr = (await tableHasColumn(db, 'unites', 'mis_a_jour_le'))
+    ? 'mis_a_jour_le'
+    : "datetime('now')";
 
   await db.execAsync('PRAGMA foreign_keys = OFF;');
   try {
-  await db.execAsync('DROP TABLE IF EXISTS unites__sans_ind_unitaire;');
-  await db.execAsync(`
-    CREATE TABLE unites__sans_ind_unitaire (
-      id TEXT PRIMARY KEY NOT NULL,
-      formule TEXT NOT NULL,
-      nom TEXT NOT NULL,
-      nom_unite TEXT NOT NULL CHECK (length(nom_unite) <= 10),
-      ind_dimension INTEGER NOT NULL DEFAULT 0 CHECK (ind_dimension IN (0, 1)),
-      cree_le TEXT DEFAULT (datetime('now')),
-      mis_a_jour_le TEXT DEFAULT (datetime('now'))
-    );
-  `);
-  await db.execAsync(`
-    INSERT INTO unites__sans_ind_unitaire (id, formule, nom, nom_unite, ind_dimension, cree_le, mis_a_jour_le)
-    SELECT id, formule, nom, nom_unite, ind_dimension, cree_le, mis_a_jour_le
-    FROM unites;
-  `);
-  await db.execAsync('DROP TABLE unites;');
-  await db.execAsync('ALTER TABLE unites__sans_ind_unitaire RENAME TO unites;');
+    await db.execAsync('DROP TABLE IF EXISTS unites__migrated;');
+    await db.execAsync(`
+      CREATE TABLE unites__migrated (
+        id TEXT PRIMARY KEY NOT NULL,
+        formule TEXT NOT NULL,
+        nom TEXT NOT NULL,
+        nom_unite TEXT NOT NULL CHECK (length(nom_unite) <= 10),
+        ind_dimension INTEGER NOT NULL DEFAULT 0 CHECK (ind_dimension IN (0, 1)),
+        cree_le TEXT DEFAULT (datetime('now')),
+        mis_a_jour_le TEXT DEFAULT (datetime('now'))
+      );
+    `);
+    await db.execAsync(`
+      INSERT INTO unites__migrated (id, formule, nom, nom_unite, ind_dimension, cree_le, mis_a_jour_le)
+      SELECT
+        id,
+        ${formuleExpr},
+        ${nomExpr},
+        ${nomUniteExpr},
+        ${indDimensionExpr},
+        ${creeLeExpr},
+        ${misAJourLeExpr}
+      FROM unites;
+    `);
+    await db.execAsync('DROP TABLE unites;');
+    await db.execAsync('ALTER TABLE unites__migrated RENAME TO unites;');
   } finally {
     await db.execAsync('PRAGMA foreign_keys = ON;');
   }
+};
+
+/** @deprecated Utiliser migrateUnitesToCurrentSchema */
+const migrateUnitesDropIndUnitaire = async (db) => {
+  await migrateUnitesToCurrentSchema(db);
 };
 
 export const initLocalDatabase = async () => {
@@ -78,6 +132,8 @@ export const initLocalDatabase = async () => {
       ind_active INTEGER NOT NULL DEFAULT 1 CHECK (ind_active IN (0, 1)),
       ind_tva INTEGER NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1)),
       date_actif_jusqua TEXT,
+      pro_activated_le TEXT,
+      pro_downgraded_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
       _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1))
@@ -151,6 +207,7 @@ export const initLocalDatabase = async () => {
       metier_id TEXT NOT NULL,
       entreprise_id TEXT NOT NULL,
       nom TEXT NOT NULL,
+      supprime_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
       _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1)),
@@ -174,7 +231,8 @@ export const initLocalDatabase = async () => {
       id TEXT PRIMARY KEY NOT NULL,
       ouvrage_id TEXT NOT NULL,
       unite_id TEXT NOT NULL,
-      prix_unitaire REAL NOT NULL DEFAULT 0.0,      
+      prix_unitaire REAL NOT NULL DEFAULT 0.0,
+      supprime_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
       _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1)),
@@ -246,6 +304,13 @@ export const initLocalDatabase = async () => {
       metier_id TEXT PRIMARY KEY NOT NULL,
       ordre INTEGER NOT NULL,
       FOREIGN KEY (metier_id) REFERENCES metiers (id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS pending_cloud_deletes (
+      table_name TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      entreprise_id TEXT NOT NULL,
+      PRIMARY KEY (table_name, record_id)
     );
   `);
 
@@ -344,7 +409,14 @@ export const initLocalDatabase = async () => {
 
   await migrateUnitesDropIndUnitaire(db);
 
-  for (const tableName of ['clients', 'chantiers', 'releves', 'ligne_releves']) {
+  for (const tableName of [
+    'clients',
+    'chantiers',
+    'releves',
+    'ligne_releves',
+    'ouvrages',
+    'ouvrage_unites',
+  ]) {
     try {
       await db.execAsync(`ALTER TABLE ${tableName} ADD COLUMN supprime_le TEXT;`);
     } catch {
@@ -383,7 +455,14 @@ const ensureSchemaMigrations = async (db) => {
     // Colonne deja presente.
   }
 
-  for (const tableName of ['clients', 'chantiers', 'releves', 'ligne_releves']) {
+  for (const tableName of [
+    'clients',
+    'chantiers',
+    'releves',
+    'ligne_releves',
+    'ouvrages',
+    'ouvrage_unites',
+  ]) {
     try {
       await db.execAsync(`ALTER TABLE ${tableName} ADD COLUMN supprime_le TEXT;`);
     } catch {
@@ -416,6 +495,33 @@ const ensureSchemaMigrations = async (db) => {
   } catch {
     // Table deja presente.
   }
+
+  try {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS pending_cloud_deletes (
+        table_name TEXT NOT NULL,
+        record_id TEXT NOT NULL,
+        entreprise_id TEXT NOT NULL,
+        PRIMARY KEY (table_name, record_id)
+      );
+    `);
+  } catch {
+    // Table deja presente.
+  }
+
+  try {
+    await db.execAsync('ALTER TABLE entreprises ADD COLUMN pro_activated_le TEXT;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync('ALTER TABLE entreprises ADD COLUMN pro_downgraded_le TEXT;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  await migrateUnitesToCurrentSchema(db);
 };
 
 export const ensureLocalDatabaseReady = async () => {

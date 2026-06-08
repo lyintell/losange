@@ -1,5 +1,5 @@
 import { assertSupabaseConfigured, isSupabaseConfigured, supabase } from './supabaseClient';
-import { ensureLocalDatabaseReady } from './localDb';
+import { ensureLocalDatabaseReady, tableHasColumn } from './localDb';
 import {
   enforceEntrepriseExpiryLocal,
   forceLogoutInactiveEntreprise,
@@ -7,9 +7,11 @@ import {
   getLoggedInProfilLocal,
   isInactiveEntrepriseError,
   revokeTerrainSessionIfEntrepriseInactive,
+  serializeRowsForCloudPush,
   upsertRows,
 } from './terrainSync';
-import { applyTerrainPullPayload, applyTerrainPullPayloadAccountOnly } from './terrainSyncMerge';
+import { applyTerrainPullPayload, applyTerrainPullPayloadAccountOnly, mergeCatalogueFromPull } from './terrainSyncMerge';
+import { reconcileEntrepriseTierLocal } from './entrepriseTierLocal';
 import {
   hydrateTerrainImagesFromPull,
   syncPendingTerrainImagesToCloud,
@@ -99,6 +101,14 @@ export const getPendingSyncCount = async () => {
     total += Number(row?.count || 0);
   }
 
+  if (entrepriseId) {
+    const pendingDeletes = await db.getFirstAsync(
+      `SELECT COUNT(*) AS count FROM pending_cloud_deletes WHERE entreprise_id = ?;`,
+      [entrepriseId]
+    );
+    total += Number(pendingDeletes?.count || 0);
+  }
+
   return total;
 };
 
@@ -175,15 +185,94 @@ const selectUnsyncedRows = async (db, tableName, entrepriseId) => {
   return [];
 };
 
+const collectPendingCloudDeletes = async (entrepriseId) => {
+  const db = await ensureLocalDatabaseReady();
+  const rows = await db.getAllAsync(
+    `SELECT table_name, record_id FROM pending_cloud_deletes WHERE entreprise_id = ?;`,
+    [entrepriseId]
+  );
+  const pending = { ouvrages: [] };
+  rows.forEach((row) => {
+    if (row.table_name === 'ouvrages') {
+      pending.ouvrages.push(String(row.record_id));
+    }
+  });
+  return pending;
+};
+
+const clearPendingCloudDeletes = async (entrepriseId, deletePayload = {}) => {
+  const db = await ensureLocalDatabaseReady();
+  const ouvrageIds = Array.isArray(deletePayload.ouvrages) ? deletePayload.ouvrages : [];
+  if (!ouvrageIds.length) return;
+
+  const placeholders = ouvrageIds.map(() => '?').join(', ');
+  await db.runAsync(
+    `
+    DELETE FROM pending_cloud_deletes
+    WHERE entreprise_id = ?
+      AND table_name = 'ouvrages'
+      AND record_id IN (${placeholders});
+    `,
+    [entrepriseId, ...ouvrageIds]
+  );
+};
+
+const migrateLegacyPendingOuvrageDeletes = async (db, entrepriseId) => {
+  const rows = await db.getAllAsync(
+    `SELECT record_id FROM pending_cloud_deletes WHERE entreprise_id = ? AND table_name = 'ouvrages';`,
+    [entrepriseId]
+  );
+  if (!rows.length) return;
+
+  const hasOuvrageSupprimeLe = await tableHasColumn(db, 'ouvrages', 'supprime_le');
+  if (!hasOuvrageSupprimeLe) return;
+
+  const deletedAt = new Date().toISOString();
+  for (const row of rows) {
+    const ouvrageId = String(row.record_id);
+    const localOuvrage = await db.getFirstAsync('SELECT id FROM ouvrages WHERE id = ?;', [ouvrageId]);
+    if (localOuvrage) {
+      await db.runAsync(
+        `
+        UPDATE ouvrage_unites
+        SET supprime_le = ?, _synced = 0, mis_a_jour_le = datetime('now')
+        WHERE ouvrage_id = ? AND supprime_le IS NULL;
+        `,
+        [deletedAt, ouvrageId]
+      );
+      await db.runAsync(
+        `
+        UPDATE ouvrages
+        SET supprime_le = ?, _synced = 0, mis_a_jour_le = datetime('now')
+        WHERE id = ?;
+        `,
+        [deletedAt, ouvrageId]
+      );
+      await db.runAsync(
+        `
+        DELETE FROM pending_cloud_deletes
+        WHERE entreprise_id = ? AND table_name = 'ouvrages' AND record_id = ?;
+        `,
+        [entrepriseId, ouvrageId]
+      );
+    }
+  }
+};
+
 export const collectPushPayload = async (entrepriseId) => {
   const db = await ensureLocalDatabaseReady();
+  await migrateLegacyPendingOuvrageDeletes(db, entrepriseId);
   const push = {};
 
   for (const tableName of PUSH_ORDER) {
-    push[tableName] = await selectUnsyncedRows(db, tableName, entrepriseId);
+    const rows = await selectUnsyncedRows(db, tableName, entrepriseId);
+    push[tableName] = serializeRowsForCloudPush(tableName, rows);
   }
 
-  return push;
+  return {
+    push,
+    delete: await collectPendingCloudDeletes(entrepriseId),
+  };
 };
 
 const markTableSynced = async (db, tableName, rows = []) => {
@@ -284,6 +373,9 @@ export const runTerrainSyncFreePushPull = async ({ skipPull = false } = {}) => {
       );
     }
     if (!skipPull && pullFirst.data.pull) {
+      if (pullFirst.data.pull.entreprise) {
+        await reconcileEntrepriseTierLocal(pullFirst.data.pull.entreprise);
+      }
       await applyTerrainPullPayloadAccountOnly(pullFirst.data.pull);
       const activeAfterPull = await assertEntrepriseStillActive(entrepriseId);
       if (activeAfterPull) return activeAfterPull;
@@ -320,6 +412,9 @@ export const runTerrainSyncFreePushPull = async ({ skipPull = false } = {}) => {
     });
 
     if (!skipPull && data.pull) {
+      if (data.pull.entreprise) {
+        await reconcileEntrepriseTierLocal(data.pull.entreprise);
+      }
       await applyTerrainPullPayloadAccountOnly(data.pull);
       const activeAfterPull = await assertEntrepriseStillActive(entrepriseId);
       if (activeAfterPull) return activeAfterPull;
@@ -341,6 +436,94 @@ export const runTerrainSyncFreePushPull = async ({ skipPull = false } = {}) => {
   } catch (syncError) {
     console.error('Erreur runTerrainSyncFreePushPull:', syncError);
     return { ok: false, error: syncError.message || 'Synchronisation impossible.' };
+  } finally {
+    syncInProgress = false;
+  }
+};
+
+export const refreshCatalogueFromCloudLocal = async () => {
+  if (!isSupabaseConfigured()) {
+    return { ok: false, error: 'Supabase non configuré.' };
+  }
+
+  if (!(await hasInternetConnection())) {
+    return { ok: false, error: 'Connexion internet requise pour charger le catalogue.' };
+  }
+
+  if (syncInProgress) {
+    return { ok: false, error: 'Synchronisation déjà en cours.' };
+  }
+
+  const device = await getTerrainDeviceAccountLocal();
+  if (!device?.identifiant || !device?.mot_de_passe) {
+    return {
+      ok: false,
+      error: 'Reconnectez-vous en ligne une fois pour charger le catalogue.',
+    };
+  }
+
+  const session = await getLoggedInProfilLocal();
+  const entrepriseId = session?.entreprise_id;
+  if (!entrepriseId) {
+    return { ok: false, error: 'Session terrain invalide.' };
+  }
+
+  syncInProgress = true;
+
+  const emptyPush = {
+    entreprises: [],
+    ouvrages: [],
+    ouvrage_unites: [],
+    clients: [],
+    chantiers: [],
+    releves: [],
+    ligne_releves: [],
+  };
+
+  try {
+    assertSupabaseConfigured();
+
+    const { data, error } = await supabase.functions.invoke('terrain-sync', {
+      body: {
+        identifiant: device.identifiant,
+        motDePasse: device.mot_de_passe,
+        push: emptyPush,
+      },
+    });
+
+    if (error) {
+      return guardSyncResultForInactiveEntreprise(
+        { ok: false, error: await readFunctionErrorMessage(error, data) },
+        entrepriseId
+      );
+    }
+
+    if (!data?.ok) {
+      return guardSyncResultForInactiveEntreprise(
+        { ok: false, error: data?.error || 'Téléchargement du catalogue refusé.' },
+        entrepriseId
+      );
+    }
+
+    if (data.pull) {
+      await mergeCatalogueFromPull(data.pull);
+    }
+
+    return guardSyncResultForInactiveEntreprise(
+      {
+        ok: true,
+        entrepriseId,
+        catalogue: {
+          metiersCount: data.pull?.metiers?.length ?? 0,
+          unitesCount: data.pull?.unites?.length ?? 0,
+          ouvragesCount: data.pull?.ouvrages?.length ?? 0,
+        },
+      },
+      entrepriseId
+    );
+  } catch (syncError) {
+    console.error('Erreur refreshCatalogueFromCloudLocal:', syncError);
+    return { ok: false, error: syncError.message || 'Impossible de charger le catalogue.' };
   } finally {
     syncInProgress = false;
   }
@@ -415,6 +598,9 @@ export const runTerrainSyncPushPull = async ({ skipPull = false } = {}) => {
       );
     }
     if (!skipPull && pullFirst.data.pull) {
+      if (pullFirst.data.pull.entreprise) {
+        await reconcileEntrepriseTierLocal(pullFirst.data.pull.entreprise);
+      }
       await applyTerrainPullPayload(pullFirst.data.pull);
       await hydrateTerrainImagesFromPull(pullFirst.data.pull);
       const activeAfterPull = await assertEntrepriseStillActive(entrepriseId);
@@ -423,13 +609,14 @@ export const runTerrainSyncPushPull = async ({ skipPull = false } = {}) => {
 
     // 2. Envoyer les images locales, puis les modifications SQLite
     await syncPendingTerrainImagesToCloud(entrepriseId);
-    const push = await collectPushPayload(entrepriseId);
+    const { push, delete: deletePayload } = await collectPushPayload(entrepriseId);
 
     const { data, error } = await supabase.functions.invoke('terrain-sync', {
       body: {
         identifiant: device.identifiant,
         motDePasse: device.mot_de_passe,
         push,
+        delete: deletePayload,
       },
     });
 
@@ -453,8 +640,12 @@ export const runTerrainSyncPushPull = async ({ skipPull = false } = {}) => {
         await markTableSynced(db, tableName, push[tableName] || []);
       }
     });
+    await clearPendingCloudDeletes(entrepriseId, deletePayload);
 
     if (!skipPull && data.pull) {
+      if (data.pull.entreprise) {
+        await reconcileEntrepriseTierLocal(data.pull.entreprise);
+      }
       await applyTerrainPullPayload(data.pull);
       await hydrateTerrainImagesFromPull(data.pull);
       const activeAfterPull = await assertEntrepriseStillActive(entrepriseId);
@@ -557,6 +748,9 @@ export const runTerrainSyncPullOnly = async () => {
     }
 
     if (data.pull) {
+      if (data.pull.entreprise) {
+        await reconcileEntrepriseTierLocal(data.pull.entreprise);
+      }
       await applyTerrainPullPayload(data.pull);
       await hydrateTerrainImagesFromPull(data.pull);
       const activeAfterPull = await assertEntrepriseStillActive(entrepriseId);

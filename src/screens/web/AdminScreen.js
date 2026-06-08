@@ -17,7 +17,10 @@ import {
 } from '../../db/supabaseAdmin';
 import { isSupabaseConfigured } from '../../db/supabaseClient';
 import { chantierColors } from '../../styles/theme';
-import { computeQuantiteLigneReleve } from '../../utils/ligneReleveCalcul';
+import {
+  computeMontantLigneReleve,
+  computeQuantiteLigneReleve,
+} from '../../utils/ligneReleveCalcul';
 
 const ROLE_OPTIONS = [
   { value: 'A', label: 'A - admin' },
@@ -28,6 +31,8 @@ const ROLE_OPTIONS = [
 
 const FIELD_LABELS = {
   ind_pro: 'Compte Pro (sync cloud)',
+  pro_activated_le: 'Pro activé le',
+  pro_downgraded_le: 'Pro désactivé le',
   ind_active: 'Compte actif',
   ind_tva: 'Afficher TVA et TTC sur le devis',
   date_actif_jusqua: "Actif jusqu'au (AAAA-MM-JJ)",
@@ -72,6 +77,8 @@ const TABLE_SCHEMAS = {
     { name: 'adresse', type: 'TEXT' },
     { name: 'logo', type: 'TEXT', isImageFile: true },
     { name: 'ind_pro', type: 'INTEGER', required: true, isBinaryToggle: true, defaultValue: 0, section: 'Compte' },
+    { name: 'pro_activated_le', type: 'TEXT', isReadOnly: true, isTierManaged: true, section: 'Compte' },
+    { name: 'pro_downgraded_le', type: 'TEXT', isReadOnly: true, isTierManaged: true, section: 'Compte' },
     { name: 'ind_active', type: 'INTEGER', required: true, isBinaryToggle: true, defaultValue: 1, section: 'Compte' },
     {
       name: 'ind_tva',
@@ -164,6 +171,7 @@ const TABLE_SCHEMAS = {
     { name: 'metier_id', type: 'TEXT', required: true, fkTable: 'metiers' },
     { name: 'entreprise_id', type: 'TEXT', required: true, fkTable: 'entreprises' },
     { name: 'nom', type: 'TEXT', required: true },
+    { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
     { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
@@ -182,6 +190,7 @@ const TABLE_SCHEMAS = {
     { name: 'ouvrage_id', type: 'TEXT', required: true, fkTable: 'ouvrages' },
     { name: 'unite_id', type: 'TEXT', required: true, fkTable: 'unites' },
     { name: 'prix_unitaire', type: 'REAL', required: true },
+    { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
     { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
@@ -326,13 +335,26 @@ const applyLigneReleveAutoCalculations = (record, recordsByTable) => {
     nombre: record.nombre,
   });
   record.quantite = quantite;
-  record.montant = quantite * (Number(record.prix_unitaire_applique) || 0);
+  record.montant = computeMontantLigneReleve({
+    prixUnitaireApplique: record.prix_unitaire_applique,
+    nombre: record.nombre,
+  });
   return record;
+};
+
+const formatTierTimestamp = (value) => {
+  if (!value) return null;
+  const parsed = Date.parse(String(value));
+  if (Number.isNaN(parsed)) return String(value);
+  return new Date(parsed).toLocaleString('fr-FR');
 };
 
 const formatDetailValue = (field, value, recordsByTable) => {
   if (field.isImageFile) {
     return value ? 'Fichier image' : '-';
+  }
+  if (field.isTierManaged) {
+    return formatTierTimestamp(value) || '— (non renseigné)';
   }
   if (value === null || value === undefined || value === '') return '-';
   if (field.fkTable) {
@@ -552,8 +574,28 @@ export default function AdminScreen({ onLogout }) {
     const hasCreatedAt = schema.some((field) => field.name === 'cree_le');
     const hasUpdatedAt = schema.some((field) => field.name === 'mis_a_jour_le');
 
+    if (
+      selectedTable === 'entreprises' &&
+      formMode === 'edit' &&
+      selectedItem &&
+      String(formValues.ind_pro ?? '0') !== String(selectedItem.ind_pro ?? '0')
+    ) {
+      const upgrading = String(formValues.ind_pro ?? '0') === '1';
+      const message = upgrading
+        ? 'Passer ce compte en Pro ?\n\nLa sync cloud démarre à partir de maintenant. Les données locales seront poussées ; les anciennes données cloud tombstonées ne seront pas restaurées.'
+        : 'Repasser ce compte en Gratuit ?\n\nLes données excédentaires seront supprimées (tombstone) sur le cloud : max 10 clients, 10 chantiers, 10 ouvrages/métier, 1 profil Admin. Logo, photos et TVA seront retirés.';
+      const confirmed =
+        typeof globalThis.confirm === 'function' ? globalThis.confirm(message) : true;
+      if (!confirmed) {
+        return;
+      }
+    }
+
     for (const field of schema) {
       if (field.isAutoComputed) continue;
+      if (field.isTierManaged) {
+        continue;
+      }
       if (field.isReadOnly) {
         if (formMode === 'edit' && selectedItem) {
           nextRecord[field.name] = selectedItem[field.name] ?? null;
@@ -604,8 +646,21 @@ export default function AdminScreen({ onLogout }) {
         if (hasUpdatedAt) {
           nextRecord.mis_a_jour_le = currentTs;
         }
-        const updated = await updateAdminRecord(selectedTable, selectedItem.id, nextRecord);
+        const { record: updated, tierChange } = await updateAdminRecord(
+          selectedTable,
+          selectedItem.id,
+          nextRecord
+        );
         setSelectedItemId(String(updated.id));
+        if (tierChange?.tierChange === 'upgrade') {
+          globalThis.alert?.(
+            `Compte passé en Pro.\nPro activé le : ${formatTierTimestamp(tierChange.pro_activated_le) || tierChange.pro_activated_le}`
+          );
+        } else if (tierChange?.tierChange === 'downgrade') {
+          globalThis.alert?.(
+            `Compte repassé en Gratuit.\nPro désactivé le : ${formatTierTimestamp(tierChange.pro_downgraded_le) || tierChange.pro_downgraded_le}`
+          );
+        }
       }
 
       await reloadRecords();
@@ -893,7 +948,11 @@ export default function AdminScreen({ onLogout }) {
                               disabled={isDisabled}
                             />
                           )}
-                          {field.isReadOnly ? (
+                          {field.isTierManaged ? (
+                            <Text style={styles.fieldHint}>
+                              Renseigné automatiquement lors d'un changement Gratuit ↔ Pro.
+                            </Text>
+                          ) : field.isReadOnly ? (
                             <Text style={styles.fieldHint}>Renseigné automatiquement par l'application mobile.</Text>
                           ) : null}
                         </View>
@@ -911,22 +970,39 @@ export default function AdminScreen({ onLogout }) {
                       Sélectionnez un élément dans la liste.
                     </Text>
                   ) : (
-                    fields.map((field) => (
-                      <View key={field.name} style={styles.detailRow}>
-                        <Text variant="bodyMedium" style={styles.detailLabel}>
-                          {getFieldLabel(field)}
-                        </Text>
-                        {field.isImageFile && selectedItem[field.name] ? (
-                          <AdminImagePreview storageKey={selectedItem[field.name]} />
-                        ) : null}
-                        <Text
-                          variant="bodyLarge"
-                          style={[styles.detailValue, field.isMultiline && styles.detailValueMultiline]}
-                        >
-                          {formatDetailValue(field, selectedItem[field.name], recordsByTable)}
-                        </Text>
-                      </View>
-                    ))
+                    fields.map((field, fieldIndex) => {
+                      const prevSection = fieldIndex > 0 ? fields[fieldIndex - 1].section : null;
+                      const showSection = field.section && field.section !== prevSection;
+
+                      return (
+                        <View key={field.name}>
+                          {showSection ? (
+                            <View style={styles.fieldSection}>
+                              <Divider />
+                              <Text style={styles.fieldSectionTitle}>{field.section}</Text>
+                            </View>
+                          ) : null}
+                          <View style={styles.detailRow}>
+                            <Text variant="bodyMedium" style={styles.detailLabel}>
+                              {getFieldLabel(field)}
+                            </Text>
+                            {field.isImageFile && selectedItem[field.name] ? (
+                              <AdminImagePreview storageKey={selectedItem[field.name]} />
+                            ) : null}
+                            <Text
+                              variant="bodyLarge"
+                              style={[
+                                styles.detailValue,
+                                field.isMultiline && styles.detailValueMultiline,
+                                field.isTierManaged && !selectedItem[field.name] ? styles.detailValueMuted : null,
+                              ]}
+                            >
+                              {formatDetailValue(field, selectedItem[field.name], recordsByTable)}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })
                   )}
                 </Card.Content>
               </Card>
@@ -1205,6 +1281,10 @@ const styles = StyleSheet.create({
   },
   detailValueMultiline: {
     whiteSpace: 'pre-wrap',
+  },
+  detailValueMuted: {
+    color: chantierColors.muted,
+    fontWeight: '400',
   },
   detailSubTitle: {
     color: chantierColors.muted,

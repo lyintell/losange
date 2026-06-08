@@ -1,5 +1,6 @@
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system/legacy';
+import { Image } from 'react-native';
 import { resolveTerrainImageUri } from '../db/terrainImageStorage';
 
 const APP_LOGO = require('../../assets/logo2.png');
@@ -24,28 +25,81 @@ const readFileAsDataUri = async (uri, mimeType) => {
   return toDataUri(base64, mimeType);
 };
 
+const fetchUriAsDataUri = async (uri) => {
+  const response = await fetch(uri);
+  if (!response.ok) return null;
+  const blob = await response.blob();
+  return await new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      resolve(typeof reader.result === 'string' ? reader.result : null);
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(blob);
+  });
+};
+
+const uriToDataUri = async (uri, mimeType = 'image/png') => {
+  if (!uri) return null;
+  if (String(uri).startsWith('data:')) return uri;
+
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    if (info.exists) {
+      return await readFileAsDataUri(uri, mimeType);
+    }
+  } catch {
+    // Fichier local inaccessible, essayer fetch ci-dessous.
+  }
+
+  if (/^https?:\/\//i.test(uri) || uri.startsWith('/')) {
+    try {
+      return await fetchUriAsDataUri(uri);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+};
+
 const getAppLogoDataUri = async () => {
   if (cachedAppLogoDataUri) return cachedAppLogoDataUri;
 
-  const asset = Asset.fromModule(APP_LOGO);
-  await asset.downloadAsync();
-  const uri = asset.localUri || asset.uri;
-  if (!uri) {
-    throw new Error('Logo Losange introuvable.');
+  const candidates = [];
+
+  try {
+    const asset = Asset.fromModule(APP_LOGO);
+    await asset.downloadAsync();
+    if (asset.localUri) candidates.push(asset.localUri);
+    if (asset.uri) candidates.push(asset.uri);
+  } catch (error) {
+    console.warn('Chargement asset logo Losange:', error);
   }
 
-  cachedAppLogoDataUri = await readFileAsDataUri(uri, 'image/png');
-  return cachedAppLogoDataUri;
+  try {
+    const resolved = Image.resolveAssetSource(APP_LOGO);
+    if (resolved?.uri) candidates.push(resolved.uri);
+  } catch {
+    // ignore
+  }
+
+  for (const uri of [...new Set(candidates.filter(Boolean))]) {
+    const dataUri = await uriToDataUri(uri, 'image/png');
+    if (dataUri) {
+      cachedAppLogoDataUri = dataUri;
+      return cachedAppLogoDataUri;
+    }
+  }
+
+  return null;
 };
 
-/** Logo entreprise (Pro + fichier local) ou logo Losange par défaut. Compte gratuit : aucun logo. */
+/** Logo entreprise si disponible localement, sinon logo Losange. Ne bloque jamais l'export. */
 export const resolveExportLogoDataUri = async (entreprise) => {
-  const isPro = Number(entreprise?.ind_pro) === 1;
-  if (!isPro) return null;
-
   const storageKey = String(entreprise?.logo || '').trim();
 
-  if (isPro && storageKey) {
+  if (storageKey) {
     try {
       const localUri = resolveTerrainImageUri(storageKey);
       const info = await FileSystem.getInfoAsync(localUri);
@@ -57,7 +111,12 @@ export const resolveExportLogoDataUri = async (entreprise) => {
     }
   }
 
-  return getAppLogoDataUri();
+  try {
+    return await getAppLogoDataUri();
+  } catch (error) {
+    console.warn('Logo application indisponible pour export:', error);
+    return null;
+  }
 };
 
 export const EXPORT_LOGO_STYLES = `

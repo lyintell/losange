@@ -27,7 +27,12 @@ import {
   getOuvragesByMetierAndEntreprise,
   getUnitesEtPrixParOuvrage,
 } from '../db/querries';
-import { hidesPriceUiForRole } from '../utils/terrainAccess';
+import { computeMontantLigneReleve } from '../utils/ligneReleveCalcul';
+import {
+  canCreateOuvrageInReleveFlow,
+  canCreateReleveOrLigne,
+  hidesPriceUiForRole,
+} from '../utils/terrainAccess';
 import PaveSaisieOneHand from './PaveSaisieOneHand';
 import { chantierColors } from '../styles/theme';
 
@@ -68,7 +73,8 @@ export default function NouvelleDimensionScreen({
   const [savingLine, setSavingLine] = useState(false);
   const [formComplete, setFormComplete] = useState(false);
   const [editingLigneId, setEditingLigneId] = useState(null);
-  const [isAdminRole, setIsAdminRole] = useState(false);
+  const [canCreateOuvrage, setCanCreateOuvrage] = useState(false);
+  const [canAddReleveLigne, setCanAddReleveLigne] = useState(true);
   const [hidesPriceUi, setHidesPriceUi] = useState(false);
   const [addOuvrageModalVisible, setAddOuvrageModalVisible] = useState(false);
 
@@ -98,11 +104,13 @@ export default function NouvelleDimensionScreen({
     const loadProfilAccess = async () => {
       try {
         const profil = await getLoggedInProfilViewLocal();
-        setIsAdminRole(profil?.role === 'A');
+        setCanCreateOuvrage(canCreateOuvrageInReleveFlow(profil));
+        setCanAddReleveLigne(canCreateReleveOrLigne(profil));
         setHidesPriceUi(hidesPriceUiForRole(profil?.role));
       } catch (error) {
         console.error('Erreur verification acces profil:', error);
-        setIsAdminRole(false);
+        setCanCreateOuvrage(false);
+        setCanAddReleveLigne(true);
         setHidesPriceUi(false);
       }
     };
@@ -219,9 +227,9 @@ export default function NouvelleDimensionScreen({
     setSavingLine(true);
     try {
       const prixUnitaireApplique =
-        Number(payload.prixUnitaireApplique) ||
-        Number(current.ouvrageUnite?.prix_unitaire) ||
-        0;
+        payload.prixUnitaireApplique != null && payload.prixUnitaireApplique !== ''
+          ? Number(payload.prixUnitaireApplique) || 0
+          : Number(current.ouvrageUnite?.prix_unitaire) || 0;
       const quantite = Number(payload.quantite) || 0;
       const ligneData = {
         ...payload,
@@ -232,7 +240,10 @@ export default function NouvelleDimensionScreen({
         ind_dimension: current.ouvrageUnite?.ind_dimension ?? 0,
         ouvrage_unite_id: current.ouvrageUnite?.ouvrage_unite_id,
         prix_unitaire_applique: prixUnitaireApplique,
-        montant: quantite * prixUnitaireApplique,
+        montant: computeMontantLigneReleve({
+          prixUnitaireApplique,
+          nombre: payload.nombre,
+        }),
         note: payload.note || null,
         photo_pending_uri: payload.photo_pending_uri || null,
         photo_mime_type: payload.photo_mime_type || null,
@@ -342,10 +353,10 @@ export default function NouvelleDimensionScreen({
         if (plusVisuallyDisabled) return;
         await saisieRef.current?.saveLine?.();
       } else if (pressCount === 2) {
-        if (savingLine || formComplete) return;
+        if (!canAddReleveLigne || savingLine || formComplete) return;
         handleNouvelOuvrage();
       } else if (pressCount >= 3) {
-        if (savingLine || formComplete) return;
+        if (!canAddReleveLigne || savingLine || formComplete) return;
         handleNouveauMetier();
       }
     }, PLUS_MULTI_PRESS_DELAY_MS);
@@ -444,7 +455,7 @@ export default function NouvelleDimensionScreen({
   );
 
   const renderOuvrageStep = () => {
-    const fabSmallCount = isAdminRole ? 1 : 0;
+    const fabSmallCount = canCreateOuvrage ? 1 : 0;
 
     return (
       <>
@@ -464,7 +475,7 @@ export default function NouvelleDimensionScreen({
             <LosangeLogoLoader size="large" containerStyle={styles.loader} />
           ) : ouvragesSorted.length === 0 ? (
             <Text style={styles.infoText}>
-              {isAdminRole
+              {canCreateOuvrage
                 ? 'Aucun ouvrage pour ce métier. Utilisez + pour en créer un.'
                 : "Aucun ouvrage pour votre entreprise. Synchronisez le catalogue ou demandez à un admin d'en ajouter."}
             </Text>
@@ -508,7 +519,7 @@ export default function NouvelleDimensionScreen({
           )}
         </ScrollView>
         <FlowBackFab onPress={() => setStep('metier')} smallCountBelow={fabSmallCount} />
-        {isAdminRole ? (
+        {canCreateOuvrage ? (
           <FlowSmallFab
             icon="plus"
             tierFromBottom={0}
@@ -521,6 +532,8 @@ export default function NouvelleDimensionScreen({
           visible={addOuvrageModalVisible}
           metier={draft?.metier}
           entrepriseId={entrepriseId}
+          existingOuvrages={ouvrages}
+          lockPrixUnitaireToOne={hidesPriceUi}
           onDismiss={() => setAddOuvrageModalVisible(false)}
           onCreated={handleOuvrageCreated}
         />
@@ -562,7 +575,7 @@ export default function NouvelleDimensionScreen({
             onValidityChange={setFormComplete}
           />
         </View>
-        {!isEditingLine ? (
+        {!isEditingLine && canAddReleveLigne ? (
           <FlowActionFab
             icon="plus"
             color={flowFabColors.primary}
@@ -625,12 +638,14 @@ export default function NouvelleDimensionScreen({
           />
         )}
       </ScrollView>
-      <FlowActionFab
-        icon="plus"
-        color={flowFabColors.primary}
-        smallCountBelow={isEditingChantier ? 1 : 0}
-        onPress={handleContinuerRecap}
-      />
+      {canAddReleveLigne ? (
+        <FlowActionFab
+          icon="plus"
+          color={flowFabColors.primary}
+          smallCountBelow={isEditingChantier ? 1 : 0}
+          onPress={handleContinuerRecap}
+        />
+      ) : null}
       {isEditingChantier ? (
         <FlowSmallFab
           icon="delete"

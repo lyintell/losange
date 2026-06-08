@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { ActivityIndicator, Menu, Modal, Portal, Text, TextInput } from 'react-native-paper';
 import MobileButton from './MobileButton';
@@ -7,10 +7,16 @@ import { chantierColors } from '../../styles/theme';
 
 const formatUniteLabel = (unite) => unite.nom || 'Unité';
 
+const normalizeOuvrageNom = (value) => String(value || '').trim().toLowerCase();
+
+const DEFAULT_CT_PRIX_UNITAIRE = '1';
+
 export default function AjouterOuvrageModal({
   visible,
   metier,
   entrepriseId,
+  existingOuvrages = [],
+  lockPrixUnitaireToOne = false,
   onDismiss,
   onCreated,
 }) {
@@ -25,11 +31,21 @@ export default function AjouterOuvrageModal({
 
   const selectedUnite = unites.find((item) => item.id === uniteId) || null;
 
+  const isDuplicateNom = useMemo(() => {
+    const normalized = normalizeOuvrageNom(nom);
+    if (!normalized) return false;
+    return existingOuvrages.some(
+      (ouvrage) => normalizeOuvrageNom(ouvrage.nom) === normalized
+    );
+  }, [nom, existingOuvrages]);
+
+  const canSubmit = Boolean(nom.trim() && uniteId && !isDuplicateNom);
+
   useEffect(() => {
     if (!visible) return undefined;
 
     setNom('');
-    setPrixUnitaire('');
+    setPrixUnitaire(lockPrixUnitaireToOne ? DEFAULT_CT_PRIX_UNITAIRE : '');
     setUniteId(null);
     setError('');
     setUniteMenuOpen(false);
@@ -49,7 +65,7 @@ export default function AjouterOuvrageModal({
     };
 
     load();
-  }, [visible, entrepriseId]);
+  }, [visible, entrepriseId, lockPrixUnitaireToOne]);
 
   const handleSave = async () => {
     setError('');
@@ -59,6 +75,10 @@ export default function AjouterOuvrageModal({
     }
     if (!nom.trim()) {
       setError("Saisissez le nom de l'ouvrage.");
+      return;
+    }
+    if (isDuplicateNom) {
+      setError('Un ouvrage avec ce nom existe déjà pour ce métier.');
       return;
     }
     if (!uniteId) {
@@ -73,7 +93,7 @@ export default function AjouterOuvrageModal({
         entrepriseId,
         nom: nom.trim(),
         uniteId,
-        prixUnitaire,
+        prixUnitaire: lockPrixUnitaireToOne ? DEFAULT_CT_PRIX_UNITAIRE : prixUnitaire,
       });
       onCreated?.(result);
       onDismiss?.();
@@ -138,15 +158,26 @@ export default function AjouterOuvrageModal({
           </Menu>
         )}
 
-        <TextInput
-          mode="outlined"
-          label="Prix unitaire"
-          value={prixUnitaire}
-          onChangeText={setPrixUnitaire}
-          keyboardType="decimal-pad"
-          style={styles.input}
-          right={<TextInput.Affix text="F" />}
-        />
+        {lockPrixUnitaireToOne ? (
+          <View style={styles.contextBlock}>
+            <Text style={styles.contextLabel}>Prix unitaire</Text>
+            <Text style={styles.contextValue}>{DEFAULT_CT_PRIX_UNITAIRE} F</Text>
+          </View>
+        ) : (
+          <TextInput
+            mode="outlined"
+            label="Prix unitaire"
+            value={prixUnitaire}
+            onChangeText={setPrixUnitaire}
+            keyboardType="decimal-pad"
+            style={styles.input}
+            right={<TextInput.Affix text="F" />}
+          />
+        )}
+
+        {isDuplicateNom ? (
+          <Text style={styles.errorText}>Un ouvrage avec ce nom existe déjà pour ce métier.</Text>
+        ) : null}
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -154,7 +185,12 @@ export default function AjouterOuvrageModal({
           <MobileButton mode="outlined" onPress={onDismiss} disabled={saving}>
             Annuler
           </MobileButton>
-          <MobileButton mode="contained" onPress={handleSave} loading={saving} disabled={saving}>
+          <MobileButton
+            mode="contained"
+            onPress={handleSave}
+            loading={saving}
+            disabled={saving || !canSubmit}
+          >
             Créer
           </MobileButton>
         </View>

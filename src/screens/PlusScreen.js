@@ -9,34 +9,11 @@ import { canAccessRapports } from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
 
 const buildSyncSuccessMessage = (result) => {
-  const lines = [];
-
-  if (result?.mode === 'pull') {
-    lines.push('Données Supabase téléchargées vers le téléphone.');
-  } else if (result?.mode === 'push_pull_account' || result?.mode === 'push_account') {
-    lines.push('Entreprise et profil synchronisés avec Supabase.');
-  } else {
-    const pushed = result?.pushedCounts || {};
-    lines.push(
-      `Envoi : ${pushed.clients ?? 0} client(s), ${pushed.chantiers ?? 0} chantier(s), ${pushed.releves ?? 0} relevé(s), ${pushed.ligne_releves ?? 0} ligne(s).`
-    );
-    lines.push('Puis mise à jour depuis Supabase si le cloud est plus récent.');
+  const pending = Number(result?.pendingAfter || 0);
+  if (pending > 0) {
+    return `${pending} modification${pending > 1 ? 's' : ''} en attente. Réessayez avec internet.`;
   }
-
-  if (result?.pendingAfter > 0) {
-    lines.push(`\n${result.pendingAfter} modification(s) encore en attente.`);
-  } else if (result?.mode !== 'pull') {
-    lines.push('\nToutes les modifications sont synchronisées.');
-  }
-
-  const catalogue = result?.catalogue;
-  if (catalogue) {
-    lines.push(
-      `\nCatalogue : ${catalogue.metiersCount ?? 0} métier(s), ${catalogue.unitesCount ?? 0} unité(s), ${catalogue.ouvragesCount ?? 0} ouvrage(s).`
-    );
-  }
-
-  return lines.join('');
+  return 'Données à jour.';
 };
 
 export default function PlusScreen({ onProfilPress, onDatabasePress, onRapportsPress, onLogout, onSyncFromSupabase }) {

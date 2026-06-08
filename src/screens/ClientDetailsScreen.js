@@ -4,7 +4,8 @@ import { Surface, Text } from 'react-native-paper';
 import ClientFormModal from '../components/terrain/ClientFormModal';
 import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
 import { FlowSmallFab, flowFabColors, getFabColumnPadding } from '../components/terrain/TerrainFlowFabs';
-import { deleteClientLocal, getClientByIdLocal } from '../db/querries';
+import { deleteClientLocal, getClientByIdLocal, getLoggedInProfilViewLocal } from '../db/querries';
+import { canManageClients } from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
 
 function InfoRow({ label, value }) {
@@ -30,6 +31,7 @@ export default function ClientDetailsScreen({
   const [client, setClient] = useState(null);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [canManage, setCanManage] = useState(false);
   const lastEditRequestIdRef = useRef(0);
 
   const loadClient = useCallback(async () => {
@@ -55,10 +57,35 @@ export default function ClientDetailsScreen({
   }, [loadClient]);
 
   useEffect(() => {
-    if (!editRequestId || editRequestId === lastEditRequestIdRef.current || !client) return;
+    let cancelled = false;
+
+    const loadAccess = async () => {
+      try {
+        const profil = await getLoggedInProfilViewLocal();
+        if (!cancelled) {
+          setCanManage(canManageClients(profil));
+        }
+      } catch (error) {
+        console.error('Erreur chargement acces client:', error);
+        if (!cancelled) {
+          setCanManage(false);
+        }
+      }
+    };
+
+    loadAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!canManage || !editRequestId || editRequestId === lastEditRequestIdRef.current || !client) {
+      return;
+    }
     lastEditRequestIdRef.current = editRequestId;
     setEditModalVisible(true);
-  }, [editRequestId, client]);
+  }, [editRequestId, client, canManage]);
 
   const handleSaved = (updatedClient) => {
     setClient(updatedClient);
@@ -119,7 +146,7 @@ export default function ClientDetailsScreen({
         </Surface>
       )}
 
-      {client ? (
+      {client && canManage ? (
         <FlowSmallFab
           icon="delete"
           tierFromBottom={0}

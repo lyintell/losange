@@ -9,20 +9,45 @@ import { FREE_TIER_LIMITS } from '../utils/freeTierLimits';
 import { getMetierColor } from '../utils/metierColors';
 import { chantierColors } from '../styles/theme';
 
+const MetiersList = ({ metiers, loading, savingOrder, onRefresh, onDragEnd, renderItem }) => {
+  if (metiers.length === 0) return null;
+
+  return (
+    <DraggableFlatList
+      style={styles.list}
+      containerStyle={styles.listContainer}
+      data={metiers}
+      keyExtractor={(item) => item.id}
+      onDragEnd={onDragEnd}
+      activationDistance={12}
+      refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} />}
+      contentContainerStyle={styles.listContent}
+      showsVerticalScrollIndicator
+      renderItem={renderItem}
+    />
+  );
+};
+
 export default function ListeMetiersScreen({ entrepriseId, refreshToken = 0 }) {
   const [loading, setLoading] = useState(false);
   const [metiers, setMetiers] = useState([]);
   const [savingOrder, setSavingOrder] = useState(false);
   const [isPro, setIsPro] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   const loadMetiers = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadError('');
       const data = await getMetiersForEntrepriseLocal(entrepriseId);
       setMetiers(data || []);
+      if (!data?.length) {
+        setLoadError('Catalogue vide. Vérifiez votre connexion puis tirez pour actualiser.');
+      }
     } catch (error) {
       console.error('Erreur chargement métiers:', error);
       setMetiers([]);
+      setLoadError(error.message || 'Impossible de charger les métiers.');
     } finally {
       setLoading(false);
     }
@@ -118,20 +143,17 @@ export default function ListeMetiersScreen({ entrepriseId, refreshToken = 0 }) {
       ) : metiers.length === 0 ? (
         <View style={styles.emptyState}>
           <Text variant="titleMedium" style={styles.emptyText}>
-            Aucun métier disponible. Synchronisez le catalogue depuis Supabase.
+            {loadError || 'Aucun métier disponible. Synchronisez le catalogue depuis Supabase.'}
           </Text>
         </View>
       ) : (
         <View style={styles.listWrap}>
-          <DraggableFlatList
-            style={styles.list}
-            data={metiers}
-            keyExtractor={(item) => item.id}
+          <MetiersList
+            metiers={metiers}
+            loading={loading}
+            savingOrder={savingOrder}
+            onRefresh={loadMetiers}
             onDragEnd={handleDragEnd}
-            activationDistance={12}
-            refreshControl={<RefreshControl refreshing={loading} onRefresh={loadMetiers} />}
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator
             renderItem={renderItem}
           />
         </View>
@@ -167,14 +189,15 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
   },
+  listContainer: {
+    flex: 1,
+  },
   list: {
     flex: 1,
   },
   listContent: {
     paddingHorizontal: 12,
     paddingBottom: 24,
-    gap: 10,
-    flexGrow: 1,
   },
   cardWrap: {
     marginBottom: 10,

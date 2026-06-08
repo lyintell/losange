@@ -56,7 +56,7 @@ function MetricToggle({ mode, onChange }) {
         style={[styles.toggleButton, mode === 'montant' && styles.toggleButtonActive]}
       >
         <Text style={[styles.toggleLabel, mode === 'montant' && styles.toggleLabelActive]}>
-          Montant
+          Montant HT
         </Text>
       </Pressable>
     </View>
@@ -116,6 +116,7 @@ export default function RapportsScreen({ entrepriseId, refreshToken = 0 }) {
           </Text>
           <Text variant="bodyMedium" style={styles.subtitle}>
             Vue d'ensemble des chantiers sur les 12 derniers mois.
+            {mode === 'montant' ? ' Montants hors taxes (HT) des relevés.' : ''}
           </Text>
         </View>
 
@@ -124,7 +125,7 @@ export default function RapportsScreen({ entrepriseId, refreshToken = 0 }) {
         <Card style={styles.card} mode="elevated">
           <Card.Content>
             <Text variant="titleMedium" style={styles.sectionTitle}>
-              Chantiers par statut
+              {mode === 'montant' ? 'Montants HT par statut' : 'Chantiers par statut'}
             </Text>
             {loading && rows.length === 0 ? (
               <View style={styles.loadingState}>
@@ -150,10 +151,7 @@ export default function RapportsScreen({ entrepriseId, refreshToken = 0 }) {
                       </Text>
                     </View>
                   )}
-                  showText
-                  textColor={chantierColors.text}
-                  textSize={11}
-                  fontWeight="700"
+                  showText={false}
                   focusOnPress
                 />
               </View>
@@ -165,7 +163,7 @@ export default function RapportsScreen({ entrepriseId, refreshToken = 0 }) {
         <Card style={styles.card} mode="elevated">
           <Card.Content>
             <Text variant="titleMedium" style={styles.sectionTitle}>
-              {mode === 'montant' ? 'Montants par mois' : 'Chantiers par mois'}
+              {mode === 'montant' ? 'Montants HT par mois' : 'Chantiers par mois'}
             </Text>
             <Text variant="bodySmall" style={styles.sectionHint}>
               Empilé par statut, du mois courant jusqu'à 12 mois en arrière.
@@ -202,6 +200,10 @@ export default function RapportsScreen({ entrepriseId, refreshToken = 0 }) {
             <StatusLegend />
           </Card.Content>
         </Card>
+
+        <Text variant="bodySmall" style={styles.footerNote}>
+          « Annulé » exclu
+        </Text>
       </ScrollView>
     </View>
   );
@@ -324,5 +326,12 @@ const styles = StyleSheet.create({
   axisText: {
     color: chantierColors.muted,
     fontSize: 11,
+  },
+  footerNote: {
+    color: chantierColors.muted,
+    textAlign: 'center',
+    marginTop: 4,
+    marginBottom: 8,
+    fontStyle: 'italic',
   },
 });

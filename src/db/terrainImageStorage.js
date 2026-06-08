@@ -69,29 +69,53 @@ export const deleteImageFileLocal = async (storageKey) => {
   }
 };
 
+const inferContentTypeFromKey = (storageKey) => {
+  const ext = String(storageKey || '').split('.').pop()?.toLowerCase();
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'heic') return 'image/heic';
+  if (ext === 'heif') return 'image/heif';
+  return 'image/jpeg';
+};
+
+const readLocalImageBytes = async (localUri) => {
+  const base64 = await FileSystem.readAsStringAsync(localUri, { encoding: 'base64' });
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+};
+
 export const uploadImageToCloud = async (storageKey) => {
   if (!isSupabaseConfigured() || !storageKey) {
     return { ok: false, skipped: true };
   }
 
-  const localUri = getLocalImageUri(storageKey);
-  const info = await FileSystem.getInfoAsync(localUri);
-  if (!info.exists) {
-    return { ok: false, error: 'Fichier local introuvable.' };
+  try {
+    const localUri = getLocalImageUri(storageKey);
+    const info = await FileSystem.getInfoAsync(localUri);
+    if (!info.exists) {
+      return { ok: false, error: 'Fichier local introuvable.' };
+    }
+
+    const bytes = await readLocalImageBytes(localUri);
+    const { error } = await supabase.storage.from(TERRAIN_IMAGE_BUCKET).upload(storageKey, bytes, {
+      upsert: true,
+      contentType: inferContentTypeFromKey(storageKey),
+    });
+
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+
+    return { ok: true };
+  } catch (uploadError) {
+    const message =
+      uploadError instanceof Error ? uploadError.message : 'Échec envoi image.';
+    return { ok: false, error: message };
   }
-
-  const response = await fetch(localUri);
-  const blob = await response.blob();
-  const { error } = await supabase.storage.from(TERRAIN_IMAGE_BUCKET).upload(storageKey, blob, {
-    upsert: true,
-    contentType: blob.type || 'image/jpeg',
-  });
-
-  if (error) {
-    return { ok: false, error: error.message };
-  }
-
-  return { ok: true };
 };
 
 export const downloadImageFromCloud = async (storageKey) => {
@@ -124,12 +148,12 @@ export const downloadImageFromCloud = async (storageKey) => {
 
 export const persistTerrainImage = async ({ sourceUri, storageKey, mimeType, uploadCloud }) => {
   const key = await saveImageFileLocal({ sourceUri, storageKey, mimeType });
-  const shouldUpload = uploadCloud === true || (uploadCloud !== false && (await isProEntreprise()));
 
-  if (shouldUpload && isSupabaseConfigured()) {
+  // Offline-first : l envoi cloud est fait par syncPendingTerrainImagesToCloud.
+  if (uploadCloud === true && isSupabaseConfigured()) {
     const uploaded = await uploadImageToCloud(key);
     if (!uploaded.ok && !uploaded.skipped) {
-      throw new Error(uploaded.error || 'Échec envoi image cloud.');
+      console.warn('Echec upload image terrain:', key, uploaded.error);
     }
   }
 
@@ -187,21 +211,29 @@ export const collectPendingImageKeys = async (entrepriseId) => {
 
 export const syncPendingTerrainImagesToCloud = async (entrepriseId) => {
   if (!(await isProEntreprise()) || !isSupabaseConfigured()) {
-    return { ok: true, uploaded: 0, skipped: true };
+    return { ok: true, uploaded: 0, failed: 0, skipped: true };
   }
 
   const keys = await collectPendingImageKeys(entrepriseId);
   let uploaded = 0;
+  let failed = 0;
 
   for (const key of keys) {
-    const result = await uploadImageToCloud(key);
-    if (result.ok) uploaded += 1;
-    if (!result.ok && !result.skipped) {
-      console.warn('Echec upload image terrain:', key, result.error);
+    try {
+      const result = await uploadImageToCloud(key);
+      if (result.ok) {
+        uploaded += 1;
+      } else if (!result.skipped) {
+        failed += 1;
+        console.warn('Echec upload image terrain:', key, result.error);
+      }
+    } catch (uploadError) {
+      failed += 1;
+      console.warn('Echec upload image terrain:', key, uploadError);
     }
   }
 
-  return { ok: true, uploaded };
+  return { ok: true, uploaded, failed };
 };
 
 export const hydrateTerrainImagesFromPull = async (pull = {}) => {

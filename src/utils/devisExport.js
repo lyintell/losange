@@ -11,9 +11,7 @@ import {
   renderExportLogoWatermarkHtml,
   resolveExportLogoDataUri,
 } from './exportLogo';
-
-const { StorageAccessFramework } = FileSystem;
-const EXPORT_SETTINGS_PATH = `${FileSystem.documentDirectory}losange_export_settings.json`;
+import { saveFileToAndroidDownloads } from './androidSafExport';
 
 const escapeHtml = (value) =>
   String(value ?? '')
@@ -405,82 +403,47 @@ export async function generateDimensionsPdfFile({ entreprise, chantier, lignes }
   return uri;
 }
 
-export async function shareDevisPdf(uri, dialogTitle) {
-  const canShare = await Sharing.isAvailableAsync();
-  if (!canShare) {
-    throw new Error("Le partage de fichiers n'est pas disponible sur cet appareil.");
-  }
-  await Sharing.shareAsync(uri, {
-    mimeType: 'application/pdf',
-    UTI: 'com.adobe.pdf',
-    dialogTitle,
-  });
-}
-
-const buildExportSlug = (chantier) =>
-  (chantier?.nom || 'chantier')
+const buildClientSlug = (chantier) =>
+  (chantier?.client_nom || 'client')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9-_]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, 40);
 
-const buildDevisFileName = (chantier) => {
-  const date = new Date().toISOString().slice(0, 10);
-  return `devis_${buildExportSlug(chantier) || 'chantier'}_${date}.pdf`;
+const buildExportDateSlug = () => new Date().toISOString().slice(0, 10);
+
+export const buildDevisFileName = (chantier) => {
+  const client = buildClientSlug(chantier) || 'client';
+  return `devis_${client}_${buildExportDateSlug()}.pdf`;
 };
 
-const buildDimensionsFileName = (chantier) => {
-  const date = new Date().toISOString().slice(0, 10);
-  return `releve_${buildExportSlug(chantier) || 'chantier'}_${date}.pdf`;
+export const buildRelevesFileName = (chantier) => {
+  const client = buildClientSlug(chantier) || 'client';
+  return `releves_${client}_${buildExportDateSlug()}.pdf`;
 };
 
-const buildDevisFileBaseName = (fileName) => fileName.replace(/\.pdf$/i, '');
+const copyPdfForNamedShare = async (sourceUri, fileName) => {
+  const destUri = `${FileSystem.cacheDirectory}${fileName}`;
+  await FileSystem.copyAsync({ from: sourceUri, to: destUri });
+  return destUri;
+};
 
-async function loadAndroidDownloadDirectoryUri() {
-  try {
-    const info = await FileSystem.getInfoAsync(EXPORT_SETTINGS_PATH);
-    if (!info.exists) return null;
-    const raw = await FileSystem.readAsStringAsync(EXPORT_SETTINGS_PATH);
-    const parsed = JSON.parse(raw);
-    return parsed.androidDownloadDirectoryUri || null;
-  } catch {
-    return null;
-  }
-}
-
-async function saveAndroidDownloadDirectoryUri(directoryUri) {
-  await FileSystem.writeAsStringAsync(
-    EXPORT_SETTINGS_PATH,
-    JSON.stringify({ androidDownloadDirectoryUri: directoryUri })
-  );
-}
-
-async function savePdfToAndroidDownloads(sourceUri, fileName) {
-  let directoryUri = await loadAndroidDownloadDirectoryUri();
-
-  if (!directoryUri) {
-    const downloadsRoot = StorageAccessFramework.getUriForDirectoryInRoot('Download');
-    const permissions = await StorageAccessFramework.requestDirectoryPermissionsAsync(downloadsRoot);
-    if (!permissions.granted) {
-      throw new Error('Accès au dossier Téléchargements refusé.');
-    }
-    directoryUri = permissions.directoryUri;
-    await saveAndroidDownloadDirectoryUri(directoryUri);
+export async function shareDevisPdf(uri, dialogTitle, { chantier, mode = 'devis' } = {}) {
+  const canShare = await Sharing.isAvailableAsync();
+  if (!canShare) {
+    throw new Error("Le partage de fichiers n'est pas disponible sur cet appareil.");
   }
 
-  const base64 = await FileSystem.readAsStringAsync(sourceUri, {
-    encoding: 'base64',
+  const fileName =
+    mode === 'pdf' ? buildRelevesFileName(chantier) : buildDevisFileName(chantier);
+  const shareUri = chantier ? await copyPdfForNamedShare(uri, fileName) : uri;
+
+  await Sharing.shareAsync(shareUri, {
+    mimeType: 'application/pdf',
+    UTI: 'com.adobe.pdf',
+    dialogTitle,
   });
-  const destUri = await StorageAccessFramework.createFileAsync(
-    directoryUri,
-    buildDevisFileBaseName(fileName),
-    'application/pdf'
-  );
-  await FileSystem.writeAsStringAsync(destUri, base64, {
-    encoding: 'base64',
-  });
-  return { savedUri: destUri, locationLabel: 'Téléchargements' };
 }
 
 async function savePdfToAppDocuments(sourceUri, fileName, folderLabel = 'Devis') {
@@ -497,15 +460,21 @@ async function savePdfToAppDocuments(sourceUri, fileName, folderLabel = 'Devis')
 export async function downloadDevisPdf(sourceUri, chantier) {
   const fileName = buildDevisFileName(chantier);
   if (Platform.OS === 'android') {
-    return { fileName, ...(await savePdfToAndroidDownloads(sourceUri, fileName)) };
+    const result = await saveFileToAndroidDownloads(sourceUri, fileName, 'application/pdf', {
+      fallbackFolderLabel: 'Devis',
+    });
+    return { fileName, ...result };
   }
   return { fileName, ...(await savePdfToAppDocuments(sourceUri, fileName, 'Devis')) };
 }
 
 export async function downloadDimensionsPdf(sourceUri, chantier) {
-  const fileName = buildDimensionsFileName(chantier);
+  const fileName = buildRelevesFileName(chantier);
   if (Platform.OS === 'android') {
-    return { fileName, ...(await savePdfToAndroidDownloads(sourceUri, fileName)) };
+    const result = await saveFileToAndroidDownloads(sourceUri, fileName, 'application/pdf', {
+      fallbackFolderLabel: 'Relevés',
+    });
+    return { fileName, ...result };
   }
   return { fileName, ...(await savePdfToAppDocuments(sourceUri, fileName, 'Relevés')) };
 }

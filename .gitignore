@@ -14,6 +14,7 @@ expo-env.d.ts
 # EAS / builds locaux
 .eas/
 build/
+credentials.json
 *.apk
 *.aab
 *.ipa
@@ -32,6 +33,8 @@ local.properties
 *.key
 *.mobileprovision
 *.hprof
+google-services.json
+GoogleService-Info.plist
 
 # Metro
 .metro-health-check*
@@ -41,6 +44,7 @@ npm-debug.*
 yarn-debug.*
 yarn-error.*
 *.log
+*.trace
 
 # macOS
 .DS_Store
@@ -56,6 +60,7 @@ Desktop.ini
 .env.*
 !.env.example
 expo.dev
+supabase/functions/.env
 
 # TypeScript
 *.tsbuildinfo
@@ -83,9 +88,10 @@ supabase/.branches/
 .cursor/
 .claude/
 
-# Transcripts & brouillons Cursor (pas le code source)
+# Prompts locaux (brouillons, exports prod, transcripts)
 prompts/transcripts/
 prompts/terminal.txt
+prompts/prod_stuff/
 
 # Test & coverage
 coverage/

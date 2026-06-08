@@ -3,7 +3,8 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-nat
 import { Card, Searchbar, Text } from 'react-native-paper';
 import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
 import { FlowSmallFab, getFabColumnPadding } from '../components/terrain/TerrainFlowFabs';
-import { getClientsByEntrepriseLocal } from '../db/querries';
+import { getClientsByEntrepriseLocal, getLoggedInProfilViewLocal } from '../db/querries';
+import { canManageClients } from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
 
 const formatClientPhoneLine = (name, phone) => {
@@ -16,6 +17,7 @@ export default function ListeClientsScreen({ entrepriseId, refreshToken = 0, onC
   const [clients, setClients] = useState([]);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [canOpenClientDetails, setCanOpenClientDetails] = useState(false);
 
   const loadClients = useCallback(async () => {
     if (!entrepriseId) {
@@ -37,6 +39,29 @@ export default function ListeClientsScreen({ entrepriseId, refreshToken = 0, onC
   useEffect(() => {
     loadClients();
   }, [loadClients, refreshToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAccess = async () => {
+      try {
+        const profil = await getLoggedInProfilViewLocal();
+        if (!cancelled) {
+          setCanOpenClientDetails(canManageClients(profil));
+        }
+      } catch (error) {
+        console.error('Erreur chargement acces clients:', error);
+        if (!cancelled) {
+          setCanOpenClientDetails(false);
+        }
+      }
+    };
+
+    loadAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filteredClients = useMemo(() => {
     const term = searchQuery.trim().toLowerCase();
@@ -68,7 +93,14 @@ export default function ListeClientsScreen({ entrepriseId, refreshToken = 0, onC
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadClients} />}
         contentContainerStyle={[styles.listContent, { paddingBottom: getFabColumnPadding(1) + 24 }]}
         renderItem={({ item }) => (
-          <Pressable onPress={() => onClientPress?.(item)}>
+          <Pressable
+            disabled={!canOpenClientDetails}
+            onPress={() => {
+              if (canOpenClientDetails) {
+                onClientPress?.(item);
+              }
+            }}
+          >
             <Card style={styles.card} mode="elevated">
               <Card.Content>
                 <Text variant="bodyLarge" style={styles.clientLine}>

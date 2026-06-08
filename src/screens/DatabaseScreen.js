@@ -1,11 +1,41 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
 import { LosangeLogoBackground } from '../components/terrain/LosangeLogoLoader';
 import PlusMenuButton from '../components/terrain/PlusMenuButton';
+import { getLoggedInProfilViewLocal } from '../db/querries';
+import { canAccessDatabaseMetiers, canAccessDatabaseOuvrages } from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
 
 export default function DatabaseScreen({ onListeClientsPress, onListeMetiersPress, onListeOuvragesPress }) {
+  const [canShowMetiers, setCanShowMetiers] = useState(false);
+  const [canShowOuvrages, setCanShowOuvrages] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAccess = async () => {
+      try {
+        const profil = await getLoggedInProfilViewLocal();
+        if (!cancelled) {
+          setCanShowMetiers(canAccessDatabaseMetiers(profil));
+          setCanShowOuvrages(canAccessDatabaseOuvrages(profil));
+        }
+      } catch (error) {
+        console.error('Erreur chargement acces base de donnees:', error);
+        if (!cancelled) {
+          setCanShowMetiers(false);
+          setCanShowOuvrages(false);
+        }
+      }
+    };
+
+    loadAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <View style={styles.container}>
       <LosangeLogoBackground opacity={0.1} />
@@ -20,13 +50,17 @@ export default function DatabaseScreen({ onListeClientsPress, onListeMetiersPres
           Clients
         </PlusMenuButton>
 
-        <PlusMenuButton icon="hard-hat" onPress={onListeMetiersPress}>
-          Métiers
-        </PlusMenuButton>
+        {canShowMetiers ? (
+          <PlusMenuButton icon="hard-hat" onPress={onListeMetiersPress}>
+            Métiers
+          </PlusMenuButton>
+        ) : null}
 
-        <PlusMenuButton icon="hammer-wrench" onPress={onListeOuvragesPress}>
-          Ouvrages
-        </PlusMenuButton>
+        {canShowOuvrages ? (
+          <PlusMenuButton icon="hammer-wrench" onPress={onListeOuvragesPress}>
+            Ouvrages
+          </PlusMenuButton>
+        ) : null}
       </View>
     </View>
   );
