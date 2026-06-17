@@ -1,19 +1,112 @@
-import React, { useCallback, useState } from 'react';
-import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
-import { Card, FAB, Text } from 'react-native-paper';
-import { getLignesByChantierLocal } from '../db/querries';
-import { chantierColors } from '../styles/theme';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Text } from 'react-native-paper';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import LigneNoteReadModal from '../components/terrain/LigneNoteReadModal';
+import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
+import TerrainImageViewModal from '../components/terrain/TerrainImageViewModal';
+import { LignesReleveGroupedSections } from '../components/terrain/LignesReleveGroupedList';
+import { FlowActionFab, FlowSmallFab, FAB_HORIZONTAL_INSET, getFabColumnPadding } from '../components/terrain/TerrainFlowFabs';
+import {
+  clearChantierPhotoLocal,
+  clearLigneRelevePhotoLocal,
+  getChantierWithClientByIdLocal,
+  getEntrepriseByIdLocal,
+  getLignesByChantierLocal,
+  getLoggedInProfilViewLocal,
+  updateChantierStatusLocal,
+  updateLigneReleveIndCompleteLocal,
+} from '../db/querries';
+import { CHANTIER_PHOTO_SLOTS, resolveTerrainImageUri } from '../db/terrainImageStorage';
+import { hidesPriceUiForRole } from '../utils/terrainAccess';
+import {
+  downloadDevisPdf,
+  downloadDimensionsPdf,
+  generateDevisPdfFile,
+  generateDimensionsPdfFile,
+  shareDevisPdf,
+} from '../utils/devisExport';
+import { CHANTIER_STATUS_DEVIS } from '../utils/chantierStatus';
+import { chantierColors, MOBILE_BUTTON_FONT_SIZE, MOBILE_BUTTON_LINE_HEIGHT } from '../styles/theme';
 
-export default function ChantierDetails({ chantier, bottomOffset = 0 }) {
+const DEVIS_MULTI_PRESS_DELAY_MS = 350;
+
+function ExportActionButton({ icon, label, buttonColor, textColor = '#FFFFFF', loading, disabled, onPress }) {
+  const isDisabled = disabled || loading;
+
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={isDisabled}
+      style={({ pressed }) => [
+        styles.exportButton,
+        { backgroundColor: buttonColor },
+        isDisabled && styles.exportButtonDisabled,
+        pressed && !isDisabled && styles.exportButtonPressed,
+      ]}
+    >
+      {loading ? (
+        <ActivityIndicator color={textColor} />
+      ) : (
+        <>
+          <MaterialCommunityIcons name={icon} size={24} color={textColor} />
+          <Text style={[styles.exportButtonLabel, { color: textColor }]}>{label}</Text>
+        </>
+      )}
+    </Pressable>
+  );
+}
+
+export default function ChantierDetails({ chantier, entrepriseId = null, onChantierUpdated }) {
   const [loading, setLoading] = useState(false);
   const [lignes, setLignes] = useState([]);
+  const [chantierData, setChantierData] = useState(chantier);
+  const [showPrices, setShowPrices] = useState(false);
+  const [exportOverlayVisible, setExportOverlayVisible] = useState(false);
+  const [exportOverlayMode, setExportOverlayMode] = useState('devis');
+  const [exporting, setExporting] = useState(false);
+  const [noteModal, setNoteModal] = useState({ visible: false, note: '', ouvrageNom: '' });
+  const [hidesDevisUi, setHidesDevisUi] = useState(false);
+  const [isProAccount, setIsProAccount] = useState(false);
+  const [imageModal, setImageModal] = useState({
+    visible: false,
+    uri: null,
+    title: 'Photo',
+    deleteKind: null,
+    deleteTarget: null,
+  });
+  const [deletingImage, setDeletingImage] = useState(false);
+
+  const chantierPhotos = useMemo(
+    () =>
+      CHANTIER_PHOTO_SLOTS.map((slot, index) => ({
+        slot,
+        index: index + 1,
+        storageKey: chantierData?.[slot] || null,
+        uri: chantierData?.[slot] ? resolveTerrainImageUri(chantierData[slot]) : null,
+      })).filter((item) => item.storageKey),
+    [chantierData]
+  );
+
+  useEffect(() => {
+    setChantierData(chantier);
+  }, [chantier]);
+
+  const devisPressCountRef = useRef(0);
+  const devisPressTimerRef = useRef(null);
 
   const loadLignes = useCallback(async () => {
     if (!chantier?.id) return;
     try {
       setLoading(true);
-      const data = await getLignesByChantierLocal(chantier.id);
+      const [data, freshChantier] = await Promise.all([
+        getLignesByChantierLocal(chantier.id),
+        getChantierWithClientByIdLocal(chantier.id),
+      ]);
       setLignes(data || []);
+      if (freshChantier) {
+        setChantierData(freshChantier);
+      }
     } catch (error) {
       console.error('Erreur chargement lignes chantier:', error);
       setLignes([]);
@@ -22,59 +115,351 @@ export default function ChantierDetails({ chantier, bottomOffset = 0 }) {
     }
   }, [chantier?.id]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     loadLignes();
   }, [loadLignes]);
+
+  useEffect(() => {
+    const loadAccess = async () => {
+      try {
+        const profil = await getLoggedInProfilViewLocal();
+        setHidesDevisUi(hidesPriceUiForRole(profil?.role));
+        setIsProAccount(Boolean(profil?.is_pro));
+        if (hidesPriceUiForRole(profil?.role)) {
+          setShowPrices(false);
+        }
+      } catch (error) {
+        console.error('Erreur chargement acces chantier:', error);
+        setHidesDevisUi(false);
+        setIsProAccount(false);
+      }
+    };
+    loadAccess();
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (devisPressTimerRef.current) clearTimeout(devisPressTimerRef.current);
+    },
+    []
+  );
+
+  const handleLignePress = (ligne) => {
+    if (ligne?.photo) {
+      setImageModal({
+        visible: true,
+        uri: resolveTerrainImageUri(ligne.photo),
+        title: ligne.ouvrage_nom || 'Photo ligne',
+        deleteKind: 'ligne',
+        deleteTarget: ligne.id,
+      });
+      return;
+    }
+    if (!ligne?.note?.trim()) return;
+    setNoteModal({
+      visible: true,
+      note: ligne.note,
+      ouvrageNom: ligne.ouvrage_nom || '',
+    });
+  };
+
+  const openChantierPhoto = (photo) => {
+    setImageModal({
+      visible: true,
+      uri: photo.uri,
+      title: `Photo ${photo.index}`,
+      deleteKind: 'chantier',
+      deleteTarget: photo.slot,
+    });
+  };
+
+  const closeImageModal = () => {
+    if (deletingImage) return;
+    setImageModal({
+      visible: false,
+      uri: null,
+      title: 'Photo',
+      deleteKind: null,
+      deleteTarget: null,
+    });
+  };
+
+  const handleDeleteImage = async () => {
+    if (!imageModal.deleteKind || !imageModal.deleteTarget || !chantierData?.id) return;
+
+    try {
+      setDeletingImage(true);
+      if (imageModal.deleteKind === 'chantier') {
+        await clearChantierPhotoLocal(chantierData.id, imageModal.deleteTarget);
+        const updated = { ...chantierData, [imageModal.deleteTarget]: null };
+        setChantierData(updated);
+        onChantierUpdated?.(updated);
+      } else if (imageModal.deleteKind === 'ligne') {
+        await clearLigneRelevePhotoLocal(imageModal.deleteTarget);
+        setLignes((prev) =>
+          prev.map((item) =>
+            item.id === imageModal.deleteTarget ? { ...item, photo: null } : item
+          )
+        );
+      }
+      closeImageModal();
+    } catch (error) {
+      console.error('Erreur suppression photo:', error);
+      Alert.alert('Erreur', error.message || 'Impossible de supprimer la photo.');
+    } finally {
+      setDeletingImage(false);
+    }
+  };
+
+  const handleToggleComplete = async (ligne) => {
+    if (!isProAccount) return;
+
+    const nextValue = Number(ligne.ind_complete) === 1 ? 0 : 1;
+    try {
+      await updateLigneReleveIndCompleteLocal(ligne.id, nextValue);
+      setLignes((prev) =>
+        prev.map((item) => (item.id === ligne.id ? { ...item, ind_complete: nextValue } : item))
+      );
+    } catch (error) {
+      console.error('Erreur mise a jour ind_complete:', error);
+      Alert.alert('Modification refusée', error.message || 'Action impossible.');
+    }
+  };
+
+  const handleDevisPress = () => {
+    devisPressCountRef.current += 1;
+    if (devisPressTimerRef.current) clearTimeout(devisPressTimerRef.current);
+    devisPressTimerRef.current = setTimeout(() => {
+      const pressCount = devisPressCountRef.current;
+      devisPressCountRef.current = 0;
+      devisPressTimerRef.current = null;
+
+      if (pressCount >= 2) {
+        if (!lignes.length) {
+          Alert.alert('Devis', 'Aucune dimension à inclure dans le devis.');
+          return;
+        }
+        setShowPrices(true);
+        setExportOverlayMode('devis');
+        setExportOverlayVisible(true);
+      } else if (pressCount === 1) {
+        setShowPrices((prev) => !prev);
+      }
+    }, DEVIS_MULTI_PRESS_DELAY_MS);
+  };
+
+  const handlePdfPress = () => {
+    if (!lignes.length) {
+      Alert.alert('PDF', 'Aucune dimension à inclure dans le document.');
+      return;
+    }
+    setExportOverlayMode('pdf');
+    setExportOverlayVisible(true);
+  };
+
+  const closeExportOverlay = () => {
+    if (exporting) return;
+    setExportOverlayVisible(false);
+  };
+
+  const markChantierAsDevis = async () => {
+    if (!chantier?.id || chantier.status === CHANTIER_STATUS_DEVIS) return;
+
+    try {
+      await updateChantierStatusLocal(chantier.id, CHANTIER_STATUS_DEVIS);
+      onChantierUpdated?.({ ...chantier, status: CHANTIER_STATUS_DEVIS });
+    } catch (error) {
+      console.error('Erreur mise a jour status devis:', error);
+    }
+  };
+
+  const generateExportPdf = async () => {
+    const entreprise = await getEntrepriseByIdLocal(entrepriseId);
+    if (exportOverlayMode === 'pdf') {
+      return generateDimensionsPdfFile({ entreprise, chantier, lignes });
+    }
+    return generateDevisPdfFile({ entreprise, chantier, lignes });
+  };
+
+  const runExportDownload = async () => {
+    if (exporting) return;
+    if (!lignes.length) {
+      Alert.alert('Export', 'Aucune dimension à inclure dans le document.');
+      return;
+    }
+
+    const isPdf = exportOverlayMode === 'pdf';
+
+    try {
+      setExporting(true);
+      const uri = await generateExportPdf();
+      const result =
+        exportOverlayMode === 'pdf'
+          ? await downloadDimensionsPdf(uri, chantier)
+          : await downloadDevisPdf(uri, chantier);
+      if (!isPdf) {
+        await markChantierAsDevis();
+      }
+      setExportOverlayVisible(false);
+      Alert.alert(
+        isPdf ? 'PDF enregistré' : 'Devis enregistré',
+        `${result.fileName}\nDossier : ${result.locationLabel}`
+      );
+    } catch (error) {
+      console.error('Erreur telechargement export:', error);
+      Alert.alert('Erreur', error.message || "Impossible d'enregistrer le document.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const runExportWhatsApp = async () => {
+    if (exporting) return;
+    if (!lignes.length) {
+      Alert.alert('Export', 'Aucune dimension à inclure dans le document.');
+      return;
+    }
+
+    const isPdf = exportOverlayMode === 'pdf';
+
+    try {
+      setExporting(true);
+      const uri = await generateExportPdf();
+      await shareDevisPdf(
+        uri,
+        isPdf ? 'Partager le PDF sur WhatsApp' : 'Partager le devis sur WhatsApp',
+        { chantier, mode: isPdf ? 'pdf' : 'devis' }
+      );
+      if (!isPdf) {
+        await markChantierAsDevis();
+      }
+      setExportOverlayVisible(false);
+    } catch (error) {
+      console.error('Erreur partage export:', error);
+      Alert.alert('Erreur', error.message || 'Impossible de partager le document.');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text variant="headlineSmall" style={styles.title}>
-          {chantier?.nom || 'Detail Chantier'}
+          {chantier?.nom || 'Détail chantier'}
         </Text>
         <Text variant="bodyMedium" style={styles.subTitle}>
-          Client: {chantier?.client_nom || 'Non renseigne'}
+          Client : {chantier?.client_nom || 'Non renseigné'}
         </Text>
       </View>
 
-      <FlatList
-        data={lignes}
-        keyExtractor={(item) => item.id}
+      <LignesReleveGroupedSections
+        lignes={lignes}
+        variant="details"
+        showPrices={showPrices}
+        onLignePress={handleLignePress}
+        onLigneDoublePress={isProAccount ? handleToggleComplete : undefined}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadLignes} />}
-        contentContainerStyle={[styles.listContent, { paddingBottom: bottomOffset + 24 }]}
-        renderItem={({ item }) => (
-          <Card style={styles.card}>
-            <Card.Content>
-              <Text style={styles.ouvrage}>{item.ouvrage_nom}</Text>
-              <Text style={styles.rowText}>
-                L:{item.largeur ?? '-'} H:{item.hauteur ?? '-'} Nb:{item.nombre ?? 1}
-              </Text>
-              <Text style={styles.rowText}>
-                Qt: {item.quantite} {item.unite_nom} | PU: {item.prix_unitaire_applique} | Mt: {item.montant}
-              </Text>
-            </Card.Content>
-          </Card>
-        )}
-        ListEmptyComponent={
-          !loading ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Aucune dimension enregistree pour ce chantier.</Text>
+        contentContainerStyle={[
+          styles.listContent,
+          {
+            paddingBottom: getFabColumnPadding(hidesDevisUi ? 0 : 1) + (chantierPhotos.length ? 16 : 24),
+          },
+        ]}
+        ListFooterComponent={
+          chantierPhotos.length ? (
+            <View style={styles.photoFooter}>
+              <View style={styles.photoButtonsRow}>
+                {chantierPhotos.map((photo) => (
+                  <Pressable
+                    key={photo.slot}
+                    onPress={() => openChantierPhoto(photo)}
+                    style={({ pressed }) => [
+                      styles.photoIconButton,
+                      pressed && styles.photoIconButtonPressed,
+                    ]}
+                    accessibilityLabel={`Photo ${photo.index}`}
+                    accessibilityRole="button"
+                  >
+                    <MaterialCommunityIcons
+                      name="image"
+                      size={36}
+                      color={chantierColors.primary}
+                    />
+                  </Pressable>
+                ))}
+              </View>
             </View>
           ) : null
         }
+        ListEmptyComponent={
+          loading ? (
+            <View style={styles.loadingState}>
+              <LosangeLogoLoader size="large" />
+            </View>
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>Aucune dimension enregistrée pour ce chantier.</Text>
+            </View>
+          )
+        }
       />
 
-      <FAB
-        icon="pencil"
-        style={[styles.penFab, { bottom: bottomOffset + 20 }]}
-        color="#000000"
-        customSize={70}
+      <FlowActionFab
+        icon="file-pdf-box"
+        color="#C62828"
+        smallCountBelow={hidesDevisUi ? 0 : 1}
+        onPress={handlePdfPress}
       />
-      <FAB
-        icon="file-document"
-        style={[styles.fileFab, { bottom: bottomOffset - 44 }]}
-        color="#FFFFFF"
-        customSize={50}
+      {hidesDevisUi ? null : (
+        <FlowSmallFab
+          icon="file-document"
+          tierFromBottom={0}
+          color={showPrices ? '#0F3D9E' : '#1D4ED8'}
+          onPress={handleDevisPress}
+        />
+      )}
+
+      {exportOverlayVisible ? (
+        <View style={styles.exportOverlay}>
+          <Pressable style={styles.overlayBackdrop} onPress={closeExportOverlay} />
+          <View style={styles.exportActions} pointerEvents="box-none">
+            <ExportActionButton
+              icon="download"
+              label="Télécharger"
+              buttonColor={exportOverlayMode === 'pdf' ? '#C62828' : '#1D4ED8'}
+              loading={exporting}
+              disabled={exporting}
+              onPress={runExportDownload}
+            />
+            {isProAccount ? (
+              <ExportActionButton
+                icon="whatsapp"
+                label="WhatsApp"
+                buttonColor="#25D366"
+                loading={exporting}
+                disabled={exporting}
+                onPress={runExportWhatsApp}
+              />
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+
+      <LigneNoteReadModal
+        visible={noteModal.visible}
+        note={noteModal.note}
+        ouvrageNom={noteModal.ouvrageNom}
+        onDismiss={() => setNoteModal({ visible: false, note: '', ouvrageNom: '' })}
+      />
+
+      <TerrainImageViewModal
+        visible={imageModal.visible}
+        imageUri={imageModal.uri}
+        title={imageModal.title}
+        onDismiss={closeImageModal}
+        onDelete={imageModal.deleteKind ? handleDeleteImage : undefined}
+        deleting={deletingImage}
       />
     </View>
   );
@@ -105,21 +490,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   listContent: {
-    gap: 8,
+    gap: 10,
+    paddingTop: 4,
   },
-  card: {
-    backgroundColor: chantierColors.surface,
-    borderWidth: 1,
-    borderColor: chantierColors.border,
-  },
-  ouvrage: {
-    color: chantierColors.text,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  rowText: {
-    color: chantierColors.text,
-    fontSize: 14,
+  loadingState: {
+    alignItems: 'center',
+    marginTop: 42,
   },
   emptyState: {
     alignItems: 'center',
@@ -129,16 +505,62 @@ const styles = StyleSheet.create({
     color: chantierColors.muted,
     textAlign: 'center',
   },
-  penFab: {
-    position: 'absolute',
-    right: 14,
-    backgroundColor: '#FACC15',
-    borderRadius: 999,
+  photoFooter: {
+    marginTop: 10,
+    paddingTop: 4,
+    paddingRight: FAB_HORIZONTAL_INSET,
   },
-  fileFab: {
-    position: 'absolute',
-    right: 24,
-    backgroundColor: '#1D4ED8',
-    borderRadius: 999,
+  photoButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingRight: FAB_HORIZONTAL_INSET,
+  },
+  photoIconButton: {
+    flex: 1,
+    minHeight: 58,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: chantierColors.border,
+    backgroundColor: chantierColors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoIconButtonPressed: {
+    backgroundColor: '#FFF5F1',
+  },
+  exportOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    zIndex: 20,
+  },
+  overlayBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255, 255, 255, 0.81)',
+  },
+  exportActions: {
+    paddingHorizontal: 24,
+    gap: 14,
+    alignItems: 'stretch',
+  },
+  exportButton: {
+    borderRadius: 12,
+    minHeight: 60,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    gap: 12,
+  },
+  exportButtonDisabled: {
+    opacity: 0.7,
+  },
+  exportButtonPressed: {
+    opacity: 0.92,
+  },
+  exportButtonLabel: {
+    fontSize: MOBILE_BUTTON_FONT_SIZE,
+    lineHeight: MOBILE_BUTTON_LINE_HEIGHT,
+    fontWeight: '700',
   },
 });

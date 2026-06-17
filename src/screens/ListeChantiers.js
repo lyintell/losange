@@ -1,34 +1,59 @@
-import React, { useCallback, useState } from 'react';
-import { Animated, Easing, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Animated, Easing, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { Card, FAB, Searchbar, Text } from 'react-native-paper';
-import { getChantiersWithClientLocal } from '../db/querries';
+import {
+  FAB_SIZES,
+  FlowSmallFab,
+  flowFabColors,
+  getFabColumnPadding,
+  getMainFabBottom,
+} from '../components/terrain/TerrainFlowFabs';
+import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
+import { canCurrentUserModifyChantierLocal, getChantiersWithClientLocal, getLoggedInProfilViewLocal, updateChantierStatusLocal } from '../db/querries';
+import { canCreateReleveOrLigne } from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
+import {
+  getChantierStatusColor,
+  getChantierStatusLabel,
+  getNextChantierStatusOnDoubleTap,
+  getNextChantierStatusOnTripleTap,
+} from '../utils/chantierStatus';
 
-const STATUS_COLORS = {
-  D: '#6C757D',
-  V: '#1D4ED8',
-  E: '#F59E0B',
-  X: '#2B9348',
-  Z: '#000000',
-  Devis: '#1D4ED8',
-  'En cours': '#F59E0B',
-  Termine: '#2B9348',
-  'Terminé': '#2B9348',
-  Annule: '#000000',
-  'Annulé': '#000000',
+const MULTI_PRESS_DELAY_MS = 350;
+
+const formatClientPhoneLine = (name, phone) => {
+  const parts = [name, phone].filter(Boolean);
+  return parts.length ? parts.join(' / ') : 'Non renseigné';
 };
 
-const STATUS_LABELS = {
-  D: 'Dimension',
-  V: 'Devis',
-  E: 'En cours',
-  X: 'Terminé',
-  Z: 'Annulé',
+const formatPriseLe = (dateValue) => {
+  if (!dateValue) return '';
+  const normalized = String(dateValue).includes('T')
+    ? dateValue
+    : String(dateValue).replace(' ', 'T');
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const formatPriseParLine = (dateValue, priseParNom) => {
+  const date = formatPriseLe(dateValue);
+  const prisePar = String(priseParNom || '').trim();
+  if (date && prisePar) return `${date} (prise par ${prisePar})`;
+  if (date) return date;
+  if (prisePar) return `(prise par ${prisePar})`;
+  return '';
 };
 
 function StatutBadge({ statut }) {
-  const bgColor = STATUS_COLORS[statut] || chantierColors.muted;
-  const label = STATUS_LABELS[statut] || statut;
+  const bgColor = getChantierStatusColor(statut);
+  const label = getChantierStatusLabel(statut);
   return (
     <View style={[styles.badge, { backgroundColor: bgColor }]}>
       <Text style={styles.badgeText}>{label}</Text>
@@ -36,35 +61,86 @@ function StatutBadge({ statut }) {
   );
 }
 
+const parsePriseLeTimestamp = (value) => {
+  if (!value) return 0;
+  const normalized = String(value).includes('T')
+    ? value
+    : String(value).replace(' ', 'T');
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+};
+
+const sortChantiersByPriseLeDesc = (rows) =>
+  [...rows].sort(
+    (a, b) => parsePriseLeTimestamp(b.prise_le) - parsePriseLeTimestamp(a.prise_le)
+  );
+
 export default function ListeChantiers({
   onCreatePress,
   onChantierPress,
+  entrepriseId = null,
   bottomOffset = 0,
   creating = false,
+  refreshToken = 0,
 }) {
   const [loading, setLoading] = useState(false);
   const [chantiers, setChantiers] = useState([]);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [canCreateReleve, setCanCreateReleve] = useState(true);
   const pulseAnim = React.useRef(new Animated.Value(1)).current;
+  const pressCountRef = useRef(0);
+  const pressTimerRef = useRef(null);
 
   const loadChantiers = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await getChantiersWithClientLocal();
+      const data = await getChantiersWithClientLocal(entrepriseId);
       setChantiers(data || []);
     } catch (error) {
       console.error('Erreur chargement chantiers:', error);
     } finally {
       setLoading(false);
     }
+  }, [entrepriseId]);
+
+  useEffect(() => {
+    loadChantiers();
+  }, [loadChantiers, refreshToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAccess = async () => {
+      try {
+        const profil = await getLoggedInProfilViewLocal();
+        if (!cancelled) {
+          setCanCreateReleve(canCreateReleveOrLigne(profil));
+        }
+      } catch (error) {
+        console.error('Erreur chargement acces creation releve:', error);
+        if (!cancelled) {
+          setCanCreateReleve(true);
+        }
+      }
+    };
+
+    loadAccess();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  React.useEffect(() => {
-    loadChantiers();
-  }, [loadChantiers]);
+  useEffect(
+    () => () => {
+      if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+    },
+    []
+  );
 
-  React.useEffect(() => {
+  useEffect(() => {
+    if (!canCreateReleve) return undefined;
+
     const pulse = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
@@ -86,12 +162,63 @@ export default function ListeChantiers({
     return () => {
       pulse.stop();
     };
-  }, [pulseAnim]);
+  }, [pulseAnim, canCreateReleve]);
+
+  const applyChantierStatus = useCallback(async (chantier, nextStatus) => {
+    if (!chantier?.id || chantier.status === nextStatus) return;
+
+    try {
+      if (!(await canCurrentUserModifyChantierLocal(chantier.id))) {
+        Alert.alert(
+          'Modification refusée',
+          "Vous ne pouvez pas modifier un chantier que vous n'avez pas pris."
+        );
+        return;
+      }
+      await updateChantierStatusLocal(chantier.id, nextStatus);
+      setChantiers((prev) =>
+        prev.map((item) => (item.id === chantier.id ? { ...item, status: nextStatus } : item))
+      );
+    } catch (error) {
+      console.error('Erreur mise a jour status chantier:', error);
+    }
+  }, []);
+
+  const handleChantierPress = useCallback(
+    (chantier) => {
+      pressCountRef.current += 1;
+      if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+
+      pressTimerRef.current = setTimeout(() => {
+        const pressCount = pressCountRef.current;
+        pressCountRef.current = 0;
+        pressTimerRef.current = null;
+
+        if (pressCount >= 3) {
+          const nextStatus = getNextChantierStatusOnTripleTap(chantier.status);
+          applyChantierStatus(chantier, nextStatus);
+          return;
+        }
+
+        if (pressCount === 2) {
+          const nextStatus = getNextChantierStatusOnDoubleTap(chantier.status);
+          applyChantierStatus(chantier, nextStatus);
+          return;
+        }
+
+        if (pressCount === 1) {
+          onChantierPress?.(chantier);
+        }
+      }, MULTI_PRESS_DELAY_MS);
+    },
+    [applyChantierStatus, onChantierPress]
+  );
 
   const filteredChantiers = React.useMemo(() => {
+    const sorted = sortChantiersByPriseLeDesc(chantiers);
     const term = searchQuery.trim().toLowerCase();
-    if (!term) return chantiers;
-    return chantiers.filter((item) =>
+    if (!term) return sorted;
+    return sorted.filter((item) =>
       [
         item.nom,
         item.adresse,
@@ -114,55 +241,71 @@ export default function ListeChantiers({
         data={filteredChantiers}
         keyExtractor={(item) => item.id}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadChantiers} />}
-        contentContainerStyle={[styles.listContent, { paddingBottom: bottomOffset + 24 }]}
-        renderItem={({ item }) => (
-          <Card style={styles.card} mode="elevated" onPress={() => onChantierPress?.(item)}>
-            <Card.Content>
-              <Text variant="titleMedium" style={styles.chantierName}>
-                {item.nom}
-              </Text>
-              <Text variant="bodyLarge" style={styles.clientName}>
-                Client: {item.client_nom || 'Non renseigne'}
-              </Text>
-              <View style={styles.badgeRow}>
-                <StatutBadge statut={item.status || 'Devis'} />
-              </View>
-            </Card.Content>
-          </Card>
-        )}
+        contentContainerStyle={[
+          styles.listContent,
+          { paddingBottom: getFabColumnPadding(canCreateReleve ? 1 : 0) + 24 },
+        ]}
+        renderItem={({ item }) => {
+          const priseParLine = formatPriseParLine(item.prise_le, item.prise_par_nom);
+
+          return (
+            <Pressable onPress={() => handleChantierPress(item)}>
+              <Card style={styles.card} mode="elevated">
+                <Card.Content>
+                  <View style={styles.titleRow}>
+                    <Text variant="titleMedium" style={styles.chantierName}>
+                      {item.nom}
+                    </Text>
+                    <StatutBadge statut={item.status || 'D'} />
+                  </View>
+                  <Text variant="bodyLarge" style={styles.clientLine} numberOfLines={1}>
+                    {formatClientPhoneLine(item.client_nom, item.client_telephone_1)}
+                  </Text>
+                  {priseParLine ? (
+                    <Text style={styles.priseLeText}>{priseParLine}</Text>
+                  ) : null}
+                </Card.Content>
+              </Card>
+            </Pressable>
+          );
+        }}
         ListEmptyComponent={
-          !loading ? (
+          loading ? (
+            <View style={styles.loadingState}>
+              <LosangeLogoLoader size="large" />
+            </View>
+          ) : (
             <View style={styles.emptyState}>
               <Text variant="titleMedium" style={styles.emptyText}>
                 Aucun chantier pour le moment.
               </Text>
             </View>
-          ) : null
+          )
         }
       />
 
-      <Animated.View
-        style={[
-          styles.pulseWrapper,
-          { bottom: bottomOffset + 20 },
-          { transform: [{ scale: pulseAnim }] },
-        ]}
-      >
-        <FAB
-          icon="plus"
-          style={styles.fab}
-          color="#FFFFFF"
-          customSize={70}
-          loading={creating}
-          disabled={creating}
-          onPress={onCreatePress}
-        />
-      </Animated.View>
-      <FAB
+      {canCreateReleve ? (
+        <Animated.View
+          style={[
+            styles.pulseWrapper,
+            { bottom: getMainFabBottom(1) },
+            { transform: [{ scale: pulseAnim }] },
+          ]}
+        >
+          <FAB
+            icon="plus"
+            style={styles.fab}
+            color="#FFFFFF"
+            customSize={FAB_SIZES.main}
+            loading={creating}
+            disabled={creating}
+            onPress={onCreatePress}
+          />
+        </Animated.View>
+      ) : null}
+      <FlowSmallFab
         icon="magnify"
-        style={[styles.searchFab, { bottom: bottomOffset - 44 }]}
-        color="#FFFFFF"
-        customSize={50}
+        tierFromBottom={0}
         onPress={() => setSearchVisible((prev) => !prev)}
       />
 
@@ -218,18 +361,27 @@ const styles = StyleSheet.create({
     borderColor: chantierColors.border,
     paddingVertical: 6,
   },
-  chantierName: {
-    color: chantierColors.text,
-    fontWeight: '800',
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
     marginBottom: 6,
   },
-  clientName: {
+  chantierName: {
+    flex: 1,
     color: chantierColors.text,
-    marginBottom: 10,
+    fontWeight: '800',
   },
-  badgeRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-start',
+  clientLine: {
+    color: chantierColors.text,
+    marginBottom: 4,
+  },
+  priseLeText: {
+    color: chantierColors.muted,
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 2,
   },
   badge: {
     paddingHorizontal: 12,
@@ -239,6 +391,10 @@ const styles = StyleSheet.create({
   badgeText: {
     color: '#FFFFFF',
     fontWeight: '700',
+  },
+  loadingState: {
+    marginTop: 48,
+    alignItems: 'center',
   },
   emptyState: {
     marginTop: 48,
@@ -250,18 +406,12 @@ const styles = StyleSheet.create({
   },
   fab: {
     right: 14,
-    backgroundColor: '#FF5722',
+    backgroundColor: flowFabColors.primary,
     borderRadius: 999,
   },
   pulseWrapper: {
     position: 'absolute',
     right: 0,
-  },
-  searchFab: {
-    position: 'absolute',
-    right: 24,
-    backgroundColor: '#9CA3AF',
-    borderRadius: 999,
   },
   searchOverlay: {
     ...StyleSheet.absoluteFillObject,

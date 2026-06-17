@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { Button, Chip, Text } from 'react-native-paper';
-import { getMetiersLocal, getOuvragesByMetierAndEntreprise, getUnitesEtPrixParOuvrage } from '../db/querries';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { Chip, Text } from 'react-native-paper';
+import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
+import MobileButton from '../components/terrain/MobileButton';
+import { getMetiersForSelectionLocal, getOuvragesByMetierAndEntreprise, getUnitesEtPrixParOuvrage } from '../db/querries';
 import { chantierColors } from '../styles/theme';
 
 export default function SelecteurMetierOuvrage({
@@ -23,9 +25,13 @@ export default function SelecteurMetierOuvrage({
 
   useEffect(() => {
     const loadMetiers = async () => {
+      if (!entrepriseId) {
+        setMetiers([]);
+        return;
+      }
       try {
         setLoadingMetiers(true);
-        const data = await getMetiersLocal();
+        const data = await getMetiersForSelectionLocal(entrepriseId);
         setMetiers(data || []);
       } catch (error) {
         console.error('Erreur chargement metiers:', error);
@@ -35,7 +41,7 @@ export default function SelecteurMetierOuvrage({
       }
     };
     loadMetiers();
-  }, []);
+  }, [entrepriseId]);
 
   const handleChooseMetier = async (metier) => {
     if (!entrepriseId) return;
@@ -81,97 +87,104 @@ export default function SelecteurMetierOuvrage({
   };
 
   return (
-    <View style={[styles.container, { paddingBottom: bottomOffset + 8 }]}>
-      <Text variant="headlineSmall" style={styles.title}>
-        1) Choisissez le metier
-      </Text>
-      {loadingMetiers ? (
-        <ActivityIndicator size="large" color={chantierColors.primary} />
-      ) : metiers.length === 0 ? (
-        <Text style={styles.infoText}>Aucun metier disponible. Synchronisez le catalogue depuis Supabase.</Text>
-      ) : (
-        <View style={styles.metierGrid}>
-          {metiers.map((metier) => (
-            <Button
-              key={metier.id}
-              mode={metierActif?.id === metier.id ? 'contained' : 'outlined'}
-              onPress={() => handleChooseMetier(metier)}
-              style={styles.metierButton}
-              contentStyle={styles.metierContent}
-              buttonColor={metierActif?.id === metier.id ? chantierColors.primary : chantierColors.surface}
-              textColor={metierActif?.id === metier.id ? '#FFFFFF' : chantierColors.text}
-              disabled={!entrepriseId}
-            >
-              {metier.nom}
-            </Button>
-          ))}
-        </View>
-      )}
+    <View style={styles.container}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomOffset + 16 }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator
+      >
+        <Text variant="headlineSmall" style={styles.title}>
+          1) Choisissez le métier
+        </Text>
+        {loadingMetiers ? (
+          <LosangeLogoLoader size="large" />
+        ) : metiers.length === 0 ? (
+          <Text style={styles.infoText}>Aucun métier disponible. Connectez-vous en ligne pour synchroniser le catalogue depuis Supabase.</Text>
+        ) : (
+          <View style={styles.metierGrid}>
+            {metiers.map((metier) => (
+              <MobileButton
+                key={metier.id}
+                mode={metierActif?.id === metier.id ? 'contained' : 'outlined'}
+                onPress={() => handleChooseMetier(metier)}
+                style={styles.metierButton}
+                contentStyle={styles.metierContent}
+                buttonColor={metierActif?.id === metier.id ? chantierColors.primary : chantierColors.surface}
+                textColor={metierActif?.id === metier.id ? '#FFFFFF' : chantierColors.text}
+                disabled={!entrepriseId}
+              >
+                {metier.nom}
+              </MobileButton>
+            ))}
+          </View>
+        )}
 
-      {!entrepriseId && (
-        <Text style={styles.infoText}>Entreprise non disponible. Connectez-vous apres synchronisation.</Text>
-      )}
+        {!entrepriseId && (
+          <Text style={styles.infoText}>Entreprise non disponible. Connectez-vous après synchronisation.</Text>
+        )}
 
-      {step === 'ouvrage-unite' && (
-        <View style={styles.bottomPanel}>
-          <Text variant="titleLarge" style={styles.subtitle}>
-            2) Choisissez l'ouvrage
-          </Text>
+        {step === 'ouvrage-unite' && (
+          <View style={styles.bottomPanel}>
+            <Text variant="titleLarge" style={styles.subtitle}>
+              2) Choisissez l'ouvrage
+            </Text>
 
-          {!hasMetier ? (
-            <Text style={styles.infoText}>Selectionnez un metier pour charger ses ouvrages.</Text>
-          ) : loading ? (
-            <ActivityIndicator size="large" color={chantierColors.primary} />
-          ) : ouvrages.length === 0 ? (
-            <Text style={styles.infoText}>Aucun ouvrage trouve pour ce metier.</Text>
-          ) : (
-            <View style={styles.chipWrap}>
-              {ouvrages.map((ouvrage) => (
-                <Chip
-                  key={ouvrage.id}
-                  selected={ouvrageActif?.id === ouvrage.id}
-                  onPress={() => handleChooseOuvrage(ouvrage)}
-                  style={styles.chip}
-                  selectedColor={chantierColors.primary}
-                >
-                  {ouvrage.nom}
-                </Chip>
-              ))}
-            </View>
-          )}
-
-          {unitesPrix.length > 0 && (
-            <View style={styles.prixPanel}>
-              <Text style={styles.prixTitle}>3) Choisissez l'unite</Text>
+            {!hasMetier ? (
+              <Text style={styles.infoText}>Sélectionnez un métier pour charger ses ouvrages.</Text>
+            ) : loading ? (
+              <LosangeLogoLoader size="large" />
+            ) : ouvrages.length === 0 ? (
+              <Text style={styles.infoText}>Aucun ouvrage trouvé pour ce métier.</Text>
+            ) : (
               <View style={styles.chipWrap}>
-                {unitesPrix.map((item) => (
+                {ouvrages.map((ouvrage) => (
                   <Chip
-                    key={item.ouvrage_unite_id}
-                    selected={uniteActive?.ouvrage_unite_id === item.ouvrage_unite_id}
-                    onPress={() => setUniteActive(item)}
+                    key={ouvrage.id}
+                    selected={ouvrageActif?.id === ouvrage.id}
+                    onPress={() => handleChooseOuvrage(ouvrage)}
                     style={styles.chip}
-                    selectedColor={chantierColors.success}
+                    selectedColor={chantierColors.primary}
                   >
-                    {item.nom} ({item.formule})
+                    {ouvrage.nom}
                   </Chip>
                 ))}
               </View>
-            </View>
-          )}
+            )}
 
-          <Button
-            mode="contained"
-            onPress={confirmSelection}
-            disabled={!ouvrageActif || !uniteActive}
-            style={styles.confirmButton}
-            contentStyle={styles.confirmContent}
-            buttonColor={chantierColors.success}
-            textColor="#FFFFFF"
-          >
-            Continuer vers la saisie
-          </Button>
-        </View>
-      )}
+            {unitesPrix.length > 0 && (
+              <View style={styles.prixPanel}>
+                <Text style={styles.prixTitle}>3) Choisissez l'unité</Text>
+                <View style={styles.chipWrap}>
+                  {unitesPrix.map((item) => (
+                    <Chip
+                      key={item.ouvrage_unite_id}
+                      selected={uniteActive?.ouvrage_unite_id === item.ouvrage_unite_id}
+                      onPress={() => setUniteActive(item)}
+                      style={styles.chip}
+                      selectedColor={chantierColors.success}
+                    >
+                      {item.nom} ({item.formule})
+                    </Chip>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            <MobileButton
+              mode="contained"
+              onPress={confirmSelection}
+              disabled={!ouvrageActif || !uniteActive}
+              style={styles.confirmButton}
+              contentStyle={styles.confirmContent}
+              buttonColor={chantierColors.success}
+              textColor="#FFFFFF"
+            >
+              Continuer vers la saisie
+            </MobileButton>
+          </View>
+        )}
+      </ScrollView>
     </View>
   );
 }
@@ -179,10 +192,17 @@ export default function SelecteurMetierOuvrage({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    minHeight: 0,
     backgroundColor: chantierColors.background,
     paddingHorizontal: 12,
     paddingTop: 8,
-    justifyContent: 'space-between',
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    gap: 12,
   },
   title: {
     color: chantierColors.text,
@@ -197,19 +217,17 @@ const styles = StyleSheet.create({
     borderColor: chantierColors.border,
   },
   metierContent: {
-    minHeight: 62,
+    minHeight: 64,
   },
   bottomPanel: {
-    minHeight: '42%',
     backgroundColor: chantierColors.surface,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: chantierColors.border,
     paddingHorizontal: 12,
     paddingTop: 14,
     paddingBottom: 12,
-    justifyContent: 'space-between',
+    gap: 8,
   },
   subtitle: {
     color: chantierColors.text,
@@ -233,7 +251,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   confirmContent: {
-    minHeight: 58,
+    minHeight: 62,
   },
   prixPanel: {
     marginBottom: 8,

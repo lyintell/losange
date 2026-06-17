@@ -1,4 +1,5 @@
 import { assertSupabaseConfigured, supabase } from './supabaseClient';
+import { getMasterSessionToken } from '../auth/masterAdminAuth';
 
 export const ADMIN_TABLE_KEYS = [
   'entreprises',
@@ -21,53 +22,56 @@ const buildEmptyRecords = () => {
   return records;
 };
 
-const getSupabaseErrorMessage = (error) => error?.message || 'Erreur Supabase inconnue.';
-
-export const fetchAllAdminRecords = async () => {
+const invokeMasterCrud = async (body) => {
   assertSupabaseConfigured();
-  const records = buildEmptyRecords();
+  const token = getMasterSessionToken();
+  if (!token) {
+    throw new Error('Session master invalide. Reconnectez-vous.');
+  }
 
-  const results = await Promise.all(
-    ADMIN_TABLE_KEYS.map(async (tableKey) => {
-      const { data, error } = await supabase.from(tableKey).select('*').order('cree_le', { ascending: false });
-      if (error) throw new Error(`${tableKey}: ${getSupabaseErrorMessage(error)}`);
-      return { tableKey, data: data || [] };
-    })
-  );
-
-  results.forEach(({ tableKey, data }) => {
-    records[tableKey] = data;
+  const { data, error } = await supabase.functions.invoke('master-admin-crud', {
+    body: { ...body, token },
   });
 
-  return records;
+  if (error) {
+    throw new Error(error.message || 'Erreur Edge Function master-admin-crud.');
+  }
+
+  if (!data?.ok) {
+    throw new Error(data?.error || 'Operation admin refusee.');
+  }
+
+  return data;
+};
+
+export const fetchAllAdminRecords = async () => {
+  const data = await invokeMasterCrud({ action: 'fetchAll' });
+  return data.records || buildEmptyRecords();
 };
 
 export const insertAdminRecord = async (tableKey, record) => {
-  assertSupabaseConfigured();
-  const payload = { ...record };
-  if (Object.prototype.hasOwnProperty.call(payload, '_synced')) {
-    payload._synced = 1;
-  }
-
-  const { data, error } = await supabase.from(tableKey).insert(payload).select('*').single();
-  if (error) throw new Error(getSupabaseErrorMessage(error));
-  return data;
+  const data = await invokeMasterCrud({
+    action: 'insert',
+    tableKey,
+    record,
+  });
+  return data.record;
 };
 
 export const updateAdminRecord = async (tableKey, recordId, record) => {
-  assertSupabaseConfigured();
-  const payload = { ...record };
-  if (Object.prototype.hasOwnProperty.call(payload, '_synced')) {
-    payload._synced = 1;
-  }
-
-  const { data, error } = await supabase.from(tableKey).update(payload).eq('id', recordId).select('*').single();
-  if (error) throw new Error(getSupabaseErrorMessage(error));
-  return data;
+  const data = await invokeMasterCrud({
+    action: 'update',
+    tableKey,
+    recordId,
+    record,
+  });
+  return { record: data.record, tierChange: data.tierChange ?? null };
 };
 
 export const deleteAdminRecord = async (tableKey, recordId) => {
-  assertSupabaseConfigured();
-  const { error } = await supabase.from(tableKey).delete().eq('id', recordId);
-  if (error) throw new Error(getSupabaseErrorMessage(error));
+  await invokeMasterCrud({
+    action: 'delete',
+    tableKey,
+    recordId,
+  });
 };

@@ -7,17 +7,36 @@ node_modules/
 .expo/
 .expo-shared/
 dist/
+dist-*/
 web-build/
 expo-env.d.ts
 
-# Native
+# EAS / builds locaux
+.eas/
+build/
+credentials.json
+*.apk
+*.aab
+*.ipa
+*.tar.gz
+
+# Native (prebuild / signing)
 .kotlin/
+/ios
+/android
+local.properties
 *.orig.*
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
 *.mobileprovision
+*.hprof
+google-services.json
+GoogleService-Info.plist
+service-account*.json
+firebase-adminsdk*.json
 
 # Metro
 .metro-health-check*
@@ -27,6 +46,9 @@ npm-debug.*
 yarn-debug.*
 yarn-error.*
 *.log
+*.trace
+*.tmp
+*.temp
 
 # macOS
 .DS_Store
@@ -41,13 +63,12 @@ Desktop.ini
 .env
 .env.*
 !.env.example
+expo.dev
+supabase/.env
+supabase/functions/.env
 
 # TypeScript
 *.tsbuildinfo
-
-# Generated native folders
-/ios
-/android
 
 # Supabase CLI (local dev)
 .supabase/
@@ -58,6 +79,9 @@ supabase/.branches/
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
+*.db-journal
 
 # IDE / editor
 .idea/
@@ -68,8 +92,18 @@ supabase/.branches/
 *.swo
 *~
 
-# Cursor (local agent state)
+# Cursor / Claude (état local agents)
 .cursor/
+.claude/
+
+# Prompts locaux (brouillons, exports prod, transcripts, captures)
+prompts/transcripts/
+prompts/terminal.txt
+prompts/errors.txt
+prompts/prod_stuff/
+prompts/screenshots/
+prompts/*.png
 
 # Test & coverage
 coverage/
+.turbo/

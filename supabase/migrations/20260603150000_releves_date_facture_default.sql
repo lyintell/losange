@@ -1,0 +1,2 @@
+ALTER TABLE releves
+  ALTER COLUMN date_facture SET DEFAULT to_char(CURRENT_DATE, 'YYYY-MM-DD');

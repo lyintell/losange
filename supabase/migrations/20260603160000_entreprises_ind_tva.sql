@@ -1,0 +1,2 @@
+ALTER TABLE entreprises
+  ADD COLUMN IF NOT EXISTS ind_tva SMALLINT NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1));

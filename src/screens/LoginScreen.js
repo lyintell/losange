@@ -1,26 +1,44 @@
 import React, { useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
-import { Button, HelperText, Surface, Text, TextInput } from 'react-native-paper';
-import { chantierColors } from '../styles/theme';
+import { HelperText, Surface, Text, TextInput } from 'react-native-paper';
+import MobileButton from '../components/terrain/MobileButton';
+import { LosangeLogo } from '../components/terrain/LosangeLogoLoader';
+import { APP_NAME, chantierColors } from '../styles/theme';
 
 const IDENTIFIANT_PATTERN = /^[A-Z][0-9]{2}[A-Z]$/;
 
-export default function LoginScreen({ onLogin }) {
+export default function LoginScreen({ onLogin, variant = 'terrain' }) {
   const [identifiant, setIdentifiant] = useState('');
   const [motDePasse, setMotDePasse] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [loading, setLoading] = useState(false);
 
+  const isMasterLogin = variant === 'master';
   const normalizedIdentifiant = useMemo(() => identifiant.trim().toUpperCase(), [identifiant]);
   const hasValidIdentifiant = IDENTIFIANT_PATTERN.test(normalizedIdentifiant);
   const canSubmit = hasValidIdentifiant && motDePasse.trim().length > 0;
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     setSubmitted(true);
+    setAuthError('');
     if (!canSubmit) return;
-    onLogin?.({
-      identifiant: normalizedIdentifiant,
-      motDePasse,
-    });
+
+    setLoading(true);
+    try {
+      const result = await onLogin?.({
+        identifiant: normalizedIdentifiant,
+        motDePasse,
+      });
+
+      if (result && result.ok === false && result.error) {
+        setAuthError(result.error);
+      }
+    } catch (error) {
+      setAuthError(error.message || 'Erreur de connexion.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -29,12 +47,21 @@ export default function LoginScreen({ onLogin }) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={24}
     >
+      <View style={styles.logoWrap}>
+        <LosangeLogo size={120} />
+        <Text variant="headlineLarge" style={styles.appName}>
+          {APP_NAME}
+        </Text>
+      </View>
+
       <View style={styles.header}>
-        <Text variant="headlineLarge" style={styles.title}>
-          Connexion
+        <Text variant="titleLarge" style={styles.title}>
+          {isMasterLogin ? 'Admin MASTER' : 'Connexion'}
         </Text>
         <Text variant="bodyLarge" style={styles.subtitle}>
-          Entrez votre identifiant et mot de passe.
+          {isMasterLogin
+            ? 'Accès réservé au compte administrateur principal.'
+            : 'Entrez votre identifiant et mot de passe.'}
         </Text>
       </View>
 
@@ -64,12 +91,22 @@ export default function LoginScreen({ onLogin }) {
         <HelperText type="error" visible={submitted && motDePasse.trim().length === 0}>
           Le mot de passe est requis.
         </HelperText>
+        <HelperText type="error" visible={Boolean(authError)}>
+          {authError}
+        </HelperText>
       </Surface>
 
       <View style={styles.bottomAction}>
-        <Button mode="contained" onPress={handleLogin} style={styles.button} contentStyle={styles.buttonContent}>
+        <MobileButton
+          mode="contained"
+          onPress={handleLogin}
+          loading={loading}
+          disabled={loading}
+          style={styles.button}
+          contentStyle={styles.buttonContent}
+        >
           Se connecter
-        </Button>
+        </MobileButton>
       </View>
     </KeyboardAvoidingView>
   );
@@ -82,13 +119,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 28,
   },
+  logoWrap: {
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 20,
+  },
+  appName: {
+    color: chantierColors.text,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
   header: {
     gap: 8,
     marginBottom: 24,
   },
   title: {
     color: chantierColors.text,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   subtitle: {
     color: chantierColors.muted,
@@ -110,6 +157,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   buttonContent: {
-    minHeight: 56,
+    minHeight: 60,
   },
 });

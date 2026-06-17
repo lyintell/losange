@@ -1,6 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { FlatList, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Button, Card, Checkbox, Divider, Menu, Text, TextInput } from 'react-native-paper';
+import AdminImageFileField, {
+  AdminImagePreview,
+  uploadChantierPhotoAdmin,
+  uploadEntrepriseLogoAdmin,
+  uploadLignePhotoAdmin,
+} from '../../components/terrain/AdminImageFileField';
+import { CHANTIER_PHOTO_SLOTS } from '../../db/terrainImageStorage';
+import LosangeLogoLoader from '../../components/terrain/LosangeLogoLoader';
 import {
   deleteAdminRecord,
   fetchAllAdminRecords,
@@ -9,7 +17,10 @@ import {
 } from '../../db/supabaseAdmin';
 import { isSupabaseConfigured } from '../../db/supabaseClient';
 import { chantierColors } from '../../styles/theme';
-import { computeQuantiteLigneReleve } from '../../utils/ligneReleveCalcul';
+import {
+  computeMontantLigneReleve,
+  computeQuantiteLigneReleve,
+} from '../../utils/ligneReleveCalcul';
 
 const ROLE_OPTIONS = [
   { value: 'A', label: 'A - admin' },
@@ -17,6 +28,22 @@ const ROLE_OPTIONS = [
   { value: 'S', label: 'S - commercial' },
   { value: 'T', label: 'T - atelier' },
 ];
+
+const FIELD_LABELS = {
+  ind_pro: 'Compte Pro (sync cloud)',
+  pro_activated_le: 'Pro activé le',
+  pro_downgraded_le: 'Pro désactivé le',
+  ind_active: 'Compte actif',
+  ind_tva: 'Afficher TVA et TTC sur le devis',
+  date_actif_jusqua: "Actif jusqu'au (AAAA-MM-JJ)",
+  date_premier_login: 'Premier login terrain',
+  date_facture: 'Date facture (AAAA-MM-JJ)',
+  notes: 'Notes chantier',
+  supprime_le: 'Supprimé le (tombstone sync)',
+  note: 'Note relevé',
+};
+
+const getFieldLabel = (field) => FIELD_LABELS[field.name] || field.name;
 
 const TABLE_GROUPS = [
   {
@@ -27,16 +54,16 @@ const TABLE_GROUPS = [
     ],
   },
   {
-    title: "DONNEES DE L'ENTREPRISE",
+    title: "DONNÉES DE L'ENTREPRISE",
     tables: [
       { key: 'clients', label: 'Clients' },
       { key: 'chantiers', label: 'Chantiers' },
-      { key: 'metiers', label: 'Metiers' },
+      { key: 'metiers', label: 'Métiers' },
       { key: 'ouvrages', label: 'Ouvrages' },
-      { key: 'unites', label: 'Unites' },
-      { key: 'ouvrage_unites', label: 'Ouvrage unites' },
-      { key: 'releves', label: 'Releves' },
-      { key: 'ligne_releves', label: 'Ligne releves' },
+      { key: 'unites', label: 'Unités' },
+      { key: 'ouvrage_unites', label: 'Ouvrage unités' },
+      { key: 'releves', label: 'Relevés' },
+      { key: 'ligne_releves', label: 'Ligne relevés' },
     ],
   },
 ];
@@ -48,7 +75,25 @@ const TABLE_SCHEMAS = {
     { name: 'telephone_1', type: 'TEXT', required: true },
     { name: 'telephone_2', type: 'TEXT' },
     { name: 'adresse', type: 'TEXT' },
-    { name: 'logo', type: 'TEXT' },
+    { name: 'logo', type: 'TEXT', isImageFile: true },
+    { name: 'ind_pro', type: 'INTEGER', required: true, isBinaryToggle: true, defaultValue: 0, section: 'Compte' },
+    { name: 'pro_activated_le', type: 'TEXT', isReadOnly: true, isTierManaged: true, section: 'Compte' },
+    { name: 'pro_downgraded_le', type: 'TEXT', isReadOnly: true, isTierManaged: true, section: 'Compte' },
+    { name: 'ind_active', type: 'INTEGER', required: true, isBinaryToggle: true, defaultValue: 1, section: 'Compte' },
+    {
+      name: 'ind_tva',
+      type: 'INTEGER',
+      required: true,
+      isBinaryToggle: true,
+      defaultValue: 0,
+      section: 'Devis et validité',
+    },
+    {
+      name: 'date_actif_jusqua',
+      type: 'TEXT',
+      section: 'Devis et validité',
+      placeholder: 'AAAA-MM-JJ',
+    },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
     { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
@@ -61,6 +106,14 @@ const TABLE_SCHEMAS = {
     { name: 'telephone_1', type: 'TEXT', required: true },
     { name: 'telephone_2', type: 'TEXT' },
     { name: 'role', type: 'TEXT', required: true, enumOptions: ROLE_OPTIONS, defaultValue: 'A' },
+    { name: 'identifiant', type: 'TEXT' },
+    { name: 'mot_de_passe', type: 'TEXT' },
+    {
+      name: 'date_premier_login',
+      type: 'TEXT',
+      isReadOnly: true,
+      section: 'Connexion terrain',
+    },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
     { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
@@ -71,6 +124,7 @@ const TABLE_SCHEMAS = {
     { name: 'nom_complet', type: 'TEXT', required: true },
     { name: 'telephone_1', type: 'TEXT', required: true },
     { name: 'telephone_2', type: 'TEXT' },
+    { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
     { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
@@ -95,6 +149,11 @@ const TABLE_SCHEMAS = {
       ],
       defaultValue: 'D',
     },
+    { name: 'notes', type: 'TEXT', isMultiline: true },
+    { name: 'photo_1', type: 'TEXT', isImageFile: true },
+    { name: 'photo_2', type: 'TEXT', isImageFile: true },
+    { name: 'photo_3', type: 'TEXT', isImageFile: true },
+    { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
     { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
@@ -112,6 +171,7 @@ const TABLE_SCHEMAS = {
     { name: 'metier_id', type: 'TEXT', required: true, fkTable: 'metiers' },
     { name: 'entreprise_id', type: 'TEXT', required: true, fkTable: 'entreprises' },
     { name: 'nom', type: 'TEXT', required: true },
+    { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
     { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
@@ -121,7 +181,6 @@ const TABLE_SCHEMAS = {
     { name: 'formule', type: 'TEXT', required: true },
     { name: 'nom', type: 'TEXT', required: true },
     { name: 'nom_unite', type: 'TEXT', required: true, maxLength: 10 },
-    { name: 'ind_unitaire', type: 'INTEGER', required: true, isBinaryToggle: true, defaultValue: 1 },
     { name: 'ind_dimension', type: 'INTEGER', required: true, isBinaryToggle: true, defaultValue: 0 },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
@@ -131,6 +190,7 @@ const TABLE_SCHEMAS = {
     { name: 'ouvrage_id', type: 'TEXT', required: true, fkTable: 'ouvrages' },
     { name: 'unite_id', type: 'TEXT', required: true, fkTable: 'unites' },
     { name: 'prix_unitaire', type: 'REAL', required: true },
+    { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
     { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
@@ -139,10 +199,12 @@ const TABLE_SCHEMAS = {
     { name: 'id', type: 'TEXT', required: true, isId: true },
     { name: 'chantier_id', type: 'TEXT', required: true, fkTable: 'chantiers' },
     { name: 'prise_par_id', type: 'TEXT', fkTable: 'profils' },
-    { name: 'date_facture', type: 'TEXT' },
+    { name: 'date_facture', type: 'TEXT', defaultToday: true, placeholder: 'AAAA-MM-JJ' },
     { name: 'total_ht_facture', type: 'REAL' },
     { name: 'tva_facture', type: 'REAL' },
     { name: 'total_ttc_facture', type: 'REAL' },
+    { name: 'note', type: 'TEXT', isMultiline: true },
+    { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
     { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
@@ -158,6 +220,10 @@ const TABLE_SCHEMAS = {
     { name: 'quantite', type: 'REAL', required: true, isAutoComputed: true },
     { name: 'prix_unitaire_applique', type: 'REAL', required: true },
     { name: 'montant', type: 'REAL', required: true, isAutoComputed: true },
+    { name: 'note', type: 'TEXT', isMultiline: true },
+    { name: 'photo', type: 'TEXT', isImageFile: true },
+    { name: 'ind_complete', type: 'INTEGER', defaultValue: 0 },
+    { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
     { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
@@ -202,6 +268,13 @@ const getTableLabel = (tableKey) => ALL_TABLES.find((item) => item.key === table
 const getPrimaryText = (record) =>
   record?.nom || record?.nom_complet || `${record?.prenom || ''} ${record?.nom || ''}`.trim() || record?.id || 'Sans titre';
 
+const truncateText = (value, maxLength = 80) => {
+  const text = String(value ?? '').trim();
+  if (!text.length) return '';
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1)}…`;
+};
+
 const getById = (list, id) => (list || []).find((item) => String(item.id) === String(id));
 
 const getListLabel = (tableKey, record, recordsByTable) => {
@@ -211,7 +284,7 @@ const getListLabel = (tableKey, record, recordsByTable) => {
     const ouvrage = getById(recordsByTable.ouvrages, record.ouvrage_id);
     const unite = getById(recordsByTable.unites, record.unite_id);
     const ouvrageNom = ouvrage?.nom || 'Ouvrage inconnu';
-    const uniteNom = unite?.nom_unite || 'Unite inconnue';
+    const uniteNom = unite?.nom_unite || 'Unité inconnue';
     return `${ouvrageNom} / ${uniteNom}`;
   }
 
@@ -220,7 +293,9 @@ const getListLabel = (tableKey, record, recordsByTable) => {
     const client = chantier ? getById(recordsByTable.clients, chantier.client_id) : null;
     const clientNom = client?.nom_complet || 'Client inconnu';
     const chantierNom = chantier?.nom || 'Chantier inconnu';
-    return `${clientNom} / ${chantierNom}`;
+    const notePreview = truncateText(record.note, 60);
+    const base = `${clientNom} / ${chantierNom}`;
+    return notePreview ? `${base} — ${notePreview}` : base;
   }
 
   if (tableKey === 'ligne_releves') {
@@ -234,7 +309,7 @@ const getListLabel = (tableKey, record, recordsByTable) => {
     const clientNom = client?.nom_complet || 'Client inconnu';
     const chantierNom = chantier?.nom || 'Chantier inconnu';
     const ouvrageNom = ouvrage?.nom || 'Ouvrage inconnu';
-    const uniteNom = unite?.nom_unite || 'Unite inconnue';
+    const uniteNom = unite?.nom_unite || 'Unité inconnue';
     return `${clientNom} / ${chantierNom} / ${ouvrageNom} / ${uniteNom}`;
   }
 
@@ -253,7 +328,6 @@ const applyLigneReleveAutoCalculations = (record, recordsByTable) => {
   const unite = ouvrageUnite ? getById(recordsByTable.unites, ouvrageUnite.unite_id) : null;
   const quantite = computeQuantiteLigneReleve({
     indDimension: unite?.ind_dimension,
-    indUnitaire: unite?.ind_unitaire,
     formule: unite?.formule,
     largeur: record.largeur,
     hauteur: record.hauteur,
@@ -261,11 +335,27 @@ const applyLigneReleveAutoCalculations = (record, recordsByTable) => {
     nombre: record.nombre,
   });
   record.quantite = quantite;
-  record.montant = quantite * (Number(record.prix_unitaire_applique) || 0);
+  record.montant = computeMontantLigneReleve({
+    prixUnitaireApplique: record.prix_unitaire_applique,
+    nombre: record.nombre,
+  });
   return record;
 };
 
+const formatTierTimestamp = (value) => {
+  if (!value) return null;
+  const parsed = Date.parse(String(value));
+  if (Number.isNaN(parsed)) return String(value);
+  return new Date(parsed).toLocaleString('fr-FR');
+};
+
 const formatDetailValue = (field, value, recordsByTable) => {
+  if (field.isImageFile) {
+    return value ? 'Fichier image' : '-';
+  }
+  if (field.isTierManaged) {
+    return formatTierTimestamp(value) || '— (non renseigné)';
+  }
   if (value === null || value === undefined || value === '') return '-';
   if (field.fkTable) {
     return getFkDisplayLabel(field.fkTable, value, recordsByTable);
@@ -290,12 +380,118 @@ export default function AdminScreen({ onLogout }) {
   const [loadError, setLoadError] = useState('');
   const fields = useMemo(() => TABLE_SCHEMAS[selectedTable] || [], [selectedTable]);
 
+  const isLogoFieldDisabled = (field) =>
+    field.name === 'logo' &&
+    selectedTable === 'entreprises' &&
+    String(formValues.ind_pro ?? selectedItem?.ind_pro ?? '0') !== '1';
+
   const items = useMemo(() => recordsByTable[selectedTable] || [], [recordsByTable, selectedTable]);
   const selectedItem = useMemo(() => items.find((item) => item.id === selectedItemId) || items[0] || null, [items, selectedItemId]);
 
+  const resolveChantierEntrepriseId = (clientId) => {
+    const client = getById(recordsByTable.clients, clientId);
+    return client?.entreprise_id || null;
+  };
+
+  const resolveLignePhotoContext = (releveId) => {
+    const releve = getById(recordsByTable.releves, releveId);
+    const chantier = releve ? getById(recordsByTable.chantiers, releve.chantier_id) : null;
+    const client = chantier ? getById(recordsByTable.clients, chantier.client_id) : null;
+    return {
+      chantierId: chantier?.id || null,
+      entrepriseId: client?.entreprise_id || null,
+    };
+  };
+
+  const renderImageFormField = (field) => {
+    const fieldLabel = getFieldLabel(field);
+    const storageKey = formValues[field.name] || '';
+    const imageHint = 'Fichier image (JPEG, PNG, WebP).';
+
+    if (field.name === 'logo' && selectedTable === 'entreprises') {
+      const disabled = isLogoFieldDisabled(field);
+      return (
+        <AdminImageFileField
+          label={`${fieldLabel}${field.required ? ' *' : ''}`}
+          storageKey={storageKey || null}
+          disabled={disabled}
+          hint={disabled ? 'Logo disponible uniquement pour les comptes Pro.' : imageHint}
+          onUploaded={async (file) => {
+            const entrepriseId = formValues.id || selectedItem?.id;
+            const uploadedKey = await uploadEntrepriseLogoAdmin(entrepriseId, file);
+            setFormValues((prev) => ({ ...prev, logo: uploadedKey }));
+            return uploadedKey;
+          }}
+          onClear={() => setFormValues((prev) => ({ ...prev, logo: '' }))}
+        />
+      );
+    }
+
+    if (selectedTable === 'chantiers' && CHANTIER_PHOTO_SLOTS.includes(field.name)) {
+      const chantierId = formValues.id || selectedItem?.id;
+      const entrepriseId = resolveChantierEntrepriseId(formValues.client_id);
+      const missingContext = !chantierId || !entrepriseId;
+      return (
+        <AdminImageFileField
+          label={fieldLabel}
+          storageKey={storageKey || null}
+          disabled={missingContext}
+          hint={
+            missingContext
+              ? "Sélectionnez un client (entreprise connue) et conservez l'identifiant chantier."
+              : imageHint
+          }
+          onUploaded={async (file) => {
+            const uploadedKey = await uploadChantierPhotoAdmin(
+              entrepriseId,
+              chantierId,
+              field.name,
+              file
+            );
+            setFormValues((prev) => ({ ...prev, [field.name]: uploadedKey }));
+            return uploadedKey;
+          }}
+          onClear={() => setFormValues((prev) => ({ ...prev, [field.name]: '' }))}
+        />
+      );
+    }
+
+    if (selectedTable === 'ligne_releves' && field.name === 'photo') {
+      const ligneId = formValues.id || selectedItem?.id;
+      const { chantierId, entrepriseId } = resolveLignePhotoContext(formValues.releve_id);
+      const missingContext = !ligneId || !chantierId || !entrepriseId;
+      return (
+        <AdminImageFileField
+          label={fieldLabel}
+          storageKey={storageKey || null}
+          disabled={missingContext}
+          hint={
+            missingContext
+              ? "Sélectionnez un relevé (chantier et entreprise connus) et conservez l'identifiant ligne."
+              : imageHint
+          }
+          onUploaded={async (file) => {
+            const uploadedKey = await uploadLignePhotoAdmin(entrepriseId, chantierId, ligneId, file);
+            setFormValues((prev) => ({ ...prev, photo: uploadedKey }));
+            return uploadedKey;
+          }}
+          onClear={() => setFormValues((prev) => ({ ...prev, photo: '' }))}
+        />
+      );
+    }
+
+    return (
+      <View style={styles.fieldWrapper}>
+        <Text style={styles.fieldHint}>
+          {fieldLabel} : clé de stockage ({storageKey || 'aucune'})
+        </Text>
+      </View>
+    );
+  };
+
   const reloadRecords = useCallback(async () => {
     if (!isSupabaseConfigured()) {
-      setLoadError('Supabase non configure. Copiez .env.example vers .env et renseignez vos cles.');
+      setLoadError('Supabase non configuré. Copiez .env.example vers .env et renseignez vos clés.');
       setLoading(false);
       return;
     }
@@ -307,7 +503,7 @@ export default function AdminScreen({ onLogout }) {
       setRecordsByTable(next);
     } catch (error) {
       console.error('Erreur chargement Supabase admin:', error);
-      setLoadError(error.message || 'Impossible de charger les donnees Supabase.');
+      setLoadError(error.message || 'Impossible de charger les données Supabase.');
     } finally {
       setLoading(false);
     }
@@ -342,6 +538,8 @@ export default function AdminScreen({ onLogout }) {
         values[field.name] = createUuid();
       } else if (field.isSynced || field.isBinaryToggle) {
         values[field.name] = String(field.defaultValue ?? 0);
+      } else if (field.defaultToday) {
+        values[field.name] = new Date().toISOString().slice(0, 10);
       } else if (field.defaultValue !== undefined) {
         values[field.name] = String(field.defaultValue);
       } else if (field.type === 'INTEGER' || field.type === 'REAL') {
@@ -376,11 +574,39 @@ export default function AdminScreen({ onLogout }) {
     const hasCreatedAt = schema.some((field) => field.name === 'cree_le');
     const hasUpdatedAt = schema.some((field) => field.name === 'mis_a_jour_le');
 
+    if (
+      selectedTable === 'entreprises' &&
+      formMode === 'edit' &&
+      selectedItem &&
+      String(formValues.ind_pro ?? '0') !== String(selectedItem.ind_pro ?? '0')
+    ) {
+      const upgrading = String(formValues.ind_pro ?? '0') === '1';
+      const message = upgrading
+        ? 'Passer ce compte en Pro ?\n\nLa sync cloud démarre à partir de maintenant. Les données locales seront poussées ; les anciennes données cloud tombstonées ne seront pas restaurées.'
+        : 'Repasser ce compte en Gratuit ?\n\nLes données excédentaires seront supprimées (tombstone) sur le cloud : max 10 clients, 10 chantiers, 10 ouvrages/métier, 1 profil Admin. Logo, photos et TVA seront retirés.';
+      const confirmed =
+        typeof globalThis.confirm === 'function' ? globalThis.confirm(message) : true;
+      if (!confirmed) {
+        return;
+      }
+    }
+
     for (const field of schema) {
       if (field.isAutoComputed) continue;
+      if (field.isTierManaged) {
+        continue;
+      }
+      if (field.isReadOnly) {
+        if (formMode === 'edit' && selectedItem) {
+          nextRecord[field.name] = selectedItem[field.name] ?? null;
+        } else {
+          nextRecord[field.name] = null;
+        }
+        continue;
+      }
       const rawValue = formValues[field.name] ?? '';
       if (field.maxLength && String(rawValue).length > field.maxLength) {
-        setFormError(`Le champ ${field.name} doit contenir au maximum ${field.maxLength} caracteres.`);
+        setFormError(`Le champ ${field.name} doit contenir au maximum ${field.maxLength} caractères.`);
         return;
       }
       const casted = castFieldValue(field.type, rawValue);
@@ -399,7 +625,7 @@ export default function AdminScreen({ onLogout }) {
           return;
         }
       } catch (error) {
-        setFormError(error.message || 'Impossible de calculer la quantite.');
+        setFormError(error.message || 'Impossible de calculer la quantité.');
         return;
       }
     }
@@ -420,8 +646,21 @@ export default function AdminScreen({ onLogout }) {
         if (hasUpdatedAt) {
           nextRecord.mis_a_jour_le = currentTs;
         }
-        const updated = await updateAdminRecord(selectedTable, selectedItem.id, nextRecord);
+        const { record: updated, tierChange } = await updateAdminRecord(
+          selectedTable,
+          selectedItem.id,
+          nextRecord
+        );
         setSelectedItemId(String(updated.id));
+        if (tierChange?.tierChange === 'upgrade') {
+          globalThis.alert?.(
+            `Compte passé en Pro.\nPro activé le : ${formatTierTimestamp(tierChange.pro_activated_le) || tierChange.pro_activated_le}`
+          );
+        } else if (tierChange?.tierChange === 'downgrade') {
+          globalThis.alert?.(
+            `Compte repassé en Gratuit.\nPro désactivé le : ${formatTierTimestamp(tierChange.pro_downgraded_le) || tierChange.pro_downgraded_le}`
+          );
+        }
       }
 
       await reloadRecords();
@@ -456,7 +695,7 @@ export default function AdminScreen({ onLogout }) {
     const sourceTable = field.fkTable || selectedTable;
     const options = recordsByTable[sourceTable] || [];
     const currentValue = formValues[field.name] ?? '';
-    const selectedLabel = getFkDisplayLabel(sourceTable, currentValue, recordsByTable) || 'Selectionner';
+    const selectedLabel = getFkDisplayLabel(sourceTable, currentValue, recordsByTable) || 'Sélectionner';
 
     return (
       <Menu
@@ -470,7 +709,7 @@ export default function AdminScreen({ onLogout }) {
             style={styles.selectButton}
             contentStyle={styles.selectButtonContent}
           >
-            {field.name}: {selectedLabel}
+            {getFieldLabel(field)}: {selectedLabel}
           </Button>
         }
       >
@@ -504,7 +743,7 @@ export default function AdminScreen({ onLogout }) {
           Admin
         </Text>
         <Text variant="bodyMedium" style={styles.sidebarSubtitle}>
-          Donnees Supabase
+          Données Supabase
         </Text>
 
         <ScrollView style={styles.sidebarScroll} contentContainerStyle={styles.sidebarScrollContent}>
@@ -543,14 +782,14 @@ export default function AdminScreen({ onLogout }) {
           <View style={styles.errorBanner}>
             <Text style={styles.errorBannerText}>{loadError}</Text>
             <Button mode="outlined" onPress={reloadRecords} disabled={loading}>
-              Reessayer
+              Réessayer
             </Button>
           </View>
         )}
 
         {loading && (
           <View style={styles.loadingOverlay}>
-            <ActivityIndicator size="large" color={chantierColors.primary} />
+            <LosangeLogoLoader size="large" />
           </View>
         )}
 
@@ -578,7 +817,9 @@ export default function AdminScreen({ onLogout }) {
                     {getListLabel(selectedTable, item, recordsByTable)}
                   </Text>
                   <Text variant="bodyMedium" style={styles.rowSubtitle}>
-                    {String(item.id || '')}
+                    {selectedTable === 'releves' && item.note
+                      ? `Note: ${truncateText(item.note, 120)}`
+                      : String(item.id || '')}
                   </Text>
                 </View>
               </Pressable>
@@ -588,101 +829,136 @@ export default function AdminScreen({ onLogout }) {
 
         <View style={[styles.detailsPane, loading && styles.paneDisabled]}>
           <Text variant="titleLarge" style={styles.sectionTitle}>
-            Details
+            Détails
           </Text>
           <ScrollView style={styles.detailsScroll} contentContainerStyle={styles.detailsScrollContent}>
             {formMode ? (
               <Card style={styles.detailsCardForm}>
                 <Card.Content>
                   <Text variant="titleMedium" style={styles.formTitle}>
-                    {formMode === 'create' ? 'Ajouter un element' : 'Modifier element'}
+                    {formMode === 'create' ? 'Ajouter un élément' : 'Modifier élément'}
                   </Text>
-                  {fields.map((field) => (
-                    <View key={field.name} style={styles.fieldWrapper}>
-                      {field.fkTable || field.enumOptions ? (
-                        <Menu
-                          visible={openSelectField === field.name}
-                          onDismiss={() => setOpenSelectField(null)}
-                          anchor={
-                            <Button
-                              mode="outlined"
-                              onPress={() => setOpenSelectField(field.name)}
-                              style={styles.selectButton}
-                              contentStyle={styles.selectButtonContent}
+                  {fields.map((field, fieldIndex) => {
+                    const prevSection = fieldIndex > 0 ? fields[fieldIndex - 1].section : null;
+                    const showSection = field.section && field.section !== prevSection;
+                    const fieldLabel = getFieldLabel(field);
+                    const isDisabled =
+                      field.isReadOnly ||
+                      field.isId ||
+                      field.name === 'cree_le' ||
+                      field.name === 'mis_a_jour_le' ||
+                      field.isAutoComputed ||
+                      isLogoFieldDisabled(field);
+
+                    return (
+                      <View key={field.name}>
+                        {showSection ? (
+                          <View style={styles.fieldSection}>
+                            <Divider />
+                            <Text style={styles.fieldSectionTitle}>{field.section}</Text>
+                          </View>
+                        ) : null}
+                        <View style={styles.fieldWrapper}>
+                          {field.isImageFile ? (
+                            renderImageFormField(field)
+                          ) : field.fkTable || field.enumOptions ? (
+                            <Menu
+                              visible={openSelectField === field.name}
+                              onDismiss={() => setOpenSelectField(null)}
+                              anchor={
+                                <Button
+                                  mode="outlined"
+                                  onPress={() => setOpenSelectField(field.name)}
+                                  style={styles.selectButton}
+                                  contentStyle={styles.selectButtonContent}
+                                  disabled={isDisabled}
+                                >
+                                  {fieldLabel}:{' '}
+                                  {field.enumOptions
+                                    ? field.enumOptions.find((option) => option.value === formValues[field.name])
+                                        ?.label || 'Sélectionner'
+                                    : getFkDisplayLabel(field.fkTable, formValues[field.name], recordsByTable) ||
+                                      'Sélectionner'}
+                                </Button>
+                              }
                             >
-                              {field.name}:{' '}
-                              {field.enumOptions
-                                ? field.enumOptions.find((option) => option.value === formValues[field.name])?.label ||
-                                  'Selectionner'
-                                : getFkDisplayLabel(field.fkTable, formValues[field.name], recordsByTable) ||
-                                  'Selectionner'}
-                            </Button>
-                          }
-                        >
-                          {!field.required && (
-                            <Menu.Item
-                              title="Aucune valeur"
+                              {!field.required && (
+                                <Menu.Item
+                                  title="Aucune valeur"
+                                  onPress={() => {
+                                    setFormValues((prev) => ({ ...prev, [field.name]: '' }));
+                                    setOpenSelectField(null);
+                                  }}
+                                />
+                              )}
+                              {field.fkTable &&
+                                (recordsByTable[field.fkTable] || []).map((item) => (
+                                  <Menu.Item
+                                    key={String(item.id)}
+                                    title={getListLabel(field.fkTable, item, recordsByTable)}
+                                    onPress={() => {
+                                      setFormValues((prev) => ({ ...prev, [field.name]: String(item.id) }));
+                                      setOpenSelectField(null);
+                                    }}
+                                  />
+                                ))}
+                              {field.enumOptions &&
+                                field.enumOptions.map((option) => (
+                                  <Menu.Item
+                                    key={option.value}
+                                    title={option.label}
+                                    onPress={() => {
+                                      setFormValues((prev) => ({ ...prev, [field.name]: option.value }));
+                                      setOpenSelectField(null);
+                                    }}
+                                  />
+                                ))}
+                            </Menu>
+                          ) : field.isSynced || field.isBinaryToggle ? (
+                            <Pressable
+                              style={styles.checkboxRow}
                               onPress={() => {
-                                setFormValues((prev) => ({ ...prev, [field.name]: '' }));
-                                setOpenSelectField(null);
+                                if (isDisabled) return;
+                                setFormValues((prev) => ({
+                                  ...prev,
+                                  [field.name]: prev[field.name] === '1' ? '0' : '1',
+                                }));
                               }}
+                            >
+                              <Checkbox status={formValues[field.name] === '1' ? 'checked' : 'unchecked'} />
+                              <Text style={styles.checkboxLabel}>
+                                {fieldLabel}
+                                {field.required ? ' *' : ''}
+                              </Text>
+                            </Pressable>
+                          ) : (
+                            <TextInput
+                              label={`${fieldLabel}${field.required ? ' *' : ''}`}
+                              mode="outlined"
+                              value={formValues[field.name] ?? ''}
+                              placeholder={field.placeholder}
+                              maxLength={field.maxLength}
+                              multiline={!!field.isMultiline}
+                              numberOfLines={field.isMultiline ? 4 : 1}
+                              keyboardType={field.type === 'TEXT' ? 'default' : 'numeric'}
+                              onChangeText={(value) =>
+                                setFormValues((prev) => ({ ...prev, [field.name]: value }))
+                              }
+                              style={[styles.formInput, field.isMultiline && styles.formInputMultiline]}
+                              disabled={isDisabled}
                             />
                           )}
-                          {field.fkTable &&
-                            (recordsByTable[field.fkTable] || []).map((item) => (
-                              <Menu.Item
-                                key={String(item.id)}
-                                title={getListLabel(field.fkTable, item, recordsByTable)}
-                                onPress={() => {
-                                  setFormValues((prev) => ({ ...prev, [field.name]: String(item.id) }));
-                                  setOpenSelectField(null);
-                                }}
-                              />
-                            ))}
-                          {field.enumOptions &&
-                            field.enumOptions.map((option) => (
-                              <Menu.Item
-                                key={option.value}
-                                title={option.label}
-                                onPress={() => {
-                                  setFormValues((prev) => ({ ...prev, [field.name]: option.value }));
-                                  setOpenSelectField(null);
-                                }}
-                              />
-                            ))}
-                        </Menu>
-                      ) : field.isSynced || field.isBinaryToggle ? (
-                        <Pressable
-                          style={styles.checkboxRow}
-                          onPress={() =>
-                            setFormValues((prev) => ({
-                              ...prev,
-                              [field.name]: prev[field.name] === '1' ? '0' : '1',
-                            }))
-                          }
-                        >
-                          <Checkbox status={formValues[field.name] === '1' ? 'checked' : 'unchecked'} />
-                          <Text style={styles.checkboxLabel}>{field.name} (1 si coche, sinon 0)</Text>
-                        </Pressable>
-                      ) : (
-                        <TextInput
-                          label={`${field.name} (${field.type})${field.required ? ' *' : ''}`}
-                          mode="outlined"
-                          value={formValues[field.name] ?? ''}
-                          maxLength={field.maxLength}
-                          keyboardType={field.type === 'TEXT' ? 'default' : 'numeric'}
-                          onChangeText={(value) => setFormValues((prev) => ({ ...prev, [field.name]: value }))}
-                          style={styles.formInput}
-                          disabled={
-                            field.isId ||
-                            field.name === 'cree_le' ||
-                            field.name === 'mis_a_jour_le' ||
-                            field.isAutoComputed
-                          }
-                        />
-                      )}
-                    </View>
-                  ))}
+                          {field.isTierManaged ? (
+                            <Text style={styles.fieldHint}>
+                              Renseigné automatiquement lors d'un changement Gratuit ↔ Pro.
+                            </Text>
+                          ) : field.isReadOnly ? (
+                            <Text style={styles.fieldHint}>Renseigné automatiquement par l'application mobile.</Text>
+                          ) : null}
+                        </View>
+                      </View>
+                    );
+                  })}
                   {!!formError && <Text style={styles.formError}>{formError}</Text>}
                 </Card.Content>
               </Card>
@@ -691,19 +967,42 @@ export default function AdminScreen({ onLogout }) {
                 <Card.Content>
                   {!selectedItem ? (
                     <Text variant="bodyLarge" style={styles.detailSubTitle}>
-                      Selectionnez un element dans la liste.
+                      Sélectionnez un élément dans la liste.
                     </Text>
                   ) : (
-                    fields.map((field) => (
-                      <View key={field.name} style={styles.detailRow}>
-                        <Text variant="bodyMedium" style={styles.detailLabel}>
-                          {field.name}
-                        </Text>
-                        <Text variant="bodyLarge" style={styles.detailValue}>
-                          {formatDetailValue(field, selectedItem[field.name], recordsByTable)}
-                        </Text>
-                      </View>
-                    ))
+                    fields.map((field, fieldIndex) => {
+                      const prevSection = fieldIndex > 0 ? fields[fieldIndex - 1].section : null;
+                      const showSection = field.section && field.section !== prevSection;
+
+                      return (
+                        <View key={field.name}>
+                          {showSection ? (
+                            <View style={styles.fieldSection}>
+                              <Divider />
+                              <Text style={styles.fieldSectionTitle}>{field.section}</Text>
+                            </View>
+                          ) : null}
+                          <View style={styles.detailRow}>
+                            <Text variant="bodyMedium" style={styles.detailLabel}>
+                              {getFieldLabel(field)}
+                            </Text>
+                            {field.isImageFile && selectedItem[field.name] ? (
+                              <AdminImagePreview storageKey={selectedItem[field.name]} />
+                            ) : null}
+                            <Text
+                              variant="bodyLarge"
+                              style={[
+                                styles.detailValue,
+                                field.isMultiline && styles.detailValueMultiline,
+                                field.isTierManaged && !selectedItem[field.name] ? styles.detailValueMuted : null,
+                              ]}
+                            >
+                              {formatDetailValue(field, selectedItem[field.name], recordsByTable)}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })
                   )}
                 </Card.Content>
               </Card>
@@ -734,7 +1033,7 @@ export default function AdminScreen({ onLogout }) {
                 <Button
                   mode="contained"
                   icon="trash-can"
-                  buttonColor={chantierColors.danger}
+                  buttonColor="#9CA3AF"
                   onPress={handleDelete}
                   disabled={!selectedItem || saving}
                   loading={saving}
@@ -867,9 +1166,11 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
     marginTop: 12,
+    ...(Platform.OS === 'web' ? { overflow: 'auto' } : {}),
   },
   detailsScrollContent: {
-    paddingBottom: 8,
+    paddingBottom: 120,
+    flexGrow: 1,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -919,8 +1220,29 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     backgroundColor: chantierColors.surface,
   },
+  formInputMultiline: {
+    minHeight: 100,
+  },
   fieldWrapper: {
     marginBottom: 10,
+  },
+  fieldSection: {
+    marginTop: 8,
+    marginBottom: 10,
+    gap: 8,
+  },
+  fieldSectionTitle: {
+    color: chantierColors.text,
+    fontWeight: '800',
+    fontSize: 13,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  fieldHint: {
+    color: chantierColors.muted,
+    fontSize: 12,
+    marginTop: -4,
+    marginBottom: 4,
   },
   selectButton: {
     justifyContent: 'flex-start',
@@ -956,6 +1278,13 @@ const styles = StyleSheet.create({
   detailValue: {
     color: chantierColors.text,
     fontWeight: '600',
+  },
+  detailValueMultiline: {
+    whiteSpace: 'pre-wrap',
+  },
+  detailValueMuted: {
+    color: chantierColors.muted,
+    fontWeight: '400',
   },
   detailSubTitle: {
     color: chantierColors.muted,

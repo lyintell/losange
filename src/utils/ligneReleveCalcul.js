@@ -1,7 +1,9 @@
+import { roundQuantite } from './formatLigneMesures';
+
 /**
  * Symboles ligne_releve : l=largeur, h=hauteur, p=profondeur, n=nombre.
- * Si ind_unitaire=1 ou ind_dimension=0 : quantite = n.
- * Si ind_dimension=1 et ind_unitaire=0 : quantite = eval(unites.formule) * n.
+ * ind_dimension=0 : quantite unitaire = n.
+ * ind_dimension=1 : quantite = eval(unites.formule) * n (ex. l*h*n).
  * l, h, p sont saisis en cm et convertis en m avant le calcul.
  */
 
@@ -36,11 +38,10 @@ const evaluateDimensionFormula = (formula, { l, h, p }) => {
   return numeric;
 };
 
-export const usesDimensionCotes = (indDimension, indUnitaire) =>
-  Number(indDimension) === 1 && Number(indUnitaire) !== 1;
+export const usesDimensionCotes = (indDimension) => Number(indDimension) === 1;
 
-export const getRequiredCotesFromFormula = (formule, indDimension, indUnitaire) => {
-  if (!usesDimensionCotes(indDimension, indUnitaire)) {
+export const getRequiredCotesFromFormula = (formule, indDimension) => {
+  if (Number(indDimension) !== 1) {
     return {
       needsLargeur: false,
       needsHauteur: false,
@@ -62,9 +63,16 @@ export const getRequiredCotesFromFormula = (formule, indDimension, indUnitaire) 
   };
 };
 
+export const computeDimensionFactor = ({ formule, largeur, hauteur, profondeur }) => {
+  const l = (Number(largeur) || 0) / 100;
+  const h = (Number(hauteur) || 0) / 100;
+  const p = (Number(profondeur) || 0) / 100;
+  const formulaSource = (formule && String(formule).trim()) || 'l*h';
+  return evaluateDimensionFormula(formulaSource, { l, h, p });
+};
+
 export const computeQuantiteLigneReleve = ({
   indDimension,
-  indUnitaire,
   formule,
   largeur,
   hauteur,
@@ -73,15 +81,32 @@ export const computeQuantiteLigneReleve = ({
 }) => {
   const n = Number(nombre) || 0;
 
-  if (Number(indUnitaire) === 1 || Number(indDimension) !== 1) {
-    return n;
+  if (Number(indDimension) !== 1) {
+    return roundQuantite(n);
   }
 
-  const l = (Number(largeur) || 0) / 100;
-  const h = (Number(hauteur) || 0) / 100;
-  const p = (Number(profondeur) || 0) / 100;
-  const formulaSource = (formule && String(formule).trim()) || 'l*h';
-
-  const dimensionValue = evaluateDimensionFormula(formulaSource, { l, h, p });
-  return dimensionValue * n;
+  const dimensionValue = computeDimensionFactor({ formule, largeur, hauteur, profondeur });
+  return roundQuantite(dimensionValue * n);
 };
+
+/** P.U applique par defaut : P.U catalogue, ou P.U x formule(l,h,p) si ind_dimension = 1. */
+export const computePrixUnitaireAppliqueDefault = ({
+  indDimension,
+  prixUnitaire,
+  formule,
+  largeur,
+  hauteur,
+  profondeur,
+}) => {
+  const pu = Number(prixUnitaire) || 0;
+  if (Number(indDimension) !== 1) {
+    return roundQuantite(pu);
+  }
+
+  const dimensionValue = computeDimensionFactor({ formule, largeur, hauteur, profondeur });
+  return roundQuantite(pu * dimensionValue);
+};
+
+/** Montant ligne : P.U applique x n (nombre). */
+export const computeMontantLigneReleve = ({ prixUnitaireApplique, nombre }) =>
+  roundQuantite((Number(prixUnitaireApplique) || 0) * (Number(nombre) || 0));

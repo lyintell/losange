@@ -169,3 +169,81 @@ sur localStorage.
 
 #26.
 Met a jour le fichier .gitignore
+
+#27.
+Implementons l'autentification au niveau de l'écran Admin (Compte MASTER).
+Seul le compte MASTER suivant est autorisé à se connecter. Tout autre combinaison identifiant / mot de passe sera rejeté
+- identifiant: Y62L
+- mot de passe: 2620-LosangE#
+Ajoute ces info (identifiant et mot de passe) à .env et configure la base de données pour que la tentative de connexion à l'écran
+admin web soit sécurisé.
+Ceci est différent des comptes admin qui seront lié aux entreprises et profils
+
+#28.
+Implementons l authentication coté serveur au lieu de .env
+L identifiant et mot de passe master ne doit pas etre montré dans le browser
+
+#29.
+Maintenant, travaillons sur l ecran mobile. On va travailler d abord sur le UI, puis on discutera du branchement de la base de donnees
+et des donnees. Pour le moment utilisons les donnees fictifs (qui mimic la base de donnees et queries dans /db).
+
+- Menu plus: Affiche juste les informations du profil (pas nouvelle dimension)
+    - Le role du profil, Le nom de L'entreprise, le prenom et nom du profil.
+    - Un bouton Deconnexion en bas (rouge avec icon)
+- Menu chantiers:
+    - Clique sur plus:
+        - Ne cree pas automatiquement de projet / client. Les donnees sont sauvegarder (en memoire d abord) sans client/projet d abord.
+        - Ouvre une page - debut processus de creation d une nouvelle dimension (blank pour le moment)
+
+#30.
+- Nouvelle dimension
+    - D abord choix du metier, puis choix de l ouvrage et de l ouvrage, puis entree des dimensions.
+    - Choix metier, bouton arriere (format bouton +), en bas bouton annuler (format bouton recherche en rouge)
+    - Choix ouvrage, bouton arriere (format bouton +), en bas bouton annuler (format bouton recherche en rouge)
+    - Entree des dimensions, bouton + (format bouton +), en bas bouton arriere (format bouton recherche), en bas button annuler (bouton arriere (format bouton +), en bas bouton annuler (format bouton recherche en rouge),
+        en bas bouton finir (icon suivant) (format bouton + en bleu).
+- Apres clique de finir, montrer le formulaire Client et chantier - a completer apres
+
+#31. Sur l ecran des mesures, le bouton annuler n est pas visible. Reduit le gap entre les boutons circle a droit en general pour que trois bouton 
+puisse toujours etre visible. Update les autres ecrans avec bouton a droite avec le meme format consistant
+
+#32.
+Dans l entree des mesures, on ne voit pas les champs (largeur, hauteur, profondeur, et nombre).
+Ceux ci doivent etre visibile dependemment de l ouvrage unite.
+Si ind_unitaire = 1, alors juste le nombre. Si ind_unitaire = 0, alors montrer les champs qui sont referent
+dans l unite. Eg. example, si largeur est present, alors champ largeur est visible, etc.
+
+#33.
+Permettre de naviger parmi les cotes (choix largeur, hauteur, nombre). Quantite n est pas modifiable
+Montrer les cotes au centre (entre les boutons suivant de gauche et plus, back, annuler de droite)
+
+#34.
+Au dessus du pave numerique (Touchez une cote....) Montre les mesures entrees format:
+l x h x p x n.
+
+#35.
+Ne pas montrer les lignes saisies. Ils seront vu on clique sur suivant, qui va nous amener sur les dimensions entrees (lignes releves).
+ceci sera un recap avant d enregistrer client et projet (bouton suivants dans ecran details)
+
+#36.
+Lorsque les elements exactes de l ouvrage unite sont entre, le bouton suivant est cliquable et on enregistre les information entrees.
+Maintenant les info ne sont enregistre que on clique sur + 
+
+#37.
+Lorsque la page entrez les dimensions est ouvert, par default n = 1.
+
+#38.
+Travaillons sur le formulaire Client et Chantier.
+Pour le client, on entre le nom et le numero de telephone. Permettre de rechercher un client par nom et telephone.
+Pour le chantier, entre le nom, adresse, status, notes.
+Le bouton enregistrer sur l ecran Client et chantier requis confirmation.
+
+#39.
+Enleve le bouton back sur l ecran d entree des dimensions.
+
+#40.
+On click sur une dimension dans le recap, aller a l ecran de cette dimension (pour modification). Les donnees reste pre remplis
+Pas de bouton + lors de la modification
+
+#41. 
+Dans le formulaire client chantier, ne pas montrer status. Par defaut, lors de l enregistrement status = D (dimension)
