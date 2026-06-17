@@ -65,3 +65,10 @@ Cependant peut modifier information Client / chantier. Peut aussi modifier prix 
 
 Peut voir et modifier ouvrages (dans base de données).
 
+11.
+Compte C et T: Ne doivent voir que les chantiers qui ont ete prise par eux meme. 
+A et S peuvent voir tous les chantiers
+
+12.
+Liste des chantiers: trier par ordre decroissant prise_le
+

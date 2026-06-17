@@ -16,7 +16,5 @@ export function groupLignesByMetier(lignes = []) {
     groups.get(metierId).lignes.push(ligne);
   });
 
-  return Array.from(groups.values()).sort((a, b) =>
-    a.metierNom.localeCompare(b.metierNom, 'fr', { sensitivity: 'base' })
-  );
+  return Array.from(groups.values());
 }

@@ -9,7 +9,7 @@ import {
 } from './terrainImageStorage';
 import { getLoggedInProfilLocal, getTerrainSessionLocal } from './terrainSync';
 import { scheduleTerrainSyncAfterWrite } from './terrainSyncScheduler';
-import { canModifyReleveForProfil } from '../utils/terrainAccess';
+import { canModifyReleveForProfil, canSeeAllChantiers } from '../utils/terrainAccess';
 import { FREE_TIER_LIMITS, isProAccount } from '../utils/freeTierLimits';
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
@@ -608,6 +608,9 @@ export const refreshReleveTotaux = async (releveId) => {
  */
 export const getChantiersWithClientLocal = async (entrepriseId = null) => {
   const db = await ensureLocalDatabaseReady();
+  const profil = await getLoggedInProfilLocal();
+  const filterOwnChantiers = profil && !canSeeAllChantiers(profil);
+  const ownChantierFilter = filterOwnChantiers ? ' AND releve_prise.prise_par_id = ?' : '';
   const hasSupprimeLe =
     (await tableHasColumn(db, 'chantiers', 'supprime_le')) &&
     (await tableHasColumn(db, 'clients', 'supprime_le'));
@@ -643,12 +646,13 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
       clients.telephone_1 as client_telephone_1,
       clients.telephone_2 as client_telephone_2,
       releve_prise.prise_le as prise_le,
+      releve_prise.prise_par_id as prise_par_id,
       TRIM(COALESCE(prise_par.prenom, '') || ' ' || COALESCE(prise_par.nom, '')) as prise_par_nom
     FROM chantiers
     JOIN clients ON chantiers.client_id = clients.id
     ${relevePriseJoin}
-    WHERE clients.entreprise_id = ?${tombstoneFilter}
-    ORDER BY COALESCE(releve_prise.prise_le, chantiers.cree_le) DESC;
+    WHERE clients.entreprise_id = ?${tombstoneFilter}${ownChantierFilter}
+    ORDER BY releve_prise.prise_le IS NULL ASC, datetime(replace(releve_prise.prise_le, 'T', ' ')) DESC;
   `
     : `
     SELECT
@@ -657,14 +661,20 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
       clients.telephone_1 as client_telephone_1,
       clients.telephone_2 as client_telephone_2,
       releve_prise.prise_le as prise_le,
+      releve_prise.prise_par_id as prise_par_id,
       TRIM(COALESCE(prise_par.prenom, '') || ' ' || COALESCE(prise_par.nom, '')) as prise_par_nom
     FROM chantiers
     JOIN clients ON chantiers.client_id = clients.id
     ${relevePriseJoin}
-    WHERE 1=1${tombstoneFilter}
-    ORDER BY COALESCE(releve_prise.prise_le, chantiers.cree_le) DESC;
+    WHERE 1=1${tombstoneFilter}${ownChantierFilter}
+    ORDER BY releve_prise.prise_le IS NULL ASC, datetime(replace(releve_prise.prise_le, 'T', ' ')) DESC;
   `;
-  return entrepriseId ? db.getAllAsync(query, [entrepriseId]) : db.getAllAsync(query);
+
+  if (entrepriseId) {
+    const params = filterOwnChantiers ? [entrepriseId, profil.id] : [entrepriseId];
+    return db.getAllAsync(query, params);
+  }
+  return filterOwnChantiers ? db.getAllAsync(query, [profil.id]) : db.getAllAsync(query);
 };
 
 /**
@@ -925,7 +935,7 @@ export const getLignesByChantierLocal = async (chantierId) => {
     JOIN metiers m ON m.id = o.metier_id
     JOIN unites u ON u.id = ou.unite_id
     WHERE r.chantier_id = ?${tombstoneFilter}
-    ORDER BY m.nom ASC, lr.cree_le DESC;
+    ORDER BY lr.cree_le ASC, lr.id ASC;
   `;
   return await db.getAllAsync(query, [chantierId]);
 };

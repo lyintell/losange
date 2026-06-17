@@ -2,7 +2,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
-import { buildDevisTableRows } from './devisGrouping';
+import { buildDevisTableRows, buildRelevesTableRows } from './devisGrouping';
 import { formatMontantFcfa } from './formatLigneMesures';
 import { montantEnLettresFcfa } from './montantEnLettres';
 import {
@@ -268,7 +268,7 @@ const renderDimensionsDesignationBlock = (row) => {
 };
 
 export function buildDimensionsPdfHtml({ chantier, lignes = [], logoDataUri = null }) {
-  const tableRows = buildDevisTableRows(lignes);
+  const tableRows = buildRelevesTableRows(lignes);
   const clientNom = chantier?.client_nom?.trim() || 'Client';
   const chantierNom = chantier?.nom?.trim() || 'Chantier';
   const chantierNotes = chantier?.notes?.trim() || '';

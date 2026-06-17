@@ -3,12 +3,14 @@ import {
   formatLigneMesures,
   formatLigneNombrePdf,
   formatLigneQuantiteAffichage,
+  formatOuvrageNomAvecUnite,
   getLigneMontant,
   getLigneNomUnite,
   getLignePrixUnitaireApplique,
   isLigneDimension,
 } from './formatLigneMesures';
 import { getMetierColor } from './metierColors';
+import { groupLignesByMetier } from './groupLignesByMetier';
 
 export function formatDevisDimension(ligne) {
   if (!isLigneDimension(ligne)) return null;
@@ -28,7 +30,9 @@ function groupByMetierThenOuvrage(lignes = []) {
     const metierNom = ligne.metier_nom?.trim() || 'Autre';
     const metierId = ligne.metier_id || metierNom;
     const ouvrageNom = ligne.ouvrage_nom?.trim() || 'Ouvrage';
-    const ouvrageKey = `${metierId}::${ouvrageNom}`;
+    const nomUnite = getLigneNomUnite(ligne);
+    const isDimension = isLigneDimension(ligne);
+    const ouvrageKey = `${metierId}::${ouvrageNom}::${isDimension ? 'dim' : nomUnite}`;
 
     if (!metierMap.has(metierId)) {
       metierMap.set(metierId, {
@@ -42,6 +46,8 @@ function groupByMetierThenOuvrage(lignes = []) {
     if (!metierGroup.ouvrageMap.has(ouvrageKey)) {
       metierGroup.ouvrageMap.set(ouvrageKey, {
         ouvrageNom,
+        nomUnite,
+        indDimension: isDimension ? 1 : 0,
         lignes: [],
       });
     }
@@ -57,10 +63,61 @@ function groupByMetierThenOuvrage(lignes = []) {
       ouvrages: Array.from(metierGroup.ouvrageMap.values())
         .sort((a, b) => a.ouvrageNom.localeCompare(b.ouvrageNom, 'fr', { sensitivity: 'base' }))
         .map((ouvrageGroup) => ({
-          ouvrageNom: ouvrageGroup.ouvrageNom,
+          ouvrageNom: formatOuvrageNomAvecUnite(
+            ouvrageGroup.ouvrageNom,
+            ouvrageGroup.nomUnite,
+            ouvrageGroup.indDimension
+          ),
           lignes: ouvrageGroup.lignes,
         })),
     }));
+}
+
+function buildOuvrageKey(metierId, ligne) {
+  const ouvrageNom = ligne.ouvrage_nom?.trim() || 'Ouvrage';
+  const nomUnite = getLigneNomUnite(ligne);
+  const isDimension = isLigneDimension(ligne);
+  return `${metierId}::${ouvrageNom}::${isDimension ? 'dim' : nomUnite}`;
+}
+
+function buildOuvrageLabel(ligne) {
+  const ouvrageNom = ligne.ouvrage_nom?.trim() || 'Ouvrage';
+  const nomUnite = getLigneNomUnite(ligne);
+  const isDimension = isLigneDimension(ligne);
+  return formatOuvrageNomAvecUnite(ouvrageNom, nomUnite, isDimension ? 1 : 0);
+}
+
+/** PDF relevés : groupement par métier, ordre de saisie conservé (devis inchangé). */
+export function buildRelevesTableRows(lignes = []) {
+  const metierGroups = groupLignesByMetier(lignes);
+  const rows = [];
+
+  metierGroups.forEach((metierGroup, metierIndex) => {
+    let previousOuvrageKey = null;
+
+    metierGroup.lignes.forEach((ligne, ligneIndex) => {
+      const ouvrageKey = buildOuvrageKey(metierGroup.metierId, ligne);
+      const showOuvrage = ouvrageKey !== previousOuvrageKey;
+      previousOuvrageKey = ouvrageKey;
+
+      rows.push({
+        metierDivider: metierIndex > 0 && ligneIndex === 0,
+        showMetier: ligneIndex === 0,
+        showOuvrage,
+        metierId: metierGroup.metierId,
+        metierNom: metierGroup.metierNom,
+        metierColor: getMetierColor(metierGroup.metierId),
+        ouvrageNom: buildOuvrageLabel(ligne),
+        dimension: formatDevisDimension(ligne),
+        dimensionLxhN: formatLigneDimensionsLxhN(ligne),
+        nombrePdf: formatLigneNombrePdf(ligne),
+        isDimensionLine: isLigneDimension(ligne),
+        note: ligne.note?.trim() || '',
+      });
+    });
+  });
+
+  return rows;
 }
 
 export function buildDevisTableRows(lignes = []) {

@@ -31,6 +31,8 @@ export const canCreateReleveOrLigne = (profil) => profil?.role !== ROLE_COMMERCI
 
 export const canEditChantierCotesInPave = (profil) => profil?.role !== ROLE_COMMERCIAL_S;
 
+export const canSeeAllChantiers = (profil) => ROLES_MODIFY_ANY_CHANTIER.has(profil?.role);
+
 export const canCreateOuvrageInReleveFlow = (profil) =>
   ROLES_CREATING_OUVRAGE_IN_RELEVE.has(profil?.role);
 

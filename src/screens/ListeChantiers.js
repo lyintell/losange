@@ -61,6 +61,20 @@ function StatutBadge({ statut }) {
   );
 }
 
+const parsePriseLeTimestamp = (value) => {
+  if (!value) return 0;
+  const normalized = String(value).includes('T')
+    ? value
+    : String(value).replace(' ', 'T');
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+};
+
+const sortChantiersByPriseLeDesc = (rows) =>
+  [...rows].sort(
+    (a, b) => parsePriseLeTimestamp(b.prise_le) - parsePriseLeTimestamp(a.prise_le)
+  );
+
 export default function ListeChantiers({
   onCreatePress,
   onChantierPress,
@@ -201,9 +215,10 @@ export default function ListeChantiers({
   );
 
   const filteredChantiers = React.useMemo(() => {
+    const sorted = sortChantiersByPriseLeDesc(chantiers);
     const term = searchQuery.trim().toLowerCase();
-    if (!term) return chantiers;
-    return chantiers.filter((item) =>
+    if (!term) return sorted;
+    return sorted.filter((item) =>
       [
         item.nom,
         item.adresse,

@@ -187,3 +187,11 @@ Apparait a la page de login. Il apparait aussi comme loading screen (pulsating r
 - Corrige Chantier card. Relevé au lieu de dimension badge
 
 - JE ne comprends pas le modal de synchronisation. Simplifié les le content et concise.
+
+- dans creation ouvrage window, augmente les polices de unites dans la liste.
+la derniere unite dans la liste n est pas tres visible.
+
+- Dans details chantier et ecran recapitulatif, garde l ordre dans lequel les ligne de releve ont ete entrées. Le groupement par metier sera conserver. Si le meme metier en deux entree differente, alors il seront groupe mais l ordre est premier entree, deuxieme, ainsi de suite
+
+Pour PDF, on applique le meme ordre.
+ Ne change rien au devis

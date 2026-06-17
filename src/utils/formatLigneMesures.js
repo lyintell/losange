@@ -10,6 +10,16 @@ export function getLigneNomUnite(ligne) {
   return ligne?.nom_unite?.trim() || ligne?.unite_nom?.trim() || '';
 }
 
+/** PDF devis / relevés : dimension → (l x h x n), unitaire → (nom_unite) ex. Carreau 60x60 (m2). */
+export function formatOuvrageNomAvecUnite(ouvrageNom, nomUnite, indDimension) {
+  const name = String(ouvrageNom || '').trim() || 'Ouvrage';
+  if (Number(indDimension) === 1) {
+    return `${name} (l x h x n)`;
+  }
+  const unite = String(nomUnite || '').trim();
+  return unite ? `${name} (${unite})` : name;
+}
+
 /** ind_dimension = 1 : affichage = nombre (n), calculs = quantite. */
 export const isLigneDimension = (ligne) => Number(ligne?.ind_dimension) === 1;
 

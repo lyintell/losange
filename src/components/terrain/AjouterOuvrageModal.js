@@ -138,12 +138,19 @@ export default function AjouterOuvrageModal({
                 onPress={() => setUniteMenuOpen(true)}
                 style={styles.uniteButton}
                 contentStyle={styles.uniteButtonContent}
+                labelStyle={styles.uniteButtonLabel}
               >
                 {selectedUnite ? formatUniteLabel(selectedUnite) : "Choisir l'unité"}
               </MobileButton>
             }
           >
-            <ScrollView style={styles.uniteMenuScroll}>
+            <ScrollView
+              style={styles.uniteMenuScroll}
+              contentContainerStyle={styles.uniteMenuScrollContent}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+              keyboardShouldPersistTaps="handled"
+            >
               {unites.map((unite) => (
                 <Menu.Item
                   key={unite.id}
@@ -152,6 +159,8 @@ export default function AjouterOuvrageModal({
                     setUniteMenuOpen(false);
                   }}
                   title={formatUniteLabel(unite)}
+                  titleStyle={styles.uniteMenuItemTitle}
+                  style={styles.uniteMenuItem}
                 />
               ))}
             </ScrollView>
@@ -237,9 +246,27 @@ const styles = StyleSheet.create({
   },
   uniteButtonContent: {
     justifyContent: 'flex-start',
+    minHeight: 52,
+  },
+  uniteButtonLabel: {
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'left',
   },
   uniteMenuScroll: {
-    maxHeight: 220,
+    maxHeight: 280,
+  },
+  uniteMenuScrollContent: {
+    paddingBottom: 52,
+  },
+  uniteMenuItem: {
+    minHeight: 52,
+    justifyContent: 'center',
+  },
+  uniteMenuItemTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: chantierColors.text,
   },
   loader: {
     marginVertical: 8,

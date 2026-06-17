@@ -35,6 +35,8 @@ local.properties
 *.hprof
 google-services.json
 GoogleService-Info.plist
+service-account*.json
+firebase-adminsdk*.json
 
 # Metro
 .metro-health-check*
@@ -45,6 +47,8 @@ yarn-debug.*
 yarn-error.*
 *.log
 *.trace
+*.tmp
+*.temp
 
 # macOS
 .DS_Store
@@ -60,6 +64,7 @@ Desktop.ini
 .env.*
 !.env.example
 expo.dev
+supabase/.env
 supabase/functions/.env
 
 # TypeScript
@@ -74,6 +79,9 @@ supabase/.branches/
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
+*.db-journal
 
 # IDE / editor
 .idea/
@@ -88,10 +96,13 @@ supabase/.branches/
 .cursor/
 .claude/
 
-# Prompts locaux (brouillons, exports prod, transcripts)
+# Prompts locaux (brouillons, exports prod, transcripts, captures)
 prompts/transcripts/
 prompts/terminal.txt
+prompts/errors.txt
 prompts/prod_stuff/
+prompts/screenshots/
+prompts/*.png
 
 # Test & coverage
 coverage/

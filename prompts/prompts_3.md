@@ -140,3 +140,7 @@ Dans le devis, P.U affiche est P.U applique et Montant = P.U applique x n
 
 35. Pour devis, telecharger et whatsapp, nom du fichier est : devis_client_date.pdf
     Pour pdf, telecharger et whatsapp, nom du fichier est : releves_client_date.pdf
+
+36. Dans le document PDF, Dans le nom de l ouvrage met entre parenthese le nom de l unité. eg. FC (lxh), Carreau 60x60 (m2)
+Pour ind_dimension=1, affiche l x h x n au lieu du nom de l unite
+
