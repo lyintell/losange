@@ -1,6 +1,57 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { filterTransactionalRowsForProPull } from './entrepriseTier.ts';
 
+const DEFAULT_METIERS = [
+  { id: 'metier-menuiserie-alu', ordre: 0 },
+  { id: 'metier-menuiserie-metallique', ordre: 1 },
+  { id: 'metier-vitrage-verre', ordre: 2 },
+  { id: 'metier-gros-oeuvres', ordre: 3 },
+  { id: 'metier-peinture', ordre: 4 },
+  { id: 'metier-carrelage', ordre: 5 },
+  { id: 'metier-electricite-clim', ordre: 6 },
+  { id: 'metier-courant-faible', ordre: 7 },
+  { id: 'metier-plomberie-sanitaire', ordre: 8 },
+  { id: 'metier-etancheite-toiture', ordre: 9 },
+  { id: 'metier-divers', ordre: 10 },
+];
+
+const ensureDefaultMetiersEntrepriseLinks = async (
+  supabase: ReturnType<typeof createClient>,
+  entrepriseId: string
+) => {
+  const { data: existingRows, error: existingError } = await supabase
+    .from('metiers_entreprise')
+    .select('metier_id')
+    .eq('entreprise_id', entrepriseId)
+    .is('supprime_le', null);
+
+  if (existingError) {
+    throw new Error(existingError.message || 'Erreur lecture métiers entreprise.');
+  }
+
+  const linked = new Set((existingRows ?? []).map((row) => String(row.metier_id)));
+  const missing = DEFAULT_METIERS.filter((metier) => !linked.has(metier.id));
+  if (missing.length === 0) return;
+
+  const now = new Date().toISOString();
+  const { error: insertError } = await supabase.from('metiers_entreprise').upsert(
+    missing.map((metier) => ({
+      entreprise_id: entrepriseId,
+      metier_id: metier.id,
+      ordre: metier.ordre,
+      ind_actif: 1,
+      cree_le: now,
+      mis_a_jour_le: now,
+      _synced: 1,
+    })),
+    { onConflict: 'entreprise_id,metier_id', ignoreDuplicates: true }
+  );
+
+  if (insertError) {
+    throw new Error(insertError.message || 'Erreur liaison métiers par défaut.');
+  }
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -97,6 +148,30 @@ const recordProfilFirstLogin = async (
   return data ?? { ...profil, date_premier_login: now, mis_a_jour_le: now };
 };
 
+const fetchMetiersPullData = async (
+  supabase: ReturnType<typeof createClient>,
+  entrepriseId: string
+) => {
+  await ensureDefaultMetiersEntrepriseLinks(supabase, entrepriseId);
+
+  const [globalMetiersResult, customMetiersResult, metiersEntrepriseResult] = await Promise.all([
+    supabase.from('metiers').select('*').is('entreprise_id', null).is('supprime_le', null),
+    supabase.from('metiers').select('*').eq('entreprise_id', entrepriseId),
+    supabase.from('metiers_entreprise').select('*').eq('entreprise_id', entrepriseId),
+  ]);
+
+  const queryError =
+    globalMetiersResult.error || customMetiersResult.error || metiersEntrepriseResult.error;
+  if (queryError) {
+    throw new Error(queryError.message || 'Erreur chargement métiers.');
+  }
+
+  return {
+    metiers: [...(globalMetiersResult.data ?? []), ...(customMetiersResult.data ?? [])],
+    metiers_entreprise: metiersEntrepriseResult.data ?? [],
+  };
+};
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -157,8 +232,8 @@ Deno.serve(async (req) => {
     const entrepriseId = String(entreprise.id);
     const isProAccount = Number(entreprise.ind_pro) === 1;
 
-    const [metiersResult, unitesResult, profilsResult] = await Promise.all([
-      supabase.from('metiers').select('*'),
+    const [metiersPull, unitesResult, profilsResult] = await Promise.all([
+      fetchMetiersPullData(supabase, entrepriseId),
       supabase.from('unites').select('*'),
       supabase
         .from('profils')
@@ -166,7 +241,7 @@ Deno.serve(async (req) => {
         .eq('entreprise_id', entrepriseId),
     ]);
 
-    const queryError = metiersResult.error || unitesResult.error || profilsResult.error;
+    const queryError = unitesResult.error || profilsResult.error;
 
     if (queryError) {
       return jsonResponse({ ok: false, error: queryError.message || 'Erreur chargement des donnees.' }, 500);
@@ -179,10 +254,12 @@ Deno.serve(async (req) => {
           entreprise,
           profil: stripProfil(profilRow as Record<string, unknown>),
           profils: profilsResult.data ?? [],
-          metiers: metiersResult.data ?? [],
+          metiers: metiersPull.metiers,
+          metiers_entreprise: metiersPull.metiers_entreprise,
           unites: unitesResult.data ?? [],
           ouvrages: [],
           ouvrage_unites: [],
+          fournisseurs: [],
           clients: [],
           chantiers: [],
           releves: [],
@@ -191,19 +268,28 @@ Deno.serve(async (req) => {
       });
     }
 
-    const [ouvragesResult, clientsResult] = await Promise.all([
-      supabase.from('ouvrages').select('*').eq('entreprise_id', entrepriseId).is('supprime_le', null),
-      supabase.from('clients').select('*').eq('entreprise_id', entrepriseId).is('supprime_le', null),
+    const [fournisseursResult, ouvragesResult, clientsResult] = await Promise.all([
+      supabase.from('fournisseurs').select('*').eq('entreprise_id', entrepriseId),
+      supabase.from('ouvrages').select('*').eq('entreprise_id', entrepriseId),
+      supabase.from('clients').select('*').eq('entreprise_id', entrepriseId),
     ]);
 
-    if (ouvragesResult.error || clientsResult.error) {
+    if (fournisseursResult.error || ouvragesResult.error || clientsResult.error) {
       return jsonResponse(
-        { ok: false, error: ouvragesResult.error?.message || clientsResult.error?.message || 'Erreur chargement.' },
+        {
+          ok: false,
+          error:
+            fournisseursResult.error?.message ||
+            ouvragesResult.error?.message ||
+            clientsResult.error?.message ||
+            'Erreur chargement.',
+        },
         500
       );
     }
 
     const proActivatedLe = entreprise.pro_activated_le as string | null | undefined;
+    let fournisseurs = filterTransactionalRowsForProPull(fournisseursResult.data ?? [], proActivatedLe);
     let ouvrages = filterTransactionalRowsForProPull(ouvragesResult.data ?? [], proActivatedLe);
     let clients = filterTransactionalRowsForProPull(clientsResult.data ?? [], proActivatedLe);
     const ouvrageIds = ouvrages.map((item) => item.id);
@@ -214,8 +300,7 @@ Deno.serve(async (req) => {
       const { data, error } = await supabase
         .from('ouvrage_unites')
         .select('*')
-        .in('ouvrage_id', ouvrageIds)
-        .is('supprime_le', null);
+        .in('ouvrage_id', ouvrageIds);
       if (error) {
         return jsonResponse({ ok: false, error: error.message || 'Erreur chargement ouvrage_unites.' }, 500);
       }
@@ -227,8 +312,7 @@ Deno.serve(async (req) => {
       const { data, error } = await supabase
         .from('chantiers')
         .select('*')
-        .in('client_id', clientIds)
-        .is('supprime_le', null);
+        .in('client_id', clientIds);
       if (error) {
         return jsonResponse({ ok: false, error: error.message || 'Erreur chargement chantiers.' }, 500);
       }
@@ -241,8 +325,7 @@ Deno.serve(async (req) => {
       const { data, error } = await supabase
         .from('releves')
         .select('*')
-        .in('chantier_id', chantierIds)
-        .is('supprime_le', null);
+        .in('chantier_id', chantierIds);
       if (error) {
         return jsonResponse({ ok: false, error: error.message || 'Erreur chargement releves.' }, 500);
       }
@@ -255,8 +338,7 @@ Deno.serve(async (req) => {
       const { data, error } = await supabase
         .from('ligne_releves')
         .select('*')
-        .in('releve_id', releveIds)
-        .is('supprime_le', null);
+        .in('releve_id', releveIds);
       if (error) {
         return jsonResponse({ ok: false, error: error.message || 'Erreur chargement ligne_releves.' }, 500);
       }
@@ -269,8 +351,10 @@ Deno.serve(async (req) => {
         entreprise,
         profil: stripProfil(profilRow as Record<string, unknown>),
         profils: profilsResult.data ?? [],
-        metiers: metiersResult.data ?? [],
+        metiers: metiersPull.metiers,
+        metiers_entreprise: metiersPull.metiers_entreprise,
         unites: unitesResult.data ?? [],
+        fournisseurs,
         ouvrages,
         ouvrage_unites: ouvrageUnites,
         clients,

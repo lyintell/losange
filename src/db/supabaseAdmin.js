@@ -7,6 +7,8 @@ export const ADMIN_TABLE_KEYS = [
   'clients',
   'chantiers',
   'metiers',
+  'metiers_entreprise',
+  'fournisseurs',
   'ouvrages',
   'unites',
   'ouvrage_unites',

@@ -6,6 +6,7 @@ const TABLE_UPSERT_ORDER = [
   'profils',
   'metiers',
   'unites',
+  'fournisseurs',
   'ouvrages',
   'ouvrage_unites',
   'clients',
@@ -21,6 +22,7 @@ const CLEAR_TABLES_ORDER = [
   'clients',
   'ouvrage_unites',
   'ouvrages',
+  'fournisseurs',
   'profils',
   'entreprises',
   'terrain_session',
@@ -61,7 +63,27 @@ const TABLE_COLUMNS = {
     'mis_a_jour_le',
     '_synced',
   ],
-  metiers: ['id', 'nom', 'abbrev', 'icon', 'cree_le', 'mis_a_jour_le'],
+  metiers: [
+    'id',
+    'nom',
+    'abbrev',
+    'icon',
+    'entreprise_id',
+    'supprime_le',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
+  metiers_entreprise: [
+    'entreprise_id',
+    'metier_id',
+    'ordre',
+    'supprime_le',
+    'ind_actif',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
   unites: [
     'id',
     'formule',
@@ -71,12 +93,38 @@ const TABLE_COLUMNS = {
     'cree_le',
     'mis_a_jour_le',
   ],
-  ouvrages: ['id', 'metier_id', 'entreprise_id', 'nom', 'supprime_le', 'cree_le', 'mis_a_jour_le', '_synced'],
+  ouvrages: [
+    'id',
+    'metier_id',
+    'entreprise_id',
+    'nom',
+    'ind_article',
+    'fournisseur_id',
+    'photo',
+    'supprime_le',
+    'ind_actif',
+    'ordre',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
   ouvrage_unites: [
     'id',
     'ouvrage_id',
     'unite_id',
     'prix_unitaire',
+    'supprime_le',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
+  fournisseurs: [
+    'id',
+    'metier_id',
+    'entreprise_id',
+    'nom',
+    'telephone_1',
+    'telephone_2',
     'supprime_le',
     'cree_le',
     'mis_a_jour_le',
@@ -118,6 +166,9 @@ const TABLE_COLUMNS = {
     'total_ht_facture',
     'tva_facture',
     'total_ttc_facture',
+    'remise',
+    'ind_tva',
+    'status',
     'note',
     'supprime_le',
     'cree_le',
@@ -152,6 +203,8 @@ const FLAG_COLUMNS = new Set([
   '_synced',
   'ind_dimension',
   'ind_complete',
+  'ind_article',
+  'ind_actif',
 ]);
 
 const coerceFlag = (value) => {
@@ -172,7 +225,14 @@ const normalizeRow = (tableName, row) => {
   const columns = TABLE_COLUMNS[tableName];
   const normalized = {};
   columns.forEach((column) => {
-    if (!Object.prototype.hasOwnProperty.call(row, column)) return;
+    if (!Object.prototype.hasOwnProperty.call(row, column)) {
+      if (tableName === 'releves' && column === 'ind_tva') {
+        normalized[column] = 0;
+      } else if (tableName === 'releves' && column === 'status') {
+        normalized[column] = 'E';
+      }
+      return;
+    }
     const value = row[column];
     if (FLAG_COLUMNS.has(column)) {
       normalized[column] = coerceFlag(value);
@@ -204,17 +264,27 @@ export const upsertRows = async (db, tableName, rows = []) => {
 
   const columns = TABLE_COLUMNS[tableName];
   const placeholders = columns.map(() => '?').join(', ');
-  const updateClause = columns
-    .filter((column) => column !== 'id')
+  const conflictTarget =
+    tableName === 'metiers_entreprise' ? '(entreprise_id, metier_id)' : '(id)';
+  const updateColumns =
+    tableName === 'metiers_entreprise'
+      ? columns.filter((column) => column !== 'entreprise_id' && column !== 'metier_id')
+      : columns.filter((column) => column !== 'id');
+  const updateClause = updateColumns
     .map((column) => `${column} = excluded.${column}`)
     .join(', ');
 
   for (const rawRow of rows) {
     const row = normalizeRow(tableName, rawRow);
-    const values = columns.map((column) => (row[column] === undefined ? null : row[column]));
+    const values = columns.map((column) => {
+      if (row[column] !== undefined) return row[column];
+      if (tableName === 'releves' && column === 'ind_tva') return 0;
+      if (tableName === 'releves' && column === 'status') return 'E';
+      return null;
+    });
     await db.runAsync(
       `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders})
-       ON CONFLICT(id) DO UPDATE SET ${updateClause};`,
+       ON CONFLICT${conflictTarget} DO UPDATE SET ${updateClause};`,
       values
     );
   }
@@ -228,9 +298,11 @@ export const syncTerrainBootstrapLocal = async (payload) => {
         profil: payload?.profil,
         profils: payload?.profils,
         metiers: payload?.metiers,
+        metiers_entreprise: payload?.metiers_entreprise,
         unites: payload?.unites,
         ouvrages: payload?.ouvrages,
         ouvrage_unites: payload?.ouvrage_unites,
+        fournisseurs: payload?.fournisseurs,
         clients: payload?.clients,
         chantiers: payload?.chantiers,
         releves: payload?.releves,

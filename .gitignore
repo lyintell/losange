@@ -104,6 +104,12 @@ prompts/prod_stuff/
 prompts/screenshots/
 prompts/*.png
 
+# Web apps (Next.js — webapps/admin, etc.)
+.next/
+out/
+.vercel/
+next-env.d.ts
+
 # Test & coverage
 coverage/
 .turbo/

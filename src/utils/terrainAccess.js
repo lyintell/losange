@@ -36,6 +36,8 @@ export const canSeeAllChantiers = (profil) => ROLES_MODIFY_ANY_CHANTIER.has(prof
 export const canCreateOuvrageInReleveFlow = (profil) =>
   ROLES_CREATING_OUVRAGE_IN_RELEVE.has(profil?.role);
 
+export const canEditReleveRemise = (profil) => ROLES_MODIFY_ANY_CHANTIER.has(profil?.role);
+
 export const canModifyReleveForProfil = (profil, releve) => {
   if (!profil) return false;
   if (ROLES_MODIFY_ANY_CHANTIER.has(profil.role)) return true;

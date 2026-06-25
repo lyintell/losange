@@ -6,8 +6,9 @@ import { PaperProvider } from 'react-native-paper';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import BottomNavButton from './src/components/terrain/BottomNavButton';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import AdminScreen from './src/screens/web/AdminScreen';
+import MasterScreen from './src/screens/web/MasterScreen';
 import ChantierDetails from './src/screens/ChantierDetails';
+import ChantierRelevesListScreen from './src/screens/ChantierRelevesListScreen';
 import ListeChantiers from './src/screens/ListeChantiers';
 import LoginScreen from './src/screens/LoginScreen';
 import ClientChantierFormScreen from './src/screens/ClientChantierFormScreen';
@@ -41,7 +42,10 @@ import {
   ensureCatalogueLocal,
   finalizeDimensionDraftLocal,
   getLignesByChantierLocal,
+  getLignesByReleveIdLocal,
   getLoggedInProfilViewLocal,
+  getReleveByIdLocal,
+  getRelevesByChantierLocal,
   getReleveIdByChantierLocal,
   isLoggedInAdminLocal,
 } from './src/db/querries';
@@ -59,6 +63,7 @@ export default function App() {
   const [screen, setScreen] = useState('chantiers');
   const [selection, setSelection] = useState(null);
   const [selectedChantier, setSelectedChantier] = useState(null);
+  const [selectedReleveId, setSelectedReleveId] = useState(null);
   const [chantierListRefreshToken, setChantierListRefreshToken] = useState(0);
   const [entrepriseId, setEntrepriseId] = useState(null);
   const [authReady, setAuthReady] = useState(false);
@@ -121,12 +126,13 @@ export default function App() {
   const handleClientChantierSave = useCallback(
     async (payload) => {
       const draft = getDraftDimensionFlow();
+      const isEditMode = Boolean(draft?.editMode);
       await finalizeDimensionDraftLocal({
         entrepriseId,
         ...payload,
         clientId: payload.clientId ?? draft?.clientId ?? null,
-        chantierId: draft?.chantierId ?? null,
-        releveId: draft?.releveId ?? null,
+        chantierId: payload.chantierId ?? draft?.chantierId ?? null,
+        releveId: isEditMode ? payload.releveId ?? draft?.releveId ?? null : payload.releveId ?? null,
         lignes: draft?.lignes || [],
       });
       clearDraftDimensionFlow();
@@ -147,6 +153,7 @@ export default function App() {
 
   const isChantiersNavActive =
     screen === 'chantiers' ||
+    screen === 'chantierReleves' ||
     screen === 'chantierDetails' ||
     screen === 'nouvelleDimension' ||
     screen === 'clientChantier' ||
@@ -166,6 +173,7 @@ export default function App() {
   const isPlusHomeScreen = screen === 'plus';
   const isPlusSubScreen = isPlusNavActive && !isPlusHomeScreen;
   const isChantierDetailsScreen = screen === 'chantierDetails';
+  const isChantierRelevesScreen = screen === 'chantierReleves';
   const isProfilScreen = screen === 'profil';
   const isDatabaseScreen = screen === 'database';
   const isListeClientsScreen = screen === 'listeClients';
@@ -177,7 +185,7 @@ export default function App() {
   const canModifyPlusDetail =
     (isClientDetailsScreen && isLoggedInAdmin) ||
     (isOuvrageDetailsScreen && (isLoggedInAdmin || canManageOuvrages));
-  const leftNavIsRetour = isPlusSubScreen || isChantierDetailsScreen;
+  const leftNavIsRetour = isPlusSubScreen || isChantierRelevesScreen || isChantierDetailsScreen;
 
   useEffect(() => {
     if (!isProfilScreen) {
@@ -464,7 +472,7 @@ export default function App() {
     return result;
   }, [handleForcedInactiveLogout]);
 
-  const handleEditChantier = useCallback(async (chantier, lignes = []) => {
+  const handleEditChantier = useCallback(async (chantier) => {
     if (!chantier?.id) return;
 
     try {
@@ -476,17 +484,51 @@ export default function App() {
         return;
       }
 
-      const resolvedLignes =
-        lignes.length > 0 ? lignes : (await getLignesByChantierLocal(chantier.id)) || [];
-      const releveId =
-        resolvedLignes[0]?.releve_id || (await getReleveIdByChantierLocal(chantier.id));
-      const draft = startDraftFromChantierEdit({ chantier, lignes: resolvedLignes, releveId });
+      let releveId = selectedReleveId;
+      let targetReleve = releveId ? await getReleveByIdLocal(releveId) : null;
+
+      if (!releveId) {
+        const releves = await getRelevesByChantierLocal(chantier.id);
+        targetReleve = releves.length ? releves[0] : null;
+        releveId = targetReleve?.id || (await getReleveIdByChantierLocal(chantier.id));
+      }
+
+      const resolvedLignes = releveId ? (await getLignesByReleveIdLocal(releveId)) || [] : [];
+      const draft = startDraftFromChantierEdit({
+        chantier,
+        lignes: resolvedLignes,
+        releveId,
+        releveRemise: targetReleve?.remise ?? 0,
+        releveIndTva: targetReleve?.ind_tva ?? 0,
+      });
       setSelection(draft);
       setScreen('nouvelleDimension');
     } catch (error) {
       console.error('Erreur ouverture modification chantier:', error);
       Alert.alert('Erreur', error.message || "Impossible d'ouvrir la modification.");
     }
+  }, [selectedReleveId]);
+
+  const openChantierFromList = useCallback(async (chantier) => {
+    if (!chantier?.id) return;
+
+    setSelectedChantier(chantier);
+    const releveCount = Number(chantier.releve_count) || 0;
+
+    if (releveCount > 1) {
+      setSelectedReleveId(null);
+      setScreen('chantierReleves');
+      return;
+    }
+
+    if (releveCount === 1) {
+      const releves = await getRelevesByChantierLocal(chantier.id);
+      setSelectedReleveId(releves[0]?.id || null);
+    } else {
+      setSelectedReleveId(null);
+    }
+
+    setScreen('chantierDetails');
   }, []);
 
   const handleDeleteChantier = useCallback(async (chantier) => {
@@ -530,7 +572,7 @@ export default function App() {
                 />
               )}
               {authReady && isLoggedIn && Platform.OS === 'web' && (
-                <AdminScreen
+                <MasterScreen
                   onLogout={() => {
                     logoutMasterAdmin();
                     setIsLoggedIn(false);
@@ -544,10 +586,28 @@ export default function App() {
                   entrepriseId={entrepriseId}
                   bottomOffset={bottomNavHeight}
                   refreshToken={chantierListRefreshToken}
+                  onSyncFromSupabase={handleSyncFromSupabase}
                   onCreatePress={handleCreatePress}
-                  onChantierPress={(chantier) => {
-                    setSelectedChantier(chantier);
+                  onChantierPress={openChantierFromList}
+                  onDeleteChantier={handleDeleteChantier}
+                />
+              )}
+              {isLoggedIn && Platform.OS !== 'web' && screen === 'chantierReleves' && (
+                <ChantierRelevesListScreen
+                  chantier={selectedChantier}
+                  onRelevePress={(releve) => {
+                    setSelectedReleveId(releve.id);
                     setScreen('chantierDetails');
+                  }}
+                  onRelevesChanged={(count) => {
+                    setSelectedChantier((prev) =>
+                      prev ? { ...prev, releve_count: count } : prev
+                    );
+                    setChantierListRefreshToken((value) => value + 1);
+                    if (count <= 1) {
+                      setSelectedReleveId(null);
+                      setScreen('chantiers');
+                    }
                   }}
                 />
               )}
@@ -600,6 +660,7 @@ export default function App() {
                 <ListeClientsScreen
                   entrepriseId={entrepriseId}
                   refreshToken={clientsListRefreshToken}
+                  onSyncFromSupabase={handleSyncFromSupabase}
                   onClientPress={(client) => {
                     setSelectedClient(client);
                     setScreen('clientDetails');
@@ -607,7 +668,10 @@ export default function App() {
                 />
               )}
               {isLoggedIn && Platform.OS !== 'web' && screen === 'listeMetiers' && (
-                <ListeMetiersScreen entrepriseId={entrepriseId} />
+                <ListeMetiersScreen
+                  entrepriseId={entrepriseId}
+                  onSyncFromSupabase={handleSyncFromSupabase}
+                />
               )}
               {isLoggedIn && Platform.OS !== 'web' && screen === 'clientDetails' && (
                 <ClientDetailsScreen
@@ -628,6 +692,7 @@ export default function App() {
                 <ListeOuvragesScreen
                   entrepriseId={entrepriseId}
                   refreshToken={ouvragesListRefreshToken}
+                  onSyncFromSupabase={handleSyncFromSupabase}
                   onOuvragePress={(ouvrage) => {
                     setSelectedOuvrage(ouvrage);
                     setScreen('ouvrageDetails');
@@ -663,6 +728,7 @@ export default function App() {
               {isLoggedIn && Platform.OS !== 'web' && screen === 'chantierDetails' && (
                 <ChantierDetails
                   chantier={selectedChantier}
+                  releveId={selectedReleveId}
                   entrepriseId={entrepriseId}
                   bottomOffset={bottomNavHeight}
                   onChantierUpdated={handleChantierUpdated}
@@ -753,6 +819,17 @@ export default function App() {
                       return;
                     }
                     if (isChantierDetailsScreen) {
+                      if ((Number(selectedChantier?.releve_count) || 0) > 1) {
+                        setSelectedReleveId(null);
+                        setScreen('chantierReleves');
+                        return;
+                      }
+                      setSelectedReleveId(null);
+                      setScreen('chantiers');
+                      return;
+                    }
+                    if (isChantierRelevesScreen) {
+                      setSelectedReleveId(null);
                       setScreen('chantiers');
                       return;
                     }
@@ -764,7 +841,11 @@ export default function App() {
                     : isPlusSubScreen
                       ? 'Retour'
                       : isChantierDetailsScreen
-                        ? 'Retour aux chantiers'
+                        ? (Number(selectedChantier?.releve_count) || 0) > 1
+                          ? 'Retour aux relevés'
+                          : 'Retour aux chantiers'
+                        : isChantierRelevesScreen
+                          ? 'Retour aux chantiers'
                         : 'Chantiers'}
                 </BottomNavButton>
                 <BottomNavButton

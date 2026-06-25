@@ -1,7 +1,17 @@
 import { ensureLocalDatabaseReady } from './localDb';
 import { upsertRows } from './terrainSync';
 
-const TRANSACTIONAL_TABLES = ['ouvrages', 'ouvrage_unites', 'clients', 'chantiers', 'releves', 'ligne_releves'];
+const TRANSACTIONAL_TABLES = [
+  'metiers',
+  'metiers_entreprise',
+  'fournisseurs',
+  'ouvrages',
+  'ouvrage_unites',
+  'clients',
+  'chantiers',
+  'releves',
+  'ligne_releves',
+];
 const CATALOGUE_TABLES = ['metiers', 'unites'];
 
 export const parseSyncTimestamp = (value) => {
@@ -17,6 +27,10 @@ export const shouldApplyRemoteRow = (localRow, remoteRow) => {
   const localPendingDelete = Boolean(localRow.supprime_le) && Number(localRow._synced) === 0;
   if (localPendingDelete && !remoteRow.supprime_le) {
     return false;
+  }
+
+  if (remoteRow.supprime_le && !localRow.supprime_le) {
+    return parseSyncTimestamp(remoteRow.mis_a_jour_le) >= parseSyncTimestamp(localRow.mis_a_jour_le);
   }
 
   const remoteTs = parseSyncTimestamp(remoteRow.mis_a_jour_le);
@@ -35,8 +49,15 @@ export const mergeCatalogueFromPull = async (pull = {}) => {
     for (const tableName of CATALOGUE_TABLES) {
       const key = tableName === 'ouvrage_unites' ? 'ouvrage_unites' : tableName;
       const rows = Array.isArray(pull[key]) ? pull[key] : [];
-      if (rows.length) {
-        await upsertRows(db, tableName, rows);
+      if (!rows.length) continue;
+
+      const toUpsert =
+        tableName === 'metiers'
+          ? rows.filter((row) => !row?.entreprise_id)
+          : rows;
+
+      if (toUpsert.length) {
+        await upsertRows(db, tableName, toUpsert);
       }
     }
   });
@@ -56,9 +77,18 @@ export const mergeTransactionalFromPull = async (pull = {}, { forceAll = false }
           continue;
         }
 
-        const localRow = await db.getFirstAsync(`SELECT * FROM ${tableName} WHERE id = ?;`, [
-          remoteRow.id,
-        ]);
+        let localRow = null;
+        if (tableName === 'metiers_entreprise') {
+          localRow = await db.getFirstAsync(
+            `SELECT * FROM metiers_entreprise WHERE entreprise_id = ? AND metier_id = ?;`,
+            [remoteRow.entreprise_id, remoteRow.metier_id]
+          );
+        } else {
+          localRow = await db.getFirstAsync(`SELECT * FROM ${tableName} WHERE id = ?;`, [
+            remoteRow.id,
+          ]);
+        }
+
         if (shouldApplyRemoteRow(localRow, remoteRow)) {
           toApply.push(remoteRow);
         }

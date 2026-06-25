@@ -58,7 +58,7 @@ export default function DatabaseScreen({ onListeClientsPress, onListeMetiersPres
 
         {canShowOuvrages ? (
           <PlusMenuButton icon="hammer-wrench" onPress={onListeOuvragesPress}>
-            Ouvrages
+            Ouvrages / Articles
           </PlusMenuButton>
         ) : null}
       </View>

@@ -23,6 +23,13 @@ export const buildChantierPhotoKey = (entrepriseId, chantierId, slot) =>
 export const buildLignePhotoKey = (entrepriseId, chantierId, ligneId) =>
   `${buildEntrepriseRoot(entrepriseId)}/chantiers/${chantierId}/ligne_releves/${ligneId}/photo`;
 
+/** Photo ouvrage/article : sous le catalogue ouvrages de l entreprise */
+export const buildOuvragePhotoKey = (entrepriseId, ouvrageId) =>
+  `${buildEntrepriseRoot(entrepriseId)}/ouvrages/${ouvrageId}/photo`;
+
+/** @deprecated Utiliser buildOuvragePhotoKey */
+export const buildArticlePhotoKey = buildOuvragePhotoKey;
+
 const resolveExtension = (sourceUri, mimeType) => {
   if (mimeType?.includes('png')) return 'png';
   if (mimeType?.includes('webp')) return 'webp';
@@ -206,6 +213,16 @@ export const collectPendingImageKeys = async (entrepriseId) => {
   );
   collectStorageKeys(ligneRows, ['photo']).forEach((key) => keys.add(key));
 
+  const ouvrageRows = await db.getAllAsync(
+    `
+    SELECT ouvrages.photo
+    FROM ouvrages
+    WHERE ouvrages.entreprise_id = ? AND ouvrages._synced = 0 AND ouvrages.photo IS NOT NULL;
+    `,
+    [entrepriseId]
+  );
+  collectStorageKeys(ouvrageRows, ['photo']).forEach((key) => keys.add(key));
+
   return [...keys];
 };
 
@@ -248,6 +265,7 @@ export const hydrateTerrainImagesFromPull = async (pull = {}) => {
   collectStorageKeys(entrepriseRows, ['logo']).forEach((key) => keys.add(key));
   collectStorageKeys(pull.chantiers || [], CHANTIER_PHOTO_SLOTS).forEach((key) => keys.add(key));
   collectStorageKeys(pull.ligne_releves || [], ['photo']).forEach((key) => keys.add(key));
+  collectStorageKeys(pull.ouvrages || [], ['photo']).forEach((key) => keys.add(key));
 
   let downloaded = 0;
   for (const key of keys) {

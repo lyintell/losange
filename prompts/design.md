@@ -195,3 +195,13 @@ la derniere unite dans la liste n est pas tres visible.
 
 Pour PDF, on applique le meme ordre.
  Ne change rien au devis
+
+ Dans client et chantier, reduit les champs photo 1, 2 et 3. Affiche les sur la meme ligne.
+ Si photo est ajouter, affiche juste l icone photo. On clique montre la photo (comme dans details). La photo peut aussi etre retiree
+
+- Dans web admin, switch Releve et devis.
+Dans card devis (liste) ajoute le badge status (avant Voir). Aussi dans le details devis affiche le badge status (meme ligne que telecharger) mais au fond a droite
+
+- Dans la liste des clients, affiche le nombre de chantiers, nombre total de devis
+- Dans la liste des chantiers, affiche le nombre total de nombre devis, nombre de devis validé, nombre de devis en attente
+

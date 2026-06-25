@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, View } from 'react-native';
-import { Chip, Text } from 'react-native-paper';
+import { Text } from 'react-native-paper';
 import AjouterOuvrageModal from '../components/terrain/AjouterOuvrageModal';
+import AjouterArticleModal from '../components/terrain/AjouterArticleModal';
+import ChoixUniteModal from '../components/terrain/ChoixUniteModal';
+import CatalogueKindToggle from '../components/terrain/CatalogueKindToggle';
 import MobileButton from '../components/terrain/MobileButton';
 import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
 import {
@@ -24,6 +27,7 @@ import {
   getLoggedInProfilViewLocal,
   getMetiersForSelectionLocal,
   getOuvrageUniteContextLocal,
+  getArticlesByMetierAndEntreprise,
   getOuvragesByMetierAndEntreprise,
   getUnitesEtPrixParOuvrage,
 } from '../db/querries';
@@ -35,10 +39,11 @@ import {
 } from '../utils/terrainAccess';
 import PaveSaisieOneHand from './PaveSaisieOneHand';
 import { chantierColors } from '../styles/theme';
+import { formatArticleNomAvecFournisseur } from '../utils/formatLigneMesures';
 
 const STEP_TITLES = {
   metier: 'Choix du métier',
-  ouvrage: "Choix de l'ouvrage",
+  ouvrage: "Choix de l'ouvrage / article",
   dimensions: 'Entrez les relevés',
   recap: 'Données entrées',
 };
@@ -65,11 +70,11 @@ export default function NouvelleDimensionScreen({
   const plusPressTimerRef = useRef(null);
   const [step, setStepState] = useState(resolveInitialStep);
   const [metiers, setMetiers] = useState([]);
-  const [ouvrages, setOuvrages] = useState([]);
-  const [unitesPrix, setUnitesPrix] = useState([]);
+  const [catalogItems, setCatalogItems] = useState([]);
   const [loadingMetiers, setLoadingMetiers] = useState(true);
-  const [loadingOuvrages, setLoadingOuvrages] = useState(false);
+  const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [draft, setDraft] = useState(() => getDraftDimensionFlow());
+  const [catalogueKind, setCatalogueKind] = useState(() => getDraftDimensionFlow()?.catalogueKind || 'ouvrage');
   const [savingLine, setSavingLine] = useState(false);
   const [formComplete, setFormComplete] = useState(false);
   const [editingLigneId, setEditingLigneId] = useState(null);
@@ -77,19 +82,63 @@ export default function NouvelleDimensionScreen({
   const [canAddReleveLigne, setCanAddReleveLigne] = useState(true);
   const [hidesPriceUi, setHidesPriceUi] = useState(false);
   const [addOuvrageModalVisible, setAddOuvrageModalVisible] = useState(false);
+  const [addArticleModalVisible, setAddArticleModalVisible] = useState(false);
+  const [choixUniteModal, setChoixUniteModal] = useState({
+    visible: false,
+    ouvrage: null,
+    unites: [],
+  });
+
+  const isArticleMode = catalogueKind === 'article';
+  const catalogueLabel = isArticleMode ? 'article' : 'ouvrage';
+
+  const formatCatalogItemLabel = useCallback(
+    (item) => {
+      if (!isArticleMode) return item.nom;
+      return formatArticleNomAvecFournisseur(item.nom, item.fournisseur_nom);
+    },
+    [isArticleMode]
+  );
+
+  const dimensionsScreenTitle = useMemo(() => {
+    if (!draft?.ouvrage?.nom) return 'Nouveau relevé';
+    const isArticle =
+      draft.catalogueKind === 'article' || Number(draft.ouvrage.ind_article) === 1;
+    if (!isArticle) return draft.ouvrage.nom;
+    return formatArticleNomAvecFournisseur(draft.ouvrage.nom, draft.ouvrage.fournisseur_nom);
+  }, [draft?.ouvrage, draft?.catalogueKind]);
 
   const isEditingLine = Boolean(editingLigneId);
   const editingLigne = useMemo(
     () => draft?.lignes?.find((ligne) => ligne.id === editingLigneId) || null,
     [draft?.lignes, editingLigneId]
   );
-  const ouvragesSorted = useMemo(
-    () =>
-      [...ouvrages].sort((a, b) =>
-        (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' })
-      ),
-    [ouvrages]
+  const catalogItemsSorted = useMemo(() => {
+    const items = [...catalogItems];
+    return items.sort((a, b) => {
+      const ordreA = Number(a.ordre);
+      const ordreB = Number(b.ordre);
+      if (Number.isFinite(ordreA) && Number.isFinite(ordreB) && ordreA !== ordreB) {
+        return ordreA - ordreB;
+      }
+      return (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' });
+    });
+  }, [catalogItems]);
+
+  const loadCatalogItems = useCallback(
+    async (metierId, kind = catalogueKind) => {
+      if (!metierId || !entrepriseId) return [];
+      if (kind === 'article') {
+        return getArticlesByMetierAndEntreprise(metierId, entrepriseId);
+      }
+      return getOuvragesByMetierAndEntreprise(metierId, entrepriseId);
+    },
+    [entrepriseId, catalogueKind]
   );
+
+  const loadUnitesForItem = useCallback(async (itemId) => {
+    return getUnitesEtPrixParOuvrage(itemId);
+  }, []);
 
   const refreshDraft = useCallback(() => {
     setDraft(getDraftDimensionFlow());
@@ -142,83 +191,120 @@ export default function NouvelleDimensionScreen({
       if (!entrepriseId) return;
       const current = getDraftDimensionFlow();
       if (!current?.metier) return;
-      if (current.metier) {
-        const data = await getOuvragesByMetierAndEntreprise(current.metier.id, entrepriseId);
-        setOuvrages(data || []);
-      }
+      const kind = current.catalogueKind || 'ouvrage';
+      setCatalogueKind(kind);
+      const data = await loadCatalogItems(current.metier.id, kind);
+      setCatalogItems(data || []);
       if (current.ouvrage) {
-        const unites = await getUnitesEtPrixParOuvrage(current.ouvrage.id);
-        setUnitesPrix(unites?.length > 1 ? unites : []);
+        await loadUnitesForItem(current.ouvrage.id, kind);
       }
     };
     restoreDraftLists();
-  }, [entrepriseId]);
+  }, [entrepriseId, loadCatalogItems, loadUnitesForItem]);
 
   const handleChooseMetier = async (metier) => {
     if (!entrepriseId) return;
-    updateDraftDimensionFlow({ metier, ouvrage: null, ouvrageUnite: null });
+    updateDraftDimensionFlow({
+      metier,
+      ouvrage: null,
+      ouvrageUnite: null,
+      catalogueKind: 'ouvrage',
+    });
+    setCatalogueKind('ouvrage');
     refreshDraft();
     setStep('ouvrage');
-    setLoadingOuvrages(true);
-    setUnitesPrix([]);
+    setLoadingCatalog(true);
     try {
-      const data = await getOuvragesByMetierAndEntreprise(metier.id, entrepriseId);
-      setOuvrages(data || []);
+      const data = await loadCatalogItems(metier.id, 'ouvrage');
+      setCatalogItems(data || []);
     } catch (error) {
-      console.error('Erreur chargement ouvrages:', error);
-      setOuvrages([]);
+      console.error('Erreur chargement catalogue:', error);
+      setCatalogItems([]);
     } finally {
-      setLoadingOuvrages(false);
+      setLoadingCatalog(false);
     }
   };
 
-  const handleChooseOuvrage = async (ouvrage) => {
+  const handleCatalogueKindChange = async (nextKind) => {
+    if (nextKind === catalogueKind) return;
+    const current = getDraftDimensionFlow();
+    if (!current?.metier?.id) return;
+
+    setCatalogueKind(nextKind);
+    updateDraftDimensionFlow({
+      catalogueKind: nextKind,
+      ouvrage: null,
+      ouvrageUnite: null,
+    });
+    refreshDraft();
+    setLoadingCatalog(true);
     try {
-      const data = await getUnitesEtPrixParOuvrage(ouvrage.id);
+      const data = await loadCatalogItems(current.metier.id, nextKind);
+      setCatalogItems(data || []);
+    } catch (error) {
+      console.error('Erreur chargement catalogue:', error);
+      setCatalogItems([]);
+    } finally {
+      setLoadingCatalog(false);
+    }
+  };
+
+  const handleChooseCatalogItem = async (item) => {
+    try {
+      const data = await loadUnitesForItem(item.id, catalogueKind);
       const unites = data || [];
 
       if (unites.length === 1) {
-        updateDraftDimensionFlow({ ouvrage, ouvrageUnite: unites[0] });
+        updateDraftDimensionFlow({ ouvrage: item, ouvrageUnite: unites[0] });
         refreshDraft();
-        setUnitesPrix([]);
         setStep('dimensions');
         return;
       }
 
-      updateDraftDimensionFlow({ ouvrage, ouvrageUnite: null });
+      if (unites.length > 1) {
+        setChoixUniteModal({ visible: true, ouvrage: item, unites });
+        return;
+      }
+
+      updateDraftDimensionFlow({ ouvrage: item, ouvrageUnite: null });
       refreshDraft();
-      setUnitesPrix(unites);
     } catch (error) {
       console.error('Erreur chargement unites:', error);
-      setUnitesPrix([]);
     }
   };
 
-  const handleChooseUnite = (unite) => {
-    updateDraftDimensionFlow({ ouvrageUnite: unite });
+  const handleChooseUniteFromModal = (unite) => {
+    const { ouvrage } = choixUniteModal;
+    setChoixUniteModal({ visible: false, ouvrage: null, unites: [] });
+    if (!ouvrage) return;
+    updateDraftDimensionFlow({ ouvrage, ouvrageUnite: unite });
     refreshDraft();
     setStep('dimensions');
   };
 
-  const reloadOuvragesForDraftMetier = useCallback(async () => {
+  const handleDismissChoixUniteModal = () => {
+    setChoixUniteModal({ visible: false, ouvrage: null, unites: [] });
+  };
+
+  const reloadCatalogForDraftMetier = useCallback(async () => {
     const current = getDraftDimensionFlow();
     if (!current?.metier?.id || !entrepriseId) return [];
-    const data = await getOuvragesByMetierAndEntreprise(current.metier.id, entrepriseId);
-    setOuvrages(data || []);
+    const kind = current.catalogueKind || catalogueKind;
+    const data = await loadCatalogItems(current.metier.id, kind);
+    setCatalogItems(data || []);
     return data || [];
-  }, [entrepriseId]);
+  }, [entrepriseId, catalogueKind, loadCatalogItems]);
 
-  const handleOuvrageCreated = async ({ ouvrage, ouvrageUnite }) => {
-    await reloadOuvragesForDraftMetier();
+  const handleCatalogItemCreated = async ({ ouvrage, ouvrageUnite }) => {
+    await reloadCatalogForDraftMetier();
     if (!ouvrage) return;
     if (ouvrageUnite) {
       updateDraftDimensionFlow({ ouvrage, ouvrageUnite });
       refreshDraft();
-      setUnitesPrix([]);
       setStep('dimensions');
       return;
     }
-    await handleChooseOuvrage(ouvrage);
+    await handleChooseCatalogItem(ouvrage);
   };
 
   const handleSaveLine = async (payload) => {
@@ -238,6 +324,7 @@ export default function NouvelleDimensionScreen({
         metier_nom: current.metier?.nom,
         nom_unite: current.ouvrageUnite?.nom_unite,
         ind_dimension: current.ouvrageUnite?.ind_dimension ?? 0,
+        catalogue_kind: current.catalogueKind || 'ouvrage',
         ouvrage_unite_id: current.ouvrageUnite?.ouvrage_unite_id,
         prix_unitaire_applique: prixUnitaireApplique,
         montant: computeMontantLigneReleve({
@@ -267,11 +354,17 @@ export default function NouvelleDimensionScreen({
     const context = await getOuvrageUniteContextLocal(ligne.ouvrage_unite_id);
     if (!context) return;
 
+    const catalogueKind =
+      ligne.catalogue_kind ||
+      (Number(context.ouvrage?.ind_article) === 1 ? 'article' : 'ouvrage');
+
     updateDraftDimensionFlow({
       metier: context.metier,
       ouvrage: context.ouvrage,
       ouvrageUnite: context.ouvrageUnite,
+      catalogueKind,
     });
+    setCatalogueKind(catalogueKind);
     setEditingLigneId(ligne.id);
     refreshDraft();
     setStep('dimensions');
@@ -326,15 +419,19 @@ export default function NouvelleDimensionScreen({
   const handleNouvelOuvrage = () => {
     updateDraftDimensionFlow({ ouvrage: null, ouvrageUnite: null });
     refreshDraft();
-    setUnitesPrix([]);
     setStep('ouvrage');
   };
 
   const handleNouveauMetier = () => {
-    updateDraftDimensionFlow({ metier: null, ouvrage: null, ouvrageUnite: null });
+    updateDraftDimensionFlow({
+      metier: null,
+      ouvrage: null,
+      ouvrageUnite: null,
+      catalogueKind: 'ouvrage',
+    });
+    setCatalogueKind('ouvrage');
     refreshDraft();
-    setOuvrages([]);
-    setUnitesPrix([]);
+    setCatalogItems([]);
     setStep('metier');
   };
 
@@ -471,60 +568,50 @@ export default function NouvelleDimensionScreen({
           <Text variant="titleMedium" style={styles.sectionTitle}>
             {draft?.metier?.nom}
           </Text>
-          {loadingOuvrages ? (
+          <CatalogueKindToggle value={catalogueKind} onChange={handleCatalogueKindChange} />
+          {loadingCatalog ? (
             <LosangeLogoLoader size="large" containerStyle={styles.loader} />
-          ) : ouvragesSorted.length === 0 ? (
+          ) : catalogItemsSorted.length === 0 ? (
             <Text style={styles.infoText}>
               {canCreateOuvrage
-                ? 'Aucun ouvrage pour ce métier. Utilisez + pour en créer un.'
-                : "Aucun ouvrage pour votre entreprise. Synchronisez le catalogue ou demandez à un admin d'en ajouter."}
+                ? `Aucun ${catalogueLabel} pour ce métier. Utilisez + pour en créer un.`
+                : `Aucun ${catalogueLabel} pour votre entreprise. Synchronisez le catalogue ou demandez à un admin d'en ajouter.`}
             </Text>
           ) : (
             <View style={styles.choiceList}>
-              {ouvragesSorted.map((ouvrage) => (
+              {catalogItemsSorted.map((item) => (
                 <MobileButton
-                  key={ouvrage.id}
-                  mode={draft?.ouvrage?.id === ouvrage.id ? 'contained' : 'outlined'}
-                  onPress={() => handleChooseOuvrage(ouvrage)}
+                  key={item.id}
+                  mode={draft?.ouvrage?.id === item.id ? 'contained' : 'outlined'}
+                  onPress={() => handleChooseCatalogItem(item)}
                   style={styles.choiceButton}
                   contentStyle={styles.choiceButtonContent}
-                  buttonColor={draft?.ouvrage?.id === ouvrage.id ? chantierColors.primary : chantierColors.surface}
-                  textColor={draft?.ouvrage?.id === ouvrage.id ? '#FFFFFF' : chantierColors.text}
+                  buttonColor={draft?.ouvrage?.id === item.id ? chantierColors.primary : chantierColors.surface}
+                  textColor={draft?.ouvrage?.id === item.id ? '#FFFFFF' : chantierColors.text}
                 >
-                  {ouvrage.nom}
+                  {formatCatalogItemLabel(item)}
                 </MobileButton>
               ))}
             </View>
           )}
 
-          {unitesPrix.length > 1 && (
-            <View style={styles.uniteSection}>
-              <Text variant="titleMedium" style={styles.sectionTitle}>
-                Unité
-              </Text>
-              <View style={styles.chipWrap}>
-                {unitesPrix.map((item) => (
-                  <Chip
-                    key={item.ouvrage_unite_id}
-                    selected={draft?.ouvrageUnite?.ouvrage_unite_id === item.ouvrage_unite_id}
-                    onPress={() => handleChooseUnite(item)}
-                    style={styles.chip}
-                    selectedColor={chantierColors.success}
-                  >
-                    {item.nom} ({item.formule})
-                  </Chip>
-                ))}
-              </View>
-            </View>
-          )}
         </ScrollView>
+        <ChoixUniteModal
+          visible={choixUniteModal.visible}
+          ouvrageNom={formatCatalogItemLabel(choixUniteModal.ouvrage || {})}
+          unites={choixUniteModal.unites}
+          onDismiss={handleDismissChoixUniteModal}
+          onSelect={handleChooseUniteFromModal}
+        />
         <FlowBackFab onPress={() => setStep('metier')} smallCountBelow={fabSmallCount} />
         {canCreateOuvrage ? (
           <FlowSmallFab
             icon="plus"
             tierFromBottom={0}
             color={flowFabColors.primary}
-            onPress={() => setAddOuvrageModalVisible(true)}
+            onPress={() =>
+              isArticleMode ? setAddArticleModalVisible(true) : setAddOuvrageModalVisible(true)
+            }
             disabled={!draft?.metier}
           />
         ) : null}
@@ -532,10 +619,19 @@ export default function NouvelleDimensionScreen({
           visible={addOuvrageModalVisible}
           metier={draft?.metier}
           entrepriseId={entrepriseId}
-          existingOuvrages={ouvrages}
+          existingOuvrages={isArticleMode ? [] : catalogItems}
           lockPrixUnitaireToOne={hidesPriceUi}
           onDismiss={() => setAddOuvrageModalVisible(false)}
-          onCreated={handleOuvrageCreated}
+          onCreated={handleCatalogItemCreated}
+        />
+        <AjouterArticleModal
+          visible={addArticleModalVisible}
+          metier={draft?.metier}
+          entrepriseId={entrepriseId}
+          existingArticles={isArticleMode ? catalogItems : []}
+          lockPrixUnitaireToOne={hidesPriceUi}
+          onDismiss={() => setAddArticleModalVisible(false)}
+          onCreated={handleCatalogItemCreated}
         />
       </>
     );
@@ -547,6 +643,7 @@ export default function NouvelleDimensionScreen({
       ? {
           largeur: editingLigne.largeur,
           hauteur: editingLigne.hauteur,
+          profondeur: editingLigne.profondeur,
           nombre: editingLigne.nombre,
           note: editingLigne.note,
           prix_unitaire_applique: editingLigne.prix_unitaire_applique,
@@ -592,10 +689,15 @@ export default function NouvelleDimensionScreen({
 
   const handleContinuerRecap = () => {
     setEditingLigneId(null);
-    updateDraftDimensionFlow({ metier: null, ouvrage: null, ouvrageUnite: null });
+    updateDraftDimensionFlow({
+      metier: null,
+      ouvrage: null,
+      ouvrageUnite: null,
+      catalogueKind: 'ouvrage',
+    });
+    setCatalogueKind('ouvrage');
     refreshDraft();
-    setOuvrages([]);
-    setUnitesPrix([]);
+    setCatalogItems([]);
     setStep('metier');
   };
 
@@ -660,8 +762,8 @@ export default function NouvelleDimensionScreen({
   const screenTitle =
     step === 'recap'
       ? 'Récapitulatif'
-      : step === 'dimensions' && draft?.ouvrage?.nom
-        ? draft.ouvrage.nom
+      : step === 'dimensions'
+        ? dimensionsScreenTitle
         : 'Nouveau relevé';
 
   const stepSubtitle =

@@ -86,8 +86,36 @@ CREATE TABLE IF NOT EXISTS metiers (
   nom TEXT NOT NULL,
   abbrev TEXT,
   icon TEXT,
+  entreprise_id TEXT REFERENCES entreprises (id) ON DELETE CASCADE,
+  supprime_le TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
-  mis_a_jour_le TIMESTAMPTZ DEFAULT now()
+  mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
+  _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
+);
+
+CREATE TABLE IF NOT EXISTS metiers_entreprise (
+  entreprise_id TEXT NOT NULL REFERENCES entreprises (id) ON DELETE CASCADE,
+  metier_id TEXT NOT NULL REFERENCES metiers (id) ON DELETE CASCADE,
+  ordre INTEGER NOT NULL DEFAULT 0,
+  supprime_le TIMESTAMPTZ,
+  ind_actif SMALLINT NOT NULL DEFAULT 1 CHECK (ind_actif IN (0, 1)),
+  cree_le TIMESTAMPTZ DEFAULT now(),
+  mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
+  _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1)),
+  PRIMARY KEY (entreprise_id, metier_id)
+);
+
+CREATE TABLE IF NOT EXISTS fournisseurs (
+  id TEXT PRIMARY KEY,
+  metier_id TEXT NOT NULL REFERENCES metiers (id) ON DELETE CASCADE,
+  entreprise_id TEXT NOT NULL REFERENCES entreprises (id) ON DELETE CASCADE,
+  nom TEXT NOT NULL,
+  telephone_1 TEXT,
+  telephone_2 TEXT,
+  supprime_le TIMESTAMPTZ,
+  cree_le TIMESTAMPTZ DEFAULT now(),
+  mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
+  _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
 );
 
 CREATE TABLE IF NOT EXISTS ouvrages (
@@ -95,7 +123,12 @@ CREATE TABLE IF NOT EXISTS ouvrages (
   metier_id TEXT NOT NULL REFERENCES metiers (id) ON DELETE CASCADE,
   entreprise_id TEXT NOT NULL REFERENCES entreprises (id) ON DELETE CASCADE,
   nom TEXT NOT NULL,
+  ind_article SMALLINT NOT NULL DEFAULT 0 CHECK (ind_article IN (0, 1)),
+  fournisseur_id TEXT REFERENCES fournisseurs (id) ON DELETE SET NULL,
+  photo TEXT,
   supprime_le TIMESTAMPTZ,
+  ind_actif SMALLINT NOT NULL DEFAULT 1 CHECK (ind_actif IN (0, 1)),
+  ordre INTEGER NOT NULL DEFAULT 0,
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
@@ -130,6 +163,9 @@ CREATE TABLE IF NOT EXISTS releves (
   total_ht_facture DOUBLE PRECISION DEFAULT 0,
   tva_facture DOUBLE PRECISION DEFAULT 18,
   total_ttc_facture DOUBLE PRECISION DEFAULT 0,
+  remise DOUBLE PRECISION NOT NULL DEFAULT 0,
+  ind_tva SMALLINT NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1)),
+  status TEXT NOT NULL DEFAULT 'E' CHECK (status IN ('E', 'V', 'N')),
   note TEXT,
   supprime_le TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
@@ -181,9 +217,11 @@ BEGIN
     'clients',
     'chantiers',
     'metiers',
+    'metiers_entreprise',
     'ouvrages',
     'unites',
     'ouvrage_unites',
+    'fournisseurs',
     'releves',
     'ligne_releves'
   ]

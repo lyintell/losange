@@ -10,8 +10,10 @@ export const startDraftDimensionFlow = () => {
     metier: null,
     ouvrage: null,
     ouvrageUnite: null,
+    catalogueKind: 'ouvrage',
     lignes: [],
     uiStep: 'metier',
+    editMode: false,
   };
   return { ...draftDimensionFlow };
 };
@@ -54,7 +56,13 @@ export const clearDraftDimensionFlow = () => {
   draftDimensionFlow = null;
 };
 
-export const startDraftFromChantierEdit = ({ chantier, lignes = [], releveId = null }) => {
+export const startDraftFromChantierEdit = ({
+  chantier,
+  lignes = [],
+  releveId = null,
+  releveRemise = 0,
+  releveIndTva = 0,
+}) => {
   draftDimensionFlow = {
     id: `draft-edit-${chantier?.id || Date.now()}`,
     startedAt: new Date().toISOString(),
@@ -72,9 +80,13 @@ export const startDraftFromChantierEdit = ({ chantier, lignes = [], releveId = n
       photo_3: chantier?.photo_3 || null,
     },
     releveId: releveId || lignes[0]?.releve_id || null,
+    releveRemise: Number(releveRemise) || 0,
+    releveIndTva: Number(releveIndTva) === 1 ? 1 : 0,
+    editMode: true,
     metier: null,
     ouvrage: null,
     ouvrageUnite: null,
+    catalogueKind: 'ouvrage',
     lignes: lignes.map((ligne) => ({
       id: ligne.id,
       ouvrage_unite_id: ligne.ouvrage_unite_id,

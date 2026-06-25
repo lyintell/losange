@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, Pressable, RefreshControl, StyleSheet, View }
 import { Text } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import LigneNoteReadModal from '../components/terrain/LigneNoteReadModal';
+import ReleveStatutBadge from '../components/terrain/ReleveStatutBadge';
 import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
 import TerrainImageViewModal from '../components/terrain/TerrainImageViewModal';
 import { LignesReleveGroupedSections } from '../components/terrain/LignesReleveGroupedList';
@@ -12,13 +13,16 @@ import {
   clearLigneRelevePhotoLocal,
   getChantierWithClientByIdLocal,
   getEntrepriseByIdLocal,
-  getLignesByChantierLocal,
+  getLignesByReleveIdLocal,
   getLoggedInProfilViewLocal,
+  getReleveByIdLocal,
   updateChantierStatusLocal,
   updateLigneReleveIndCompleteLocal,
+  updateReleveStatusLocal,
 } from '../db/querries';
 import { CHANTIER_PHOTO_SLOTS, resolveTerrainImageUri } from '../db/terrainImageStorage';
-import { hidesPriceUiForRole } from '../utils/terrainAccess';
+import { canModifyReleveForProfil, hidesPriceUiForRole } from '../utils/terrainAccess';
+import { formatPriseParLine } from '../utils/releveDisplay';
 import {
   downloadDevisPdf,
   downloadDimensionsPdf,
@@ -57,9 +61,15 @@ function ExportActionButton({ icon, label, buttonColor, textColor = '#FFFFFF', l
   );
 }
 
-export default function ChantierDetails({ chantier, entrepriseId = null, onChantierUpdated }) {
+export default function ChantierDetails({
+  chantier,
+  releveId = null,
+  entrepriseId = null,
+  onChantierUpdated,
+}) {
   const [loading, setLoading] = useState(false);
   const [lignes, setLignes] = useState([]);
+  const [releve, setReleve] = useState(null);
   const [chantierData, setChantierData] = useState(chantier);
   const [showPrices, setShowPrices] = useState(false);
   const [exportOverlayVisible, setExportOverlayVisible] = useState(false);
@@ -68,6 +78,7 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onChant
   const [noteModal, setNoteModal] = useState({ visible: false, note: '', ouvrageNom: '' });
   const [hidesDevisUi, setHidesDevisUi] = useState(false);
   const [isProAccount, setIsProAccount] = useState(false);
+  const [canModifyReleve, setCanModifyReleve] = useState(false);
   const [imageModal, setImageModal] = useState({
     visible: false,
     uri: null,
@@ -95,25 +106,35 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onChant
   const devisPressCountRef = useRef(0);
   const devisPressTimerRef = useRef(null);
 
+  const releveMetaLine = formatPriseParLine(releve?.cree_le, releve?.prise_par_nom);
+
   const loadLignes = useCallback(async () => {
-    if (!chantier?.id) return;
+    if (!chantier?.id || !releveId) {
+      setLignes([]);
+      setReleve(null);
+      return;
+    }
+
     try {
       setLoading(true);
-      const [data, freshChantier] = await Promise.all([
-        getLignesByChantierLocal(chantier.id),
+      const [releveData, lignesData, freshChantier] = await Promise.all([
+        getReleveByIdLocal(releveId),
+        getLignesByReleveIdLocal(releveId),
         getChantierWithClientByIdLocal(chantier.id),
       ]);
-      setLignes(data || []);
+      setReleve(releveData || null);
+      setLignes(lignesData || []);
       if (freshChantier) {
         setChantierData(freshChantier);
       }
     } catch (error) {
       console.error('Erreur chargement lignes chantier:', error);
       setLignes([]);
+      setReleve(null);
     } finally {
       setLoading(false);
     }
-  }, [chantier?.id]);
+  }, [chantier?.id, releveId]);
 
   useEffect(() => {
     loadLignes();
@@ -125,6 +146,7 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onChant
         const profil = await getLoggedInProfilViewLocal();
         setHidesDevisUi(hidesPriceUiForRole(profil?.role));
         setIsProAccount(Boolean(profil?.is_pro));
+        setCanModifyReleve(canModifyReleveForProfil(profil, releve));
         if (hidesPriceUiForRole(profil?.role)) {
           setShowPrices(false);
         }
@@ -132,10 +154,11 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onChant
         console.error('Erreur chargement acces chantier:', error);
         setHidesDevisUi(false);
         setIsProAccount(false);
+        setCanModifyReleve(false);
       }
     };
     loadAccess();
-  }, []);
+  }, [releve]);
 
   useEffect(
     () => () => {
@@ -257,6 +280,23 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onChant
     setExportOverlayVisible(true);
   };
 
+  const handleReleveStatusChange = async (nextStatus) => {
+    if (!releveId || !chantier?.id) return;
+
+    try {
+      const savedStatus = await updateReleveStatusLocal(releveId, nextStatus);
+      setReleve((prev) => (prev ? { ...prev, status: savedStatus } : prev));
+      const freshChantier = await getChantierWithClientByIdLocal(chantier.id);
+      if (freshChantier) {
+        setChantierData(freshChantier);
+        onChantierUpdated?.(freshChantier);
+      }
+    } catch (error) {
+      console.error('Erreur mise a jour status releve:', error);
+      Alert.alert('Modification refusée', error.message || 'Action impossible.');
+    }
+  };
+
   const closeExportOverlay = () => {
     if (exporting) return;
     setExportOverlayVisible(false);
@@ -278,7 +318,12 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onChant
     if (exportOverlayMode === 'pdf') {
       return generateDimensionsPdfFile({ entreprise, chantier, lignes });
     }
-    return generateDevisPdfFile({ entreprise, chantier, lignes });
+    return generateDevisPdfFile({
+      entreprise,
+      chantier,
+      lignes,
+      releve,
+    });
   };
 
   const runExportDownload = async () => {
@@ -351,6 +396,26 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onChant
         <Text variant="bodyMedium" style={styles.subTitle}>
           Client : {chantier?.client_nom || 'Non renseigné'}
         </Text>
+        {releveMetaLine ? (
+          <View style={styles.releveMetaRow}>
+            <Text variant="bodyMedium" style={styles.releveMeta}>
+              {releveMetaLine}
+            </Text>
+            <ReleveStatutBadge
+              status={releve?.status}
+              disabled={!canModifyReleve}
+              onStatusChange={handleReleveStatusChange}
+            />
+          </View>
+        ) : releve ? (
+          <View style={styles.releveMetaRow}>
+            <ReleveStatutBadge
+              status={releve?.status}
+              disabled={!canModifyReleve}
+              onStatusChange={handleReleveStatusChange}
+            />
+          </View>
+        ) : null}
       </View>
 
       <LignesReleveGroupedSections
@@ -399,7 +464,7 @@ export default function ChantierDetails({ chantier, entrepriseId = null, onChant
             </View>
           ) : (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Aucune dimension enregistrée pour ce chantier.</Text>
+              <Text style={styles.emptyText}>Aucune dimension enregistrée pour ce relevé.</Text>
             </View>
           )
         }
@@ -487,7 +552,19 @@ const styles = StyleSheet.create({
   subTitle: {
     color: chantierColors.muted,
     marginTop: 4,
+  },
+  releveMeta: {
+    color: chantierColors.muted,
+    flex: 1,
+    fontSize: 13,
+    marginRight: 8,
+  },
+  releveMetaRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginBottom: 8,
+    marginTop: 2,
   },
   listContent: {
     gap: 10,

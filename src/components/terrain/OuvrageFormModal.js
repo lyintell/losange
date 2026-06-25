@@ -1,41 +1,79 @@
-import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { ActivityIndicator, Menu, Modal, Portal, Text, TextInput } from 'react-native-paper';
 import MobileButton from './MobileButton';
-import { getAllUnitesLocal, updateOuvrageLocal } from '../../db/querries';
+import { getAllUnitesLocal, searchFournisseursLocal, updateOuvrageLocal } from '../../db/querries';
 import { getMetierColor } from '../../utils/metierColors';
+import { formatUniteTypeLabel } from '../../utils/formatLigneMesures';
+import { formatUniteChoiceLabel } from '../../utils/formatUniteChoiceLabel';
 import { chantierColors } from '../../styles/theme';
 
-const formatUniteTypeLabel = (indDimension) =>
-  Number(indDimension) === 1 ? 'Dimension (L x H x N)' : 'Unitaire (n)';
-
-const formatUniteLabel = (unite) => unite.nom || 'Unité';
+const formatFournisseurSubtitle = (fournisseur) => {
+  const phones = [fournisseur.telephone_1, fournisseur.telephone_2].filter(Boolean);
+  return phones.join(' · ');
+};
 
 const mapCatalogueUnite = (catalogueUnite) => ({
   uniteId: catalogueUnite.id,
-  label: catalogueUnite.nom || 'Unité',
+  label: formatUniteChoiceLabel(catalogueUnite),
   formule: catalogueUnite.formule || '',
-  typeLabel: formatUniteTypeLabel(catalogueUnite.ind_dimension),
+  typeLabel: formatUniteTypeLabel(catalogueUnite.ind_dimension, catalogueUnite.formule),
 });
 
 const buildUniteDrafts = (unites) =>
   (unites || []).map((unite) => ({
     ouvrageUniteId: unite.ouvrage_unite_id,
     uniteId: unite.unite_id,
-    label: unite.nom || unite.nom_unite || 'Unité',
+    label: formatUniteChoiceLabel(unite),
     formule: unite.formule || '',
-    typeLabel: formatUniteTypeLabel(unite.ind_dimension),
+    typeLabel: formatUniteTypeLabel(unite.ind_dimension, unite.formule),
     prixUnitaire: String(unite.prix_unitaire ?? ''),
   }));
 
 export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, onSaved }) {
+  const isArticle = Number(ouvrage?.ind_article) === 1;
   const [catalogueUnites, setCatalogueUnites] = useState([]);
   const [loadingUnites, setLoadingUnites] = useState(false);
   const [nom, setNom] = useState('');
   const [uniteDrafts, setUniteDrafts] = useState([]);
   const [openMenuForId, setOpenMenuForId] = useState(null);
+  const [fournisseurNom, setFournisseurNom] = useState('');
+  const [selectedFournisseurId, setSelectedFournisseurId] = useState(null);
+  const [fournisseurSearchResults, setFournisseurSearchResults] = useState([]);
+  const [searchingFournisseurs, setSearchingFournisseurs] = useState(false);
+  const [showFournisseurDropdown, setShowFournisseurDropdown] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  const runFournisseurSearch = useCallback(
+    async (query) => {
+      if (!isArticle || !ouvrage?.metier_id || !ouvrage?.entreprise_id || !query.trim()) {
+        setFournisseurSearchResults([]);
+        return;
+      }
+      try {
+        setSearchingFournisseurs(true);
+        const results = await searchFournisseursLocal(
+          ouvrage.metier_id,
+          ouvrage.entreprise_id,
+          query
+        );
+        setFournisseurSearchResults(results || []);
+      } catch (searchError) {
+        console.error('Erreur recherche fournisseurs:', searchError);
+        setFournisseurSearchResults([]);
+      } finally {
+        setSearchingFournisseurs(false);
+      }
+    },
+    [isArticle, ouvrage?.metier_id, ouvrage?.entreprise_id]
+  );
+
+  useEffect(() => {
+    if (!visible || !isArticle || !showFournisseurDropdown) return undefined;
+    const timer = setTimeout(() => runFournisseurSearch(fournisseurNom), 300);
+    return () => clearTimeout(timer);
+  }, [fournisseurNom, isArticle, runFournisseurSearch, showFournisseurDropdown, visible]);
 
   useEffect(() => {
     if (!visible) return undefined;
@@ -44,6 +82,10 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
     setUniteDrafts(buildUniteDrafts(unites));
     setOpenMenuForId(null);
     setError('');
+    setFournisseurNom(ouvrage?.fournisseur_nom || '');
+    setSelectedFournisseurId(ouvrage?.fournisseur_id || null);
+    setFournisseurSearchResults([]);
+    setShowFournisseurDropdown(false);
 
     const load = async () => {
       setLoadingUnites(true);
@@ -81,10 +123,23 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
     setOpenMenuForId(null);
   };
 
+  const handleSelectFournisseur = (fournisseur) => {
+    setSelectedFournisseurId(fournisseur.id);
+    setFournisseurNom(fournisseur.nom || '');
+    setFournisseurSearchResults([]);
+    setShowFournisseurDropdown(false);
+  };
+
+  const handleFournisseurNomChange = (value) => {
+    setFournisseurNom(value);
+    setSelectedFournisseurId(null);
+    setShowFournisseurDropdown(true);
+  };
+
   const handleSave = async () => {
     if (!ouvrage?.id) return;
     if (!nom.trim()) {
-      setError("Saisissez le nom de l'ouvrage.");
+      setError(isArticle ? "Saisissez le nom de l'article." : "Saisissez le nom de l'ouvrage.");
       return;
     }
     if (uniteDrafts.some((draft) => !draft.uniteId)) {
@@ -95,7 +150,7 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
     setSaving(true);
     setError('');
     try {
-      const result = await updateOuvrageLocal({
+      const payload = {
         ouvrageId: ouvrage.id,
         nom: nom.trim(),
         unites: uniteDrafts.map((draft) => ({
@@ -103,7 +158,14 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
           uniteId: draft.uniteId,
           prixUnitaire: draft.prixUnitaire,
         })),
-      });
+      };
+
+      if (isArticle) {
+        payload.fournisseurId = selectedFournisseurId;
+        payload.fournisseurNom = fournisseurNom.trim() || null;
+      }
+
+      const result = await updateOuvrageLocal(payload);
       onSaved?.(result);
       onDismiss?.();
     } catch (saveError) {
@@ -116,10 +178,15 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
   return (
     <Portal>
       <Modal visible={visible} onDismiss={onDismiss} contentContainerStyle={styles.modal}>
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <Text variant="titleLarge" style={styles.title}>
-            Modifier l'ouvrage
+            {isArticle ? "Modifier l'article" : "Modifier l'ouvrage"}
           </Text>
+
+          <View style={styles.contextBlock}>
+            <Text style={styles.contextLabel}>Type</Text>
+            <Text style={styles.contextValue}>{isArticle ? 'Article' : 'Ouvrage'}</Text>
+          </View>
 
           <View style={styles.contextBlock}>
             <Text style={styles.contextLabel}>Métier</Text>
@@ -130,11 +197,54 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
 
           <TextInput
             mode="outlined"
-            label="Nom de l'ouvrage"
+            label={isArticle ? "Nom de l'article" : "Nom de l'ouvrage"}
             value={nom}
             onChangeText={setNom}
             style={styles.input}
           />
+
+          {isArticle ? (
+            <>
+              <TextInput
+                mode="outlined"
+                label="Nom du fournisseur (optionnel)"
+                placeholder="Nom ou téléphone"
+                value={fournisseurNom}
+                onChangeText={handleFournisseurNomChange}
+                style={styles.input}
+                right={
+                  searchingFournisseurs ? (
+                    <TextInput.Icon
+                      icon={() => <ActivityIndicator size={18} color={chantierColors.primary} />}
+                    />
+                  ) : undefined
+                }
+              />
+
+              {showFournisseurDropdown && fournisseurSearchResults.length > 0 ? (
+                <View style={styles.searchResults}>
+                  {fournisseurSearchResults.map((fournisseur) => (
+                    <Pressable
+                      key={fournisseur.id}
+                      onPress={() => handleSelectFournisseur(fournisseur)}
+                      style={({ pressed }) => [
+                        styles.searchResultRow,
+                        selectedFournisseurId === fournisseur.id && styles.searchResultRowSelected,
+                        pressed && styles.searchResultPressed,
+                      ]}
+                    >
+                      <Text style={styles.searchResultName}>{fournisseur.nom}</Text>
+                      {formatFournisseurSubtitle(fournisseur) ? (
+                        <Text style={styles.searchResultPhone}>
+                          {formatFournisseurSubtitle(fournisseur)}
+                        </Text>
+                      ) : null}
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
+            </>
+          ) : null}
 
           {uniteDrafts.length === 0 ? (
             <Text style={styles.mutedText}>Aucune unité associée.</Text>
@@ -145,7 +255,9 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
 
               return (
                 <View key={draft.ouvrageUniteId} style={styles.uniteBlock}>
-                  <Text style={styles.uniteTitle}>Ouvrage unité</Text>
+                  <Text style={styles.uniteTitle}>
+                    {isArticle ? 'Unité article' : 'Ouvrage unité'}
+                  </Text>
 
                   {loadingUnites ? (
                     <ActivityIndicator
@@ -168,7 +280,9 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
                           style={styles.uniteButton}
                           contentStyle={styles.uniteButtonContent}
                         >
-                          {selectedUnite ? formatUniteLabel(selectedUnite) : "Choisir l'unité"}
+                          {selectedUnite
+                            ? formatUniteChoiceLabel(selectedUnite)
+                            : draft.label || "Choisir l'unité"}
                         </MobileButton>
                       }
                     >
@@ -177,7 +291,7 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
                           <Menu.Item
                             key={catalogueUnite.id}
                             onPress={() => handleUniteSelect(draft.ouvrageUniteId, catalogueUnite)}
-                            title={formatUniteLabel(catalogueUnite)}
+                            title={formatUniteChoiceLabel(catalogueUnite)}
                           />
                         ))}
                       </ScrollView>
@@ -244,10 +358,41 @@ const styles = StyleSheet.create({
   contextValue: {
     fontSize: 16,
     fontWeight: '700',
+    color: chantierColors.text,
   },
   input: {
     backgroundColor: chantierColors.surface,
     marginBottom: 12,
+  },
+  searchResults: {
+    borderWidth: 1,
+    borderColor: chantierColors.border,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: chantierColors.surface,
+    marginBottom: 12,
+  },
+  searchResultRow: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: chantierColors.border,
+  },
+  searchResultRowSelected: {
+    backgroundColor: '#FFF5F1',
+  },
+  searchResultPressed: {
+    backgroundColor: '#FFF5F1',
+  },
+  searchResultName: {
+    color: chantierColors.text,
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  searchResultPhone: {
+    color: chantierColors.muted,
+    marginTop: 2,
+    fontSize: 14,
   },
   uniteBlock: {
     borderWidth: 1,

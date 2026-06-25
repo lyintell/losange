@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { Card, Searchbar, Text } from 'react-native-paper';
 import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
+import TerrainSyncOverlay from '../components/terrain/TerrainSyncOverlay';
 import { FlowSmallFab, getFabColumnPadding } from '../components/terrain/TerrainFlowFabs';
+import { useTerrainSyncRefresh } from '../hooks/useTerrainSyncRefresh';
 import { getClientsByEntrepriseLocal, getLoggedInProfilViewLocal } from '../db/querries';
 import { canManageClients } from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
@@ -12,8 +14,13 @@ const formatClientPhoneLine = (name, phone) => {
   return parts.length ? parts.join(' / ') : '—';
 };
 
-export default function ListeClientsScreen({ entrepriseId, refreshToken = 0, onClientPress }) {
-  const [loading, setLoading] = useState(false);
+export default function ListeClientsScreen({
+  entrepriseId,
+  refreshToken = 0,
+  onClientPress,
+  onSyncFromSupabase,
+}) {
+  const [initialLoading, setInitialLoading] = useState(true);
   const [clients, setClients] = useState([]);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -25,19 +32,34 @@ export default function ListeClientsScreen({ entrepriseId, refreshToken = 0, onC
       return;
     }
     try {
-      setLoading(true);
       const data = await getClientsByEntrepriseLocal(entrepriseId);
       setClients(data || []);
     } catch (error) {
       console.error('Erreur chargement clients:', error);
       setClients([]);
-    } finally {
-      setLoading(false);
     }
   }, [entrepriseId]);
 
+  const { syncing, handleRefresh } = useTerrainSyncRefresh({
+    onSyncFromSupabase,
+    onReload: loadClients,
+  });
+
   useEffect(() => {
-    loadClients();
+    let cancelled = false;
+
+    const load = async () => {
+      setInitialLoading(true);
+      await loadClients();
+      if (!cancelled) {
+        setInitialLoading(false);
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, [loadClients, refreshToken]);
 
   useEffect(() => {
@@ -81,6 +103,7 @@ export default function ListeClientsScreen({ entrepriseId, refreshToken = 0, onC
 
   return (
     <View style={styles.container}>
+      <TerrainSyncOverlay visible={syncing} />
       <View style={styles.header}>
         <Text variant="headlineSmall" style={styles.title}>
           Clients
@@ -90,7 +113,7 @@ export default function ListeClientsScreen({ entrepriseId, refreshToken = 0, onC
       <FlatList
         data={filteredClients}
         keyExtractor={(item) => item.id}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadClients} />}
+        refreshControl={<RefreshControl refreshing={syncing} onRefresh={handleRefresh} />}
         contentContainerStyle={[styles.listContent, { paddingBottom: getFabColumnPadding(1) + 24 }]}
         renderItem={({ item }) => (
           <Pressable
@@ -111,7 +134,7 @@ export default function ListeClientsScreen({ entrepriseId, refreshToken = 0, onC
           </Pressable>
         )}
         ListEmptyComponent={
-          loading ? (
+          initialLoading ? (
             <View style={styles.loadingState}>
               <LosangeLogoLoader size="large" />
             </View>

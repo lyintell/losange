@@ -1,5 +1,5 @@
 import { assertSupabaseConfigured, isSupabaseConfigured, supabase } from './supabaseClient';
-import { ensureLocalDatabaseReady, tableHasColumn } from './localDb';
+import { ensureLocalDatabaseReady, runWithLocalDatabase, tableHasColumn } from './localDb';
 import {
   enforceEntrepriseExpiryLocal,
   forceLogoutInactiveEntreprise,
@@ -19,7 +19,13 @@ import {
 import { hasInternetConnection } from '../utils/network';
 
 const ENTREPRISE_PUSH_TABLES = ['entreprises'];
-const CATALOGUE_PUSH_TABLES = ['ouvrages', 'ouvrage_unites'];
+const CATALOGUE_PUSH_TABLES = [
+  'metiers',
+  'metiers_entreprise',
+  'fournisseurs',
+  'ouvrages',
+  'ouvrage_unites',
+];
 const TRANSACTIONAL_TABLES = ['clients', 'chantiers', 'releves', 'ligne_releves'];
 const PUSH_ORDER = [...ENTREPRISE_PUSH_TABLES, ...CATALOGUE_PUSH_TABLES, ...TRANSACTIONAL_TABLES];
 
@@ -115,6 +121,27 @@ export const getPendingSyncCount = async () => {
 const selectUnsyncedRows = async (db, tableName, entrepriseId) => {
   if (tableName === 'entreprises') {
     return db.getAllAsync(`SELECT * FROM entreprises WHERE id = ? AND _synced = 0;`, [entrepriseId]);
+  }
+
+  if (tableName === 'metiers') {
+    return db.getAllAsync(
+      `SELECT * FROM metiers WHERE entreprise_id = ? AND _synced = 0;`,
+      [entrepriseId]
+    );
+  }
+
+  if (tableName === 'metiers_entreprise') {
+    return db.getAllAsync(
+      `SELECT * FROM metiers_entreprise WHERE entreprise_id = ? AND _synced = 0;`,
+      [entrepriseId]
+    );
+  }
+
+  if (tableName === 'fournisseurs') {
+    return db.getAllAsync(
+      `SELECT * FROM fournisseurs WHERE entreprise_id = ? AND _synced = 0;`,
+      [entrepriseId]
+    );
   }
 
   if (tableName === 'ouvrages') {
@@ -277,6 +304,22 @@ export const collectPushPayload = async (entrepriseId) => {
 
 const markTableSynced = async (db, tableName, rows = []) => {
   if (!rows.length) return;
+
+  if (tableName === 'metiers_entreprise') {
+    for (const row of rows) {
+      if (!row?.entreprise_id || !row?.metier_id) continue;
+      await db.runAsync(
+        `
+        UPDATE metiers_entreprise
+        SET _synced = 1
+        WHERE entreprise_id = ? AND metier_id = ?;
+        `,
+        [row.entreprise_id, row.metier_id]
+      );
+    }
+    return;
+  }
+
   const ids = rows.map((row) => row.id).filter(Boolean);
   if (!ids.length) return;
 
@@ -342,6 +385,7 @@ export const runTerrainSyncFreePushPull = async ({ skipPull = false } = {}) => {
     entreprises: [],
     ouvrages: [],
     ouvrage_unites: [],
+    fournisseurs: [],
     clients: [],
     chantiers: [],
     releves: [],
@@ -404,11 +448,12 @@ export const runTerrainSyncFreePushPull = async ({ skipPull = false } = {}) => {
       );
     }
 
-    const db = await ensureLocalDatabaseReady();
-    await db.withTransactionAsync(async () => {
-      for (const tableName of FREE_PUSH_ORDER) {
-        await markTableSynced(db, tableName, push[tableName] || []);
-      }
+    await runWithLocalDatabase(async (db) => {
+      await db.withTransactionAsync(async () => {
+        for (const tableName of FREE_PUSH_ORDER) {
+          await markTableSynced(db, tableName, push[tableName] || []);
+        }
+      });
     });
 
     if (!skipPull && data.pull) {
@@ -474,6 +519,7 @@ export const refreshCatalogueFromCloudLocal = async () => {
     entreprises: [],
     ouvrages: [],
     ouvrage_unites: [],
+    fournisseurs: [],
     clients: [],
     chantiers: [],
     releves: [],
@@ -566,6 +612,7 @@ export const runTerrainSyncPushPull = async ({ skipPull = false } = {}) => {
     entreprises: [],
     ouvrages: [],
     ouvrage_unites: [],
+    fournisseurs: [],
     clients: [],
     chantiers: [],
     releves: [],
@@ -634,11 +681,12 @@ export const runTerrainSyncPushPull = async ({ skipPull = false } = {}) => {
       );
     }
 
-    const db = await ensureLocalDatabaseReady();
-    await db.withTransactionAsync(async () => {
-      for (const tableName of PUSH_ORDER) {
-        await markTableSynced(db, tableName, push[tableName] || []);
-      }
+    await runWithLocalDatabase(async (db) => {
+      await db.withTransactionAsync(async () => {
+        for (const tableName of PUSH_ORDER) {
+          await markTableSynced(db, tableName, push[tableName] || []);
+        }
+      });
     });
     await clearPendingCloudDeletes(entrepriseId, deletePayload);
 
@@ -723,6 +771,7 @@ export const runTerrainSyncPullOnly = async () => {
         motDePasse: device.mot_de_passe,
         push: {
           entreprises: [],
+          fournisseurs: [],
           ouvrages: [],
           ouvrage_unites: [],
           clients: [],

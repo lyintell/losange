@@ -9,55 +9,77 @@ import {
   getMainFabBottom,
 } from '../components/terrain/TerrainFlowFabs';
 import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
+import ChantierStatutBadge from '../components/terrain/ChantierStatutBadge';
+import TerrainSyncOverlay from '../components/terrain/TerrainSyncOverlay';
+import { useTerrainSyncRefresh } from '../hooks/useTerrainSyncRefresh';
 import { canCurrentUserModifyChantierLocal, getChantiersWithClientLocal, getLoggedInProfilViewLocal, updateChantierStatusLocal } from '../db/querries';
 import { canCreateReleveOrLigne } from '../utils/terrainAccess';
+import { formatPriseParLine, formatReleveCountLabel } from '../utils/releveDisplay';
 import { chantierColors } from '../styles/theme';
-import {
-  getChantierStatusColor,
-  getChantierStatusLabel,
-  getNextChantierStatusOnDoubleTap,
-  getNextChantierStatusOnTripleTap,
-} from '../utils/chantierStatus';
 
-const MULTI_PRESS_DELAY_MS = 350;
+const CARD_PRESS_DELAY_MS = 350;
 
 const formatClientPhoneLine = (name, phone) => {
   const parts = [name, phone].filter(Boolean);
   return parts.length ? parts.join(' / ') : 'Non renseigné';
 };
 
-const formatPriseLe = (dateValue) => {
-  if (!dateValue) return '';
-  const normalized = String(dateValue).includes('T')
-    ? dateValue
-    : String(dateValue).replace(' ', 'T');
-  const parsed = new Date(normalized);
-  if (Number.isNaN(parsed.getTime())) return '';
-  return parsed.toLocaleString('fr-FR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-};
+function ChantierListCard({ item, onPress, onDelete, onStatusChange }) {
+  const pressCountRef = useRef(0);
+  const pressTimerRef = useRef(null);
+  const releveCount = Number(item.releve_count) || 0;
+  const releveCountLabel = formatReleveCountLabel(releveCount);
+  const priseParLine = formatPriseParLine(item.prise_le, item.prise_par_nom);
+  const metaLine = releveCountLabel || priseParLine;
 
-const formatPriseParLine = (dateValue, priseParNom) => {
-  const date = formatPriseLe(dateValue);
-  const prisePar = String(priseParNom || '').trim();
-  if (date && prisePar) return `${date} (prise par ${prisePar})`;
-  if (date) return date;
-  if (prisePar) return `(prise par ${prisePar})`;
-  return '';
-};
+  useEffect(
+    () => () => {
+      if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+    },
+    []
+  );
 
-function StatutBadge({ statut }) {
-  const bgColor = getChantierStatusColor(statut);
-  const label = getChantierStatusLabel(statut);
+  const handleCardPress = () => {
+    pressCountRef.current += 1;
+    if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+    pressTimerRef.current = setTimeout(() => {
+      const pressCount = pressCountRef.current;
+      pressCountRef.current = 0;
+      pressTimerRef.current = null;
+
+      if (pressCount >= 2) {
+        onDelete?.(item);
+        return;
+      }
+
+      if (pressCount === 1) {
+        onPress?.(item);
+      }
+    }, CARD_PRESS_DELAY_MS);
+  };
+
   return (
-    <View style={[styles.badge, { backgroundColor: bgColor }]}>
-      <Text style={styles.badgeText}>{label}</Text>
-    </View>
+    <Card style={styles.card} mode="elevated">
+      <Card.Content>
+        <View style={styles.titleRow}>
+          <Pressable style={styles.cardPressArea} onPress={handleCardPress}>
+            <Text variant="titleMedium" style={styles.chantierName}>
+              {item.nom}
+            </Text>
+          </Pressable>
+          <ChantierStatutBadge
+            status={item.status || 'D'}
+            onStatusChange={(nextStatus) => onStatusChange?.(item, nextStatus)}
+          />
+        </View>
+        <Pressable onPress={handleCardPress}>
+          <Text variant="bodyLarge" style={styles.clientLine} numberOfLines={1}>
+            {formatClientPhoneLine(item.client_nom, item.client_telephone_1)}
+          </Text>
+          {metaLine ? <Text style={styles.priseLeText}>{metaLine}</Text> : null}
+        </Pressable>
+      </Card.Content>
+    </Card>
   );
 }
 
@@ -78,34 +100,49 @@ const sortChantiersByPriseLeDesc = (rows) =>
 export default function ListeChantiers({
   onCreatePress,
   onChantierPress,
+  onDeleteChantier,
+  onSyncFromSupabase,
   entrepriseId = null,
   bottomOffset = 0,
   creating = false,
   refreshToken = 0,
 }) {
-  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [chantiers, setChantiers] = useState([]);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [canCreateReleve, setCanCreateReleve] = useState(true);
   const pulseAnim = React.useRef(new Animated.Value(1)).current;
-  const pressCountRef = useRef(0);
-  const pressTimerRef = useRef(null);
 
   const loadChantiers = useCallback(async () => {
     try {
-      setLoading(true);
       const data = await getChantiersWithClientLocal(entrepriseId);
       setChantiers(data || []);
     } catch (error) {
       console.error('Erreur chargement chantiers:', error);
-    } finally {
-      setLoading(false);
     }
   }, [entrepriseId]);
 
+  const { syncing, handleRefresh } = useTerrainSyncRefresh({
+    onSyncFromSupabase,
+    onReload: loadChantiers,
+  });
+
   useEffect(() => {
-    loadChantiers();
+    let cancelled = false;
+
+    const load = async () => {
+      setInitialLoading(true);
+      await loadChantiers();
+      if (!cancelled) {
+        setInitialLoading(false);
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, [loadChantiers, refreshToken]);
 
   useEffect(() => {
@@ -130,13 +167,6 @@ export default function ListeChantiers({
       cancelled = true;
     };
   }, []);
-
-  useEffect(
-    () => () => {
-      if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
-    },
-    []
-  );
 
   useEffect(() => {
     if (!canCreateReleve) return undefined;
@@ -181,37 +211,49 @@ export default function ListeChantiers({
       );
     } catch (error) {
       console.error('Erreur mise a jour status chantier:', error);
+      Alert.alert('Modification refusée', error.message || 'Action impossible.');
     }
   }, []);
 
-  const handleChantierPress = useCallback(
-    (chantier) => {
-      pressCountRef.current += 1;
-      if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+  const handleDeleteChantierPress = useCallback(
+    async (chantier) => {
+      if (!chantier?.id) return;
 
-      pressTimerRef.current = setTimeout(() => {
-        const pressCount = pressCountRef.current;
-        pressCountRef.current = 0;
-        pressTimerRef.current = null;
-
-        if (pressCount >= 3) {
-          const nextStatus = getNextChantierStatusOnTripleTap(chantier.status);
-          applyChantierStatus(chantier, nextStatus);
+      try {
+        if (!(await canCurrentUserModifyChantierLocal(chantier.id))) {
+          Alert.alert(
+            'Modification refusée',
+            "Vous ne pouvez pas supprimer un chantier que vous n'avez pas pris."
+          );
           return;
         }
+      } catch (error) {
+        console.error('Erreur verification suppression chantier:', error);
+        return;
+      }
 
-        if (pressCount === 2) {
-          const nextStatus = getNextChantierStatusOnDoubleTap(chantier.status);
-          applyChantierStatus(chantier, nextStatus);
-          return;
-        }
-
-        if (pressCount === 1) {
-          onChantierPress?.(chantier);
-        }
-      }, MULTI_PRESS_DELAY_MS);
+      Alert.alert(
+        'Supprimer',
+        `Voulez-vous supprimer le chantier "${chantier.nom || ''}" ?`,
+        [
+          { text: 'Non', style: 'cancel' },
+          {
+            text: 'Oui',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await onDeleteChantier?.(chantier);
+                setChantiers((prev) => prev.filter((item) => item.id !== chantier.id));
+              } catch (error) {
+                console.error('Erreur suppression chantier:', error);
+                Alert.alert('Erreur', error.message || 'Impossible de supprimer ce chantier.');
+              }
+            },
+          },
+        ]
+      );
     },
-    [applyChantierStatus, onChantierPress]
+    [onDeleteChantier]
   );
 
   const filteredChantiers = React.useMemo(() => {
@@ -231,6 +273,7 @@ export default function ListeChantiers({
 
   return (
     <View style={styles.container}>
+      <TerrainSyncOverlay visible={syncing} />
       <View style={styles.header}>
         <Text variant="headlineSmall" style={styles.title}>
           Chantiers
@@ -240,37 +283,21 @@ export default function ListeChantiers({
       <FlatList
         data={filteredChantiers}
         keyExtractor={(item) => item.id}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadChantiers} />}
+        refreshControl={<RefreshControl refreshing={syncing} onRefresh={handleRefresh} />}
         contentContainerStyle={[
           styles.listContent,
           { paddingBottom: getFabColumnPadding(canCreateReleve ? 1 : 0) + 24 },
         ]}
-        renderItem={({ item }) => {
-          const priseParLine = formatPriseParLine(item.prise_le, item.prise_par_nom);
-
-          return (
-            <Pressable onPress={() => handleChantierPress(item)}>
-              <Card style={styles.card} mode="elevated">
-                <Card.Content>
-                  <View style={styles.titleRow}>
-                    <Text variant="titleMedium" style={styles.chantierName}>
-                      {item.nom}
-                    </Text>
-                    <StatutBadge statut={item.status || 'D'} />
-                  </View>
-                  <Text variant="bodyLarge" style={styles.clientLine} numberOfLines={1}>
-                    {formatClientPhoneLine(item.client_nom, item.client_telephone_1)}
-                  </Text>
-                  {priseParLine ? (
-                    <Text style={styles.priseLeText}>{priseParLine}</Text>
-                  ) : null}
-                </Card.Content>
-              </Card>
-            </Pressable>
-          );
-        }}
+        renderItem={({ item }) => (
+          <ChantierListCard
+            item={item}
+            onPress={onChantierPress}
+            onDelete={handleDeleteChantierPress}
+            onStatusChange={applyChantierStatus}
+          />
+        )}
         ListEmptyComponent={
-          loading ? (
+          initialLoading ? (
             <View style={styles.loadingState}>
               <LosangeLogoLoader size="large" />
             </View>
@@ -368,8 +395,10 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 6,
   },
-  chantierName: {
+  cardPressArea: {
     flex: 1,
+  },
+  chantierName: {
     color: chantierColors.text,
     fontWeight: '800',
   },
@@ -382,15 +411,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     marginTop: 2,
-  },
-  badge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-  badgeText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
   },
   loadingState: {
     marginTop: 48,

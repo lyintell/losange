@@ -38,9 +38,3 @@ export const getNextChantierStatusOnDoubleTap = (currentStatus) => {
 
   return CHANTIER_STATUS_CYCLE[(index + 1) % CHANTIER_STATUS_CYCLE.length];
 };
-
-/** Triple-clic : tout statut -> Annulé ; depuis Annulé -> Relevé. */
-export const getNextChantierStatusOnTripleTap = (currentStatus) => {
-  const status = currentStatus || 'D';
-  return status === 'Z' ? 'D' : 'Z';
-};

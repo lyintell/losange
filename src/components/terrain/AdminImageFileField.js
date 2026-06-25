@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Image, Platform, StyleSheet, View } from 'react-native';
 import { Button, Text } from 'react-native-paper';
 import {
+  buildOuvragePhotoKey,
   buildChantierPhotoKey,
   buildEntrepriseLogoKey,
   buildLignePhotoKey,
@@ -153,6 +154,19 @@ export const uploadLignePhotoAdmin = async (entrepriseId, chantierId, ligneId, f
     storageKeyBase: buildLignePhotoKey(entrepriseId, chantierId, ligneId),
   });
 };
+
+export const uploadOuvragePhotoAdmin = async (entrepriseId, ouvrageId, file) => {
+  if (!entrepriseId || !ouvrageId || !file) {
+    throw new Error('Entreprise, ouvrage ou fichier manquant.');
+  }
+  return uploadAdminTerrainImageFile({
+    file,
+    storageKeyBase: buildOuvragePhotoKey(entrepriseId, ouvrageId),
+  });
+};
+
+/** @deprecated Utiliser uploadOuvragePhotoAdmin */
+export const uploadArticlePhotoAdmin = uploadOuvragePhotoAdmin;
 
 const styles = StyleSheet.create({
   wrap: {
