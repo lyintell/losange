@@ -4,9 +4,10 @@ import { Surface, Text } from 'react-native-paper';
 import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
 import OuvrageFormModal from '../components/terrain/OuvrageFormModal';
 import { FlowSmallFab, flowFabColors, getFabColumnPadding } from '../components/terrain/TerrainFlowFabs';
-import { deleteOuvrageLocal, getOuvrageByIdLocal, getUnitesEtPrixParOuvrage } from '../db/querries';
+import { deleteOuvrageLocal, getLoggedInProfilViewLocal, getOuvrageByIdLocal, getUnitesEtPrixParOuvrage } from '../db/querries';
 import { formatArticleNomAvecFournisseur, formatMontant, formatUniteTypeLabel } from '../utils/formatLigneMesures';
 import { getMetierColor } from '../utils/metierColors';
+import { canDeleteOuvrage, canEditOuvrageNomAndUnite } from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
 
 function InfoRow({ label, value, valueColor }) {
@@ -33,7 +34,34 @@ export default function OuvrageDetailsScreen({
   const [unites, setUnites] = useState([]);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [canDelete, setCanDelete] = useState(false);
+  const [canEditNomAndUnite, setCanEditNomAndUnite] = useState(false);
   const lastEditRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAccess = async () => {
+      try {
+        const profil = await getLoggedInProfilViewLocal();
+        if (!cancelled) {
+          setCanDelete(canDeleteOuvrage(profil));
+          setCanEditNomAndUnite(canEditOuvrageNomAndUnite(profil));
+        }
+      } catch (error) {
+        console.error('Erreur chargement acces ouvrage:', error);
+        if (!cancelled) {
+          setCanDelete(false);
+          setCanEditNomAndUnite(false);
+        }
+      }
+    };
+
+    loadAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadOuvrage = useCallback(async () => {
     if (!ouvrageId) {
@@ -76,7 +104,7 @@ export default function OuvrageDetailsScreen({
   };
 
   const handleDeletePress = () => {
-    if (!ouvrage?.id || deleting) return;
+    if (!canDelete || !ouvrage?.id || deleting) return;
     const isArticle = Number(ouvrage.ind_article) === 1;
     const kindLabel = isArticle ? 'article' : 'ouvrage';
 
@@ -170,7 +198,7 @@ export default function OuvrageDetailsScreen({
         </Surface>
       )}
 
-      {ouvrage ? (
+      {ouvrage && canDelete ? (
         <FlowSmallFab
           icon="delete"
           tierFromBottom={0}
@@ -184,6 +212,7 @@ export default function OuvrageDetailsScreen({
         visible={editModalVisible}
         ouvrage={ouvrage}
         unites={unites}
+        editPriceOnly={!canEditNomAndUnite}
         onDismiss={() => setEditModalVisible(false)}
         onSaved={handleSaved}
       />

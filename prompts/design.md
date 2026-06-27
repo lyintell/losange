@@ -205,3 +205,6 @@ Dans card devis (liste) ajoute le badge status (avant Voir). Aussi dans le detai
 - Dans la liste des clients, affiche le nombre de chantiers, nombre total de devis
 - Dans la liste des chantiers, affiche le nombre total de nombre devis, nombre de devis validé, nombre de devis en attente
 
+- Dans PDF et Devis, separe par section. Si pas de section, ne mentionne rien.
+
+Dans le devis, separation section en ligne pleine. Separation metier sans ligne. Metier Centré

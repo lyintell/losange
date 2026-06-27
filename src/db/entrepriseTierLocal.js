@@ -1,7 +1,7 @@
 import { ensureLocalDatabaseReady } from './localDb';
 import { deleteImageFileLocal } from './terrainImageStorage';
 import { upsertRows } from './terrainSync';
-import { applyTerrainPullPayloadAccountOnly, mergeCatalogueFromPull } from './terrainSyncMerge';
+import { applyTerrainPullPayloadAccountOnly, mergeCatalogueFromPull, mergeTransactionalFromPull } from './terrainSyncMerge';
 import { FREE_TIER_LIMITS } from '../utils/freeTierLimits';
 
 const sortByMisAJourLeDesc = (rows) =>
@@ -347,8 +347,6 @@ export const syncTerrainBootstrapAccountLocal = async (payload) => {
     profil: payload?.profil,
     profils: payload?.profils,
   });
-  await mergeCatalogueFromPull({
-    metiers: payload?.metiers,
-    unites: payload?.unites,
-  });
+  await mergeCatalogueFromPull({ unites: payload?.unites });
+  await mergeTransactionalFromPull({ metiers: payload?.metiers }, { forceAll: true });
 };

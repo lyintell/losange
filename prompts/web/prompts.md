@@ -101,7 +101,15 @@ Plomberie et sanitaire
 Divers
 
 
+17. Persiste deux champ dans table entreprise (ind_admin_connecte_mobile et ind_metiers_preselectionnes).
+ind_admin_connecte_mobile = 1 des que 1 admin (au moins 1 si plusieurs admin) de l entreprise se connectera SUR mobile (pas webadmin).
+ind_metiers_preselectionnes = 1 des que 1 admin preselectionne les metiers pour une premiere fois.
+
+18. Je trouve que la table metier_entreprise et metier sont redondant. Les metiers doivent etre lie aux entreprise de toute facon. A la creation d une entreprise, a la premiere connexion de l admin (sur mobile), voici les actions suivantes:
+- ind_admin_connecte_mobile passe de 0 a 1
+- puis, il verra un pop up ou il devra selectionner (pas creation ici) les metiers pour son entreprise (a partir de la liste par defaut). Les comptes free peuvent choisir max 3.
+Les metiers sont alors cree pour ces entreprise dans la table metier en base (unique table maintenant assiciant le id de l entreprise avec ses metiers). Sur validation des metiers, alors ind_metiers_preselectionnes = 1 et acces a l ecran chantier.
 
 15. Deplace parametres juste en haut de profil.
 - Dans paramètres, permet de modifier les info de l'entreprise (comme dans mobile)
-- 
+- De meme que 

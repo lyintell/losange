@@ -1,6 +1,7 @@
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { computeChantierStatusFromReleves } from '@/lib/chantiers/chantierStatusFromReleves';
 import { normalizeReleveRow } from '@/lib/chantiers/releveNormalize';
+import { withReleveNumbers } from '@/lib/chantiers/releveNumber';
 import { normalizeReleveStatus } from '@/lib/chantiers/releveStatus';
 
 const ACTIVE_FILTER = (query) => query.is('supprime_le', null);
@@ -41,7 +42,7 @@ async function fetchRelevesByChantierIds(supabase, chantierIds) {
     .order('cree_le', { ascending: false });
 
   if (error) throw new Error(error.message || 'Erreur chargement relevés.');
-  return (data || []).map(normalizeReleveRow);
+  return withReleveNumbers((data || []).map(normalizeReleveRow));
 }
 
 function filterChantiersForRole(rows, { role, profilId }) {
@@ -151,19 +152,19 @@ export async function fetchClientById(clientId, { entrepriseId } = {}) {
 }
 
 export async function fetchClientsList({ entrepriseId, role, profilId }) {
-  const chantiers = await fetchChantiersList({ entrepriseId, role, profilId });
-  const clientIds = [...new Set(chantiers.map((row) => row.client_id).filter(Boolean))];
-  if (!clientIds.length) return [];
+  if (!entrepriseId) return [];
 
   const supabase = createServerSupabaseClient();
   const { data, error } = await ACTIVE_FILTER(
     supabase
       .from('clients')
       .select('id, nom_complet, telephone_1, telephone_2, cree_le')
-      .in('id', clientIds)
+      .eq('entreprise_id', entrepriseId)
   ).order('nom_complet', { ascending: true });
 
   if (error) throw new Error(error.message || 'Erreur chargement clients.');
+
+  const chantiers = await fetchChantiersList({ entrepriseId, role, profilId });
 
   const chantierCountByClient = chantiers.reduce((acc, row) => {
     acc[row.client_id] = (acc[row.client_id] || 0) + 1;

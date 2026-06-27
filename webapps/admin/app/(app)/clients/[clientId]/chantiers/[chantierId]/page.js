@@ -2,10 +2,10 @@ import { notFound, redirect } from 'next/navigation';
 import ChantierDetailPageClient from '@/components/chantiers/ChantierDetailPageClient';
 import { fetchChantierDetail } from '@/lib/chantiers/queries';
 import { getSession } from '@/lib/auth/session';
-import { getAdminNavItem } from '@/lib/navigation/adminNav';
+import { CLIENTS_SECTION_LABEL, getAdminNavItem } from '@/lib/navigation/adminNav';
 
 export const metadata = {
-  title: 'Clients et chantiers — Losange Admin',
+  title: `${CLIENTS_SECTION_LABEL} — Losange Admin`,
 };
 
 export default async function ClientChantierDetailPage({ params }) {

@@ -48,7 +48,7 @@ export default function LoginForm() {
         return;
       }
 
-      router.replace('/accueil');
+      router.replace('/tableau-de-bord');
       router.refresh();
     } catch (error) {
       setAuthError(error.message || 'Erreur de connexion.');

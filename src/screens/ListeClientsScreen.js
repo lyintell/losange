@@ -6,7 +6,7 @@ import TerrainSyncOverlay from '../components/terrain/TerrainSyncOverlay';
 import { FlowSmallFab, getFabColumnPadding } from '../components/terrain/TerrainFlowFabs';
 import { useTerrainSyncRefresh } from '../hooks/useTerrainSyncRefresh';
 import { getClientsByEntrepriseLocal, getLoggedInProfilViewLocal } from '../db/querries';
-import { canManageClients } from '../utils/terrainAccess';
+import { canManageClients, canSeeClientPhone } from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
 
 const formatClientPhoneLine = (name, phone) => {
@@ -25,6 +25,7 @@ export default function ListeClientsScreen({
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [canOpenClientDetails, setCanOpenClientDetails] = useState(false);
+  const [showClientPhone, setShowClientPhone] = useState(true);
 
   const loadClients = useCallback(async () => {
     if (!entrepriseId) {
@@ -70,11 +71,13 @@ export default function ListeClientsScreen({
         const profil = await getLoggedInProfilViewLocal();
         if (!cancelled) {
           setCanOpenClientDetails(canManageClients(profil));
+          setShowClientPhone(canSeeClientPhone(profil));
         }
       } catch (error) {
         console.error('Erreur chargement acces clients:', error);
         if (!cancelled) {
           setCanOpenClientDetails(false);
+          setShowClientPhone(false);
         }
       }
     };
@@ -91,15 +94,14 @@ export default function ListeClientsScreen({
     return clients.filter((client) => {
       const haystack = [
         client.nom_complet,
-        client.telephone_1,
-        client.telephone_2,
+        ...(showClientPhone ? [client.telephone_1, client.telephone_2] : []),
       ]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
       return haystack.includes(term);
     });
-  }, [clients, searchQuery]);
+  }, [clients, searchQuery, showClientPhone]);
 
   return (
     <View style={styles.container}>
@@ -127,7 +129,9 @@ export default function ListeClientsScreen({
             <Card style={styles.card} mode="elevated">
               <Card.Content>
                 <Text variant="bodyLarge" style={styles.clientLine}>
-                  {formatClientPhoneLine(item.nom_complet, item.telephone_1)}
+                  {showClientPhone
+                    ? formatClientPhoneLine(item.nom_complet, item.telephone_1)
+                    : item.nom_complet || '—'}
                 </Text>
               </Card.Content>
             </Card>

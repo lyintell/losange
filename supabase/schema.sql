@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS entreprises (
   date_actif_jusqua TIMESTAMPTZ,
   pro_activated_le TIMESTAMPTZ,
   pro_downgraded_le TIMESTAMPTZ,
+  ind_admin_connecte_mobile SMALLINT NOT NULL DEFAULT 0 CHECK (ind_admin_connecte_mobile IN (0, 1)),
+  ind_metiers_preselectionnes SMALLINT NOT NULL DEFAULT 0 CHECK (ind_metiers_preselectionnes IN (0, 1)),
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
@@ -26,6 +28,8 @@ ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS date_actif_jusqua TIMESTAMPTZ;
 ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS ind_tva SMALLINT NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1));
 ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS pro_activated_le TIMESTAMPTZ;
 ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS pro_downgraded_le TIMESTAMPTZ;
+ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS ind_admin_connecte_mobile SMALLINT NOT NULL DEFAULT 0 CHECK (ind_admin_connecte_mobile IN (0, 1));
+ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS ind_metiers_preselectionnes SMALLINT NOT NULL DEFAULT 0 CHECK (ind_metiers_preselectionnes IN (0, 1));
 
 CREATE TABLE IF NOT EXISTS profils (
   id TEXT PRIMARY KEY,
@@ -87,23 +91,34 @@ CREATE TABLE IF NOT EXISTS metiers (
   abbrev TEXT,
   icon TEXT,
   entreprise_id TEXT REFERENCES entreprises (id) ON DELETE CASCADE,
+  ordre INTEGER NOT NULL DEFAULT 0,
+  ind_actif SMALLINT NOT NULL DEFAULT 1 CHECK (ind_actif IN (0, 1)),
+  ind_default SMALLINT NOT NULL DEFAULT 0 CHECK (ind_default IN (0, 1)),
   supprime_le TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
 );
 
-CREATE TABLE IF NOT EXISTS metiers_entreprise (
+ALTER TABLE metiers ADD COLUMN IF NOT EXISTS ordre INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE metiers ADD COLUMN IF NOT EXISTS ind_actif SMALLINT NOT NULL DEFAULT 1 CHECK (ind_actif IN (0, 1));
+ALTER TABLE metiers ADD COLUMN IF NOT EXISTS ind_default SMALLINT NOT NULL DEFAULT 0 CHECK (ind_default IN (0, 1));
+
+CREATE TABLE IF NOT EXISTS sections (
+  id TEXT PRIMARY KEY,
+  nom TEXT NOT NULL,
   entreprise_id TEXT NOT NULL REFERENCES entreprises (id) ON DELETE CASCADE,
-  metier_id TEXT NOT NULL REFERENCES metiers (id) ON DELETE CASCADE,
-  ordre INTEGER NOT NULL DEFAULT 0,
   supprime_le TIMESTAMPTZ,
-  ind_actif SMALLINT NOT NULL DEFAULT 1 CHECK (ind_actif IN (0, 1)),
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
-  _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1)),
-  PRIMARY KEY (entreprise_id, metier_id)
+  _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
 );
+
+CREATE INDEX IF NOT EXISTS idx_sections_entreprise
+  ON sections (entreprise_id)
+  WHERE supprime_le IS NULL;
+
+DROP TABLE IF EXISTS metiers_entreprise CASCADE;
 
 CREATE TABLE IF NOT EXISTS fournisseurs (
   id TEXT PRIMARY KEY,
@@ -173,6 +188,29 @@ CREATE TABLE IF NOT EXISTS releves (
   _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
 );
 
+CREATE TABLE IF NOT EXISTS section_releves (
+  id TEXT PRIMARY KEY,
+  section_id TEXT NOT NULL REFERENCES sections (id) ON DELETE CASCADE,
+  releve_id TEXT NOT NULL REFERENCES releves (id) ON DELETE CASCADE,
+  ordre INTEGER NOT NULL DEFAULT 0,
+  supprime_le TIMESTAMPTZ,
+  cree_le TIMESTAMPTZ DEFAULT now(),
+  mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
+  _synced SMALLINT NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_section_releves_pair
+  ON section_releves (section_id, releve_id)
+  WHERE supprime_le IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_section_releves_releve_ordre
+  ON section_releves (releve_id, ordre)
+  WHERE supprime_le IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_section_releves_section
+  ON section_releves (section_id)
+  WHERE supprime_le IS NULL;
+
 CREATE TABLE IF NOT EXISTS ligne_releves (
   id TEXT PRIMARY KEY,
   releve_id TEXT NOT NULL REFERENCES releves (id) ON DELETE CASCADE,
@@ -186,6 +224,8 @@ CREATE TABLE IF NOT EXISTS ligne_releves (
   montant DOUBLE PRECISION NOT NULL,
   note TEXT,
   photo TEXT,
+  section_id TEXT REFERENCES sections (id) ON DELETE SET NULL,
+  ordre INTEGER NOT NULL DEFAULT 0,
   ind_complete SMALLINT NOT NULL DEFAULT 0 CHECK (ind_complete IN (0, 1)),
   supprime_le TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
@@ -194,6 +234,12 @@ CREATE TABLE IF NOT EXISTS ligne_releves (
 );
 
 ALTER TABLE ligne_releves ADD COLUMN IF NOT EXISTS photo TEXT;
+ALTER TABLE ligne_releves ADD COLUMN IF NOT EXISTS section_id TEXT REFERENCES sections (id) ON DELETE SET NULL;
+ALTER TABLE ligne_releves ADD COLUMN IF NOT EXISTS ordre INTEGER NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS idx_ligne_releves_releve_ordre
+  ON ligne_releves (releve_id, ordre)
+  WHERE supprime_le IS NULL;
 
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
@@ -217,12 +263,13 @@ BEGIN
     'clients',
     'chantiers',
     'metiers',
-    'metiers_entreprise',
+    'sections',
     'ouvrages',
     'unites',
     'ouvrage_unites',
     'fournisseurs',
     'releves',
+    'section_releves',
     'ligne_releves'
   ]
   LOOP

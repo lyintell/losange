@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
+import AjouterSectionModal from '../components/terrain/AjouterSectionModal';
+import ChoixSectionModal from '../components/terrain/ChoixSectionModal';
 import AjouterOuvrageModal from '../components/terrain/AjouterOuvrageModal';
 import AjouterArticleModal from '../components/terrain/AjouterArticleModal';
 import ChoixUniteModal from '../components/terrain/ChoixUniteModal';
@@ -17,8 +19,10 @@ import {
 import { LignesReleveGroupedList } from '../components/terrain/LignesReleveGroupedList';
 import {
   addLigneToDraft,
+  changeDraftSectionForLignes,
   getDraftDimensionFlow,
   removeLigneFromDraft,
+  reorderDraftLignesInSection,
   setDraftUiStep,
   updateDraftDimensionFlow,
   updateLigneInDraft,
@@ -29,6 +33,7 @@ import {
   getOuvrageUniteContextLocal,
   getArticlesByMetierAndEntreprise,
   getOuvragesByMetierAndEntreprise,
+  getSectionsByEntrepriseLocal,
   getUnitesEtPrixParOuvrage,
 } from '../db/querries';
 import { computeMontantLigneReleve } from '../utils/ligneReleveCalcul';
@@ -44,16 +49,38 @@ import { formatArticleNomAvecFournisseur } from '../utils/formatLigneMesures';
 const STEP_TITLES = {
   metier: 'Choix du métier',
   ouvrage: "Choix de l'ouvrage / article",
+  section: 'Choix de la section',
   dimensions: 'Entrez les relevés',
   recap: 'Données entrées',
 };
 
+const FLOW_STEP_ORDER = ['section', 'metier', 'ouvrage', 'dimensions'];
+
+const deriveFlowStepFromDraft = (current) => {
+  if (!current?.section?.id) return 'section';
+  if (!current?.metier?.id) return 'metier';
+  if (!current?.ouvrageUnite) return 'ouvrage';
+  return 'dimensions';
+};
+
+const getDownstreamClearUpdates = (targetStep) => {
+  if (targetStep === 'section') {
+    return { metier: null, ouvrage: null, ouvrageUnite: null, catalogueKind: 'ouvrage' };
+  }
+  if (targetStep === 'metier') {
+    return { ouvrage: null, ouvrageUnite: null };
+  }
+  if (targetStep === 'ouvrage') {
+    return { ouvrage: null, ouvrageUnite: null };
+  }
+  return {};
+};
+
 const resolveInitialStep = () => {
   const current = getDraftDimensionFlow();
-  if (current?.uiStep) return current.uiStep;
-  if (current?.ouvrageUnite) return 'dimensions';
-  if (current?.metier) return 'ouvrage';
-  return 'metier';
+  if (!current) return 'section';
+  if (current.uiStep === 'recap') return 'recap';
+  return deriveFlowStepFromDraft(current);
 };
 
 export default function NouvelleDimensionScreen({
@@ -70,8 +97,10 @@ export default function NouvelleDimensionScreen({
   const plusPressTimerRef = useRef(null);
   const [step, setStepState] = useState(resolveInitialStep);
   const [metiers, setMetiers] = useState([]);
+  const [sections, setSections] = useState([]);
   const [catalogItems, setCatalogItems] = useState([]);
   const [loadingMetiers, setLoadingMetiers] = useState(true);
+  const [loadingSections, setLoadingSections] = useState(false);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [draft, setDraft] = useState(() => getDraftDimensionFlow());
   const [catalogueKind, setCatalogueKind] = useState(() => getDraftDimensionFlow()?.catalogueKind || 'ouvrage');
@@ -83,6 +112,13 @@ export default function NouvelleDimensionScreen({
   const [hidesPriceUi, setHidesPriceUi] = useState(false);
   const [addOuvrageModalVisible, setAddOuvrageModalVisible] = useState(false);
   const [addArticleModalVisible, setAddArticleModalVisible] = useState(false);
+  const [addSectionModalVisible, setAddSectionModalVisible] = useState(false);
+  const [recapSectionPicker, setRecapSectionPicker] = useState({
+    visible: false,
+    sectionId: null,
+    sectionNom: null,
+  });
+  const [recapCreateSectionVisible, setRecapCreateSectionVisible] = useState(false);
   const [choixUniteModal, setChoixUniteModal] = useState({
     visible: false,
     ouvrage: null,
@@ -101,12 +137,18 @@ export default function NouvelleDimensionScreen({
   );
 
   const dimensionsScreenTitle = useMemo(() => {
-    if (!draft?.ouvrage?.nom) return 'Nouveau relevé';
-    const isArticle =
-      draft.catalogueKind === 'article' || Number(draft.ouvrage.ind_article) === 1;
-    if (!isArticle) return draft.ouvrage.nom;
-    return formatArticleNomAvecFournisseur(draft.ouvrage.nom, draft.ouvrage.fournisseur_nom);
-  }, [draft?.ouvrage, draft?.catalogueKind]);
+    const sectionNom = draft?.section?.nom;
+    const ouvrageLabel = (() => {
+      if (!draft?.ouvrage?.nom) return null;
+      const isArticle =
+        draft.catalogueKind === 'article' || Number(draft.ouvrage.ind_article) === 1;
+      if (!isArticle) return draft.ouvrage.nom;
+      return formatArticleNomAvecFournisseur(draft.ouvrage.nom, draft.ouvrage.fournisseur_nom);
+    })();
+    if (sectionNom && ouvrageLabel) return `${sectionNom} · ${ouvrageLabel}`;
+    if (ouvrageLabel) return ouvrageLabel;
+    return 'Nouveau relevé';
+  }, [draft?.section?.nom, draft?.ouvrage, draft?.catalogueKind]);
 
   const isEditingLine = Boolean(editingLigneId);
   const editingLigne = useMemo(
@@ -140,14 +182,78 @@ export default function NouvelleDimensionScreen({
     return getUnitesEtPrixParOuvrage(itemId);
   }, []);
 
+  const loadSections = useCallback(async () => {
+    if (!entrepriseId) {
+      setSections([]);
+      return [];
+    }
+    setLoadingSections(true);
+    try {
+      const data = await getSectionsByEntrepriseLocal(entrepriseId);
+      setSections(data || []);
+      return data || [];
+    } catch (error) {
+      console.error('Erreur chargement sections:', error);
+      setSections([]);
+      return [];
+    } finally {
+      setLoadingSections(false);
+    }
+  }, [entrepriseId]);
+
   const refreshDraft = useCallback(() => {
     setDraft(getDraftDimensionFlow());
   }, []);
+
+  useEffect(() => {
+    if (step === 'recap') {
+      refreshDraft();
+    }
+  }, [step, refreshDraft]);
+
+  const hasRecapLignes = (draft?.lignes?.length || 0) > 0;
 
   const setStep = useCallback((nextStep) => {
     setStepState(nextStep);
     setDraftUiStep(nextStep);
   }, []);
+
+  const goToFlowStep = useCallback(
+    async (targetStep) => {
+      if (!FLOW_STEP_ORDER.includes(targetStep)) return;
+
+      updateDraftDimensionFlow(getDownstreamClearUpdates(targetStep));
+      if (targetStep === 'section' || targetStep === 'metier') {
+        setCatalogueKind('ouvrage');
+        setCatalogItems([]);
+      }
+      refreshDraft();
+      setStep(targetStep);
+
+      if (targetStep === 'section') {
+        await loadSections();
+        return;
+      }
+
+      if (targetStep === 'ouvrage') {
+        const current = getDraftDimensionFlow();
+        if (!current?.metier?.id) return;
+        setLoadingCatalog(true);
+        try {
+          const kind = current.catalogueKind || 'ouvrage';
+          setCatalogueKind(kind);
+          const data = await loadCatalogItems(current.metier.id, kind);
+          setCatalogItems(data || []);
+        } catch (error) {
+          console.error('Erreur chargement catalogue:', error);
+          setCatalogItems([]);
+        } finally {
+          setLoadingCatalog(false);
+        }
+      }
+    },
+    [loadCatalogItems, loadSections, refreshDraft, setStep]
+  );
 
   useEffect(() => {
     const loadProfilAccess = async () => {
@@ -200,10 +306,28 @@ export default function NouvelleDimensionScreen({
       }
     };
     restoreDraftLists();
-  }, [entrepriseId, loadCatalogItems, loadUnitesForItem]);
+    loadSections();
+  }, [entrepriseId, loadCatalogItems, loadUnitesForItem, loadSections]);
+
+  const resolveSectionOrdre = useCallback(
+    (sectionId) => {
+      const current = getDraftDimensionFlow();
+      const order = current?.sectionOrder || [];
+      const existingIndex = order.indexOf(sectionId);
+      if (existingIndex >= 0) return existingIndex;
+      return order.length;
+    },
+    []
+  );
 
   const handleChooseMetier = async (metier) => {
     if (!entrepriseId) return;
+    const current = getDraftDimensionFlow();
+    if (!current?.section?.id) {
+      await goToFlowStep('section');
+      return;
+    }
+
     updateDraftDimensionFlow({
       metier,
       ouvrage: null,
@@ -307,11 +431,32 @@ export default function NouvelleDimensionScreen({
     await handleChooseCatalogItem(ouvrage);
   };
 
+  const handleChooseSection = async (section) => {
+    if (!section?.id) return;
+    updateDraftDimensionFlow({
+      section: { id: section.id, nom: section.nom },
+      metier: null,
+      ouvrage: null,
+      ouvrageUnite: null,
+    });
+    setCatalogItems([]);
+    refreshDraft();
+    setStep('metier');
+  };
+
+  const handleSectionCreated = async ({ section }) => {
+    if (!section?.id) return;
+    const data = await loadSections();
+    const resolved = data.find((item) => item.id === section.id) || section;
+    handleChooseSection(resolved);
+  };
+
   const handleSaveLine = async (payload) => {
     const current = getDraftDimensionFlow();
-    if (!current?.ouvrageUnite) return;
+    if (!current?.ouvrageUnite || !current?.section?.id) return;
     setSavingLine(true);
     try {
+      const sectionOrdre = resolveSectionOrdre(current.section.id);
       const prixUnitaireApplique =
         payload.prixUnitaireApplique != null && payload.prixUnitaireApplique !== ''
           ? Number(payload.prixUnitaireApplique) || 0
@@ -322,6 +467,9 @@ export default function NouvelleDimensionScreen({
         ouvrage_nom: current.ouvrage?.nom,
         metier_id: current.metier?.id,
         metier_nom: current.metier?.nom,
+        section_id: current.section.id,
+        section_nom: current.section.nom,
+        section_ordre: sectionOrdre,
         nom_unite: current.ouvrageUnite?.nom_unite,
         ind_dimension: current.ouvrageUnite?.ind_dimension ?? 0,
         catalogue_kind: current.catalogueKind || 'ouvrage',
@@ -340,6 +488,7 @@ export default function NouvelleDimensionScreen({
       if (editingLigneId) {
         updateLigneInDraft(editingLigneId, ligneData);
         setEditingLigneId(null);
+        updateDraftDimensionFlow({ metier: null, section: null, ouvrage: null, ouvrageUnite: null });
         setStep('recap');
       } else {
         addLigneToDraft(ligneData);
@@ -360,6 +509,10 @@ export default function NouvelleDimensionScreen({
 
     updateDraftDimensionFlow({
       metier: context.metier,
+      section:
+        ligne.section_id && ligne.section_nom
+          ? { id: ligne.section_id, nom: ligne.section_nom }
+          : null,
       ouvrage: context.ouvrage,
       ouvrageUnite: context.ouvrageUnite,
       catalogueKind,
@@ -372,7 +525,7 @@ export default function NouvelleDimensionScreen({
 
   const handleCancelEdit = useCallback(() => {
     setEditingLigneId(null);
-    updateDraftDimensionFlow({ metier: null, ouvrage: null, ouvrageUnite: null });
+    updateDraftDimensionFlow({ metier: null, section: null, ouvrage: null, ouvrageUnite: null });
     refreshDraft();
     setStep('recap');
   }, [refreshDraft, setStep]);
@@ -413,25 +566,49 @@ export default function NouvelleDimensionScreen({
 
     const current = getDraftDimensionFlow();
     if (!current?.lignes?.length) return;
+    updateDraftDimensionFlow({ metier: null, section: null, ouvrage: null, ouvrageUnite: null });
+    refreshDraft();
     setStep('recap');
   };
+
+  const handleDimensionsStepBack = useCallback(() => {
+    if (editingLigneId) {
+      handleCancelEdit();
+      return;
+    }
+    goToFlowStep('ouvrage');
+  }, [editingLigneId, goToFlowStep, handleCancelEdit]);
+
+  const handleMetierStepBack = useCallback(() => {
+    goToFlowStep('section');
+  }, [goToFlowStep]);
+
+  const handleSectionStepBack = useCallback(() => {
+    const current = getDraftDimensionFlow();
+    if (current?.lignes?.length) {
+      updateDraftDimensionFlow({ metier: null, section: null, ouvrage: null, ouvrageUnite: null });
+      refreshDraft();
+      setStep('recap');
+      return;
+    }
+    onBackToChantiers?.();
+  }, [onBackToChantiers, refreshDraft, setStep]);
+
+  const handleOuvrageStepBack = useCallback(() => {
+    goToFlowStep('metier');
+  }, [goToFlowStep]);
 
   const handleNouvelOuvrage = () => {
     updateDraftDimensionFlow({ ouvrage: null, ouvrageUnite: null });
     refreshDraft();
-    setStep('ouvrage');
+    goToFlowStep('ouvrage');
   };
 
   const handleNouveauMetier = () => {
-    updateDraftDimensionFlow({
-      metier: null,
-      ouvrage: null,
-      ouvrageUnite: null,
-      catalogueKind: 'ouvrage',
-    });
+    updateDraftDimensionFlow({ metier: null, ouvrage: null, ouvrageUnite: null, catalogueKind: 'ouvrage' });
     setCatalogueKind('ouvrage');
-    refreshDraft();
     setCatalogItems([]);
+    refreshDraft();
     setStep('metier');
   };
 
@@ -487,6 +664,7 @@ export default function NouvelleDimensionScreen({
     const saveDisabled = isDimensionsStep
       ? voirDisabled
       : step === 'metier' ||
+        step === 'section' ||
         step === 'ouvrage' ||
         (step === 'recap' && !draft?.lignes?.length);
 
@@ -523,6 +701,9 @@ export default function NouvelleDimensionScreen({
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator
       >
+        <Text variant="titleMedium" style={styles.sectionTitle}>
+          {draft?.section?.nom || ''}
+        </Text>
         {!entrepriseId ? (
           <Text style={styles.infoText}>Entreprise non disponible. Connectez-vous après synchronisation.</Text>
         ) : loadingMetiers ? (
@@ -547,7 +728,65 @@ export default function NouvelleDimensionScreen({
           </View>
         )}
       </ScrollView>
-      <FlowBackFab onPress={onBackToChantiers} smallCountBelow={0} />
+      <FlowBackFab onPress={handleMetierStepBack} smallCountBelow={0} />
+    </>
+  );
+
+  const renderSectionStep = () => (
+    <>
+      <ScrollView
+        style={styles.stepScroll}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: getFabColumnPadding(1) },
+        ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator
+      >
+        <Text variant="titleMedium" style={styles.sectionTitle}>
+          {hasRecapLignes ? 'Ajouter une ligne' : draft?.section?.nom || ''}
+        </Text>
+        {loadingSections ? (
+          <LosangeLogoLoader size="large" containerStyle={styles.loader} />
+        ) : sections.length === 0 ? (
+          <Text style={styles.infoText}>
+            Aucune section. Utilisez + pour créer RDC, Salon, Étage…
+          </Text>
+        ) : (
+          <View style={styles.choiceList}>
+            {sections.map((section) => (
+              <MobileButton
+                key={section.id}
+                mode={draft?.section?.id === section.id ? 'contained' : 'outlined'}
+                onPress={() => handleChooseSection(section)}
+                style={styles.choiceButton}
+                contentStyle={styles.choiceButtonContent}
+                buttonColor={
+                  draft?.section?.id === section.id ? chantierColors.primary : chantierColors.surface
+                }
+                textColor={draft?.section?.id === section.id ? '#FFFFFF' : chantierColors.text}
+              >
+                {section.nom}
+              </MobileButton>
+            ))}
+          </View>
+        )}
+      </ScrollView>
+      <FlowBackFab onPress={handleSectionStepBack} smallCountBelow={1} />
+      <FlowSmallFab
+        icon="plus"
+        tierFromBottom={0}
+        color={flowFabColors.primary}
+        onPress={() => setAddSectionModalVisible(true)}
+        disabled={!entrepriseId}
+      />
+      <AjouterSectionModal
+        visible={addSectionModalVisible}
+        entrepriseId={entrepriseId}
+        existingSections={sections}
+        onDismiss={() => setAddSectionModalVisible(false)}
+        onCreated={handleSectionCreated}
+      />
     </>
   );
 
@@ -566,7 +805,7 @@ export default function NouvelleDimensionScreen({
           showsVerticalScrollIndicator
         >
           <Text variant="titleMedium" style={styles.sectionTitle}>
-            {draft?.metier?.nom}
+            {[draft?.section?.nom, draft?.metier?.nom].filter(Boolean).join(' · ')}
           </Text>
           <CatalogueKindToggle value={catalogueKind} onChange={handleCatalogueKindChange} />
           {loadingCatalog ? (
@@ -603,7 +842,7 @@ export default function NouvelleDimensionScreen({
           onDismiss={handleDismissChoixUniteModal}
           onSelect={handleChooseUniteFromModal}
         />
-        <FlowBackFab onPress={() => setStep('metier')} smallCountBelow={fabSmallCount} />
+        <FlowBackFab onPress={handleOuvrageStepBack} smallCountBelow={fabSmallCount} />
         {canCreateOuvrage ? (
           <FlowSmallFab
             icon="plus"
@@ -639,6 +878,8 @@ export default function NouvelleDimensionScreen({
 
   const renderDimensionsStep = () => {
     const ouvrageUnite = draft?.ouvrageUnite;
+    const showPlusFab = !isEditingLine && canAddReleveLigne;
+    const fabSmallCountBelow = showPlusFab ? 1 : 0;
     const initialValues = editingLigne
       ? {
           largeur: editingLigne.largeur,
@@ -667,16 +908,22 @@ export default function NouvelleDimensionScreen({
             uniteFormule={ouvrageUnite?.formule || ''}
             nomUnite={ouvrageUnite?.nom_unite || ''}
             initialValues={initialValues}
-            fabSmallCountBelow={0}
+            fabSmallCountBelow={fabSmallCountBelow}
             onSaveLine={handleSaveLine}
             onValidityChange={setFormComplete}
           />
         </View>
-        {!isEditingLine && canAddReleveLigne ? (
+        <FlowSmallFab
+          icon="arrow-left"
+          tierFromBottom={0}
+          color={flowFabColors.muted}
+          onPress={handleDimensionsStepBack}
+        />
+        {showPlusFab ? (
           <FlowActionFab
             icon="plus"
             color={flowFabColors.primary}
-            smallCountBelow={0}
+            smallCountBelow={1}
             onPress={handlePlusPress}
             loading={savingLine}
             disabled={savingLine || !formComplete}
@@ -687,19 +934,65 @@ export default function NouvelleDimensionScreen({
     );
   };
 
-  const handleContinuerRecap = () => {
+  const handleContinuerRecap = async () => {
     setEditingLigneId(null);
     updateDraftDimensionFlow({
       metier: null,
+      section: null,
       ouvrage: null,
       ouvrageUnite: null,
       catalogueKind: 'ouvrage',
     });
     setCatalogueKind('ouvrage');
-    refreshDraft();
     setCatalogItems([]);
-    setStep('metier');
+    refreshDraft();
+    await goToFlowStep('section');
   };
+
+  const handleLigneReorder = useCallback(
+    (sectionId, reorderedLignes) => {
+      reorderDraftLignesInSection(sectionId, reorderedLignes);
+      refreshDraft();
+    },
+    [refreshDraft]
+  );
+
+  const handleRecapSectionPress = useCallback(
+    (sectionId, sectionNom) => {
+      if (!sectionId) return;
+      setRecapSectionPicker({
+        visible: true,
+        sectionId,
+        sectionNom: sectionNom || null,
+      });
+      loadSections();
+    },
+    [loadSections]
+  );
+
+  const handleRecapSectionSelect = useCallback(
+    (section) => {
+      if (!section?.id || !recapSectionPicker.sectionId) return;
+      changeDraftSectionForLignes(recapSectionPicker.sectionId, section);
+      setRecapSectionPicker({ visible: false, sectionId: null, sectionNom: null });
+      refreshDraft();
+    },
+    [recapSectionPicker.sectionId, refreshDraft]
+  );
+
+  const handleRecapSectionCreated = useCallback(
+    async ({ section }) => {
+      if (!section?.id) return;
+      await loadSections();
+      if (recapSectionPicker.sectionId) {
+        changeDraftSectionForLignes(recapSectionPicker.sectionId, section);
+        refreshDraft();
+      }
+      setRecapCreateSectionVisible(false);
+      setRecapSectionPicker({ visible: false, sectionId: null, sectionNom: null });
+    },
+    [loadSections, recapSectionPicker.sectionId, refreshDraft]
+  );
 
   const isEditingChantier = Boolean(draft?.chantierId);
 
@@ -720,26 +1013,57 @@ export default function NouvelleDimensionScreen({
     );
   };
 
-  const renderRecapStep = () => (
+  const renderRecapStep = () => {
+    const fabPadding = getFabColumnPadding(isEditingChantier ? 1 : 0);
+    const lignes = draft?.lignes || [];
+
+    return (
     <>
-      <ScrollView
-        contentContainerStyle={[
-          styles.recapContent,
-          { paddingBottom: getFabColumnPadding(isEditingChantier ? 1 : 0) },
-        ]}
-      >
-        {draft?.lignes?.length === 0 ? (
+      <View style={styles.recapStepRoot}>
+        {!lignes.length ? (
           <Text style={styles.infoText}>Aucune dimension saisie.</Text>
         ) : (
           <LignesReleveGroupedList
-            lignes={draft.lignes}
+            lignes={lignes}
             variant="recap"
             showPrices={!hidesPriceUi}
+            groupBySection
+            sectionOrder={draft?.sectionOrder}
+            enableLigneDrag
+            onLigneReorder={handleLigneReorder}
+            onSectionPress={handleRecapSectionPress}
             onLignePress={handleEditLigne}
             onLigneDoublePress={handleDeleteLigne}
+            contentPaddingBottom={fabPadding}
+            style={styles.recapList}
           />
         )}
-      </ScrollView>
+      </View>
+      <ChoixSectionModal
+        visible={recapSectionPicker.visible}
+        title={
+          recapSectionPicker.sectionNom
+            ? `Section : ${recapSectionPicker.sectionNom}`
+            : 'Changer de section'
+        }
+        sections={sections}
+        selectedSectionId={recapSectionPicker.sectionId}
+        onDismiss={() =>
+          setRecapSectionPicker({ visible: false, sectionId: null, sectionNom: null })
+        }
+        onSelect={handleRecapSectionSelect}
+        onCreatePress={() => {
+          setRecapSectionPicker((current) => ({ ...current, visible: false }));
+          setRecapCreateSectionVisible(true);
+        }}
+      />
+      <AjouterSectionModal
+        visible={recapCreateSectionVisible}
+        entrepriseId={entrepriseId}
+        existingSections={sections}
+        onDismiss={() => setRecapCreateSectionVisible(false)}
+        onCreated={handleRecapSectionCreated}
+      />
       {canAddReleveLigne ? (
         <FlowActionFab
           icon="plus"
@@ -757,7 +1081,8 @@ export default function NouvelleDimensionScreen({
         />
       ) : null}
     </>
-  );
+    );
+  };
 
   const screenTitle =
     step === 'recap'
@@ -784,6 +1109,7 @@ export default function NouvelleDimensionScreen({
 
       <View style={styles.body}>
         {step === 'metier' && renderMetierStep()}
+        {step === 'section' && renderSectionStep()}
         {step === 'ouvrage' && renderOuvrageStep()}
         {step === 'dimensions' && renderDimensionsStep()}
         {step === 'recap' && renderRecapStep()}
@@ -859,12 +1185,30 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 8,
   },
+  contextLine: {
+    color: chantierColors.muted,
+    fontSize: 16,
+    marginBottom: 8,
+  },
   infoText: {
     color: chantierColors.muted,
     fontSize: 16,
   },
   loader: {
     marginTop: 24,
+  },
+  recapStepRoot: {
+    flex: 1,
+    minHeight: 0,
+    paddingTop: 4,
+  },
+  recapList: {
+    flex: 1,
+    minHeight: 0,
+  },
+  recapContainer: {
+    flex: 1,
+    paddingTop: 4,
   },
   recapContent: {
     gap: 10,

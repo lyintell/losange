@@ -1,57 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { filterTransactionalRowsForProPull } from './entrepriseTier.ts';
 
-const DEFAULT_METIERS = [
-  { id: 'metier-menuiserie-alu', ordre: 0 },
-  { id: 'metier-menuiserie-metallique', ordre: 1 },
-  { id: 'metier-vitrage-verre', ordre: 2 },
-  { id: 'metier-gros-oeuvres', ordre: 3 },
-  { id: 'metier-peinture', ordre: 4 },
-  { id: 'metier-carrelage', ordre: 5 },
-  { id: 'metier-electricite-clim', ordre: 6 },
-  { id: 'metier-courant-faible', ordre: 7 },
-  { id: 'metier-plomberie-sanitaire', ordre: 8 },
-  { id: 'metier-etancheite-toiture', ordre: 9 },
-  { id: 'metier-divers', ordre: 10 },
-];
-
-const ensureDefaultMetiersEntrepriseLinks = async (
-  supabase: ReturnType<typeof createClient>,
-  entrepriseId: string
-) => {
-  const { data: existingRows, error: existingError } = await supabase
-    .from('metiers_entreprise')
-    .select('metier_id')
-    .eq('entreprise_id', entrepriseId)
-    .is('supprime_le', null);
-
-  if (existingError) {
-    throw new Error(existingError.message || 'Erreur lecture métiers entreprise.');
-  }
-
-  const linked = new Set((existingRows ?? []).map((row) => String(row.metier_id)));
-  const missing = DEFAULT_METIERS.filter((metier) => !linked.has(metier.id));
-  if (missing.length === 0) return;
-
-  const now = new Date().toISOString();
-  const { error: insertError } = await supabase.from('metiers_entreprise').upsert(
-    missing.map((metier) => ({
-      entreprise_id: entrepriseId,
-      metier_id: metier.id,
-      ordre: metier.ordre,
-      ind_actif: 1,
-      cree_le: now,
-      mis_a_jour_le: now,
-      _synced: 1,
-    })),
-    { onConflict: 'entreprise_id,metier_id', ignoreDuplicates: true }
-  );
-
-  if (insertError) {
-    throw new Error(insertError.message || 'Erreur liaison métiers par défaut.');
-  }
-};
-
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -148,28 +97,52 @@ const recordProfilFirstLogin = async (
   return data ?? { ...profil, date_premier_login: now, mis_a_jour_le: now };
 };
 
+const recordAdminMobileLogin = async (
+  supabase: ReturnType<typeof createClient>,
+  entreprise: Record<string, unknown>,
+  profil: Record<string, unknown>,
+  source: string
+) => {
+  if (source !== 'mobile') return entreprise;
+  if (String(profil.role || '').toUpperCase() !== 'A') return entreprise;
+  if (Number(entreprise.ind_admin_connecte_mobile) === 1) return entreprise;
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('entreprises')
+    .update({ ind_admin_connecte_mobile: 1, mis_a_jour_le: now })
+    .eq('id', String(entreprise.id))
+    .eq('ind_admin_connecte_mobile', 0)
+    .select('*')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message || 'Impossible d enregistrer la connexion admin mobile.');
+  }
+
+  return (data ?? { ...entreprise, ind_admin_connecte_mobile: 1, mis_a_jour_le: now }) as Record<
+    string,
+    unknown
+  >;
+};
+
 const fetchMetiersPullData = async (
   supabase: ReturnType<typeof createClient>,
   entrepriseId: string
 ) => {
-  await ensureDefaultMetiersEntrepriseLinks(supabase, entrepriseId);
+  const { data: metiers, error } = await supabase
+    .from('metiers')
+    .select('*')
+    .eq('entreprise_id', entrepriseId)
+    .is('supprime_le', null)
+    .order('ordre', { ascending: true })
+    .order('nom', { ascending: true });
 
-  const [globalMetiersResult, customMetiersResult, metiersEntrepriseResult] = await Promise.all([
-    supabase.from('metiers').select('*').is('entreprise_id', null).is('supprime_le', null),
-    supabase.from('metiers').select('*').eq('entreprise_id', entrepriseId),
-    supabase.from('metiers_entreprise').select('*').eq('entreprise_id', entrepriseId),
-  ]);
-
-  const queryError =
-    globalMetiersResult.error || customMetiersResult.error || metiersEntrepriseResult.error;
-  if (queryError) {
-    throw new Error(queryError.message || 'Erreur chargement métiers.');
+  if (error) {
+    throw new Error(error.message || 'Erreur chargement métiers.');
   }
 
-  return {
-    metiers: [...(globalMetiersResult.data ?? []), ...(customMetiersResult.data ?? [])],
-    metiers_entreprise: metiersEntrepriseResult.data ?? [],
-  };
+  return metiers ?? [];
 };
 
 Deno.serve(async (req) => {
@@ -192,6 +165,7 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const identifiant = normalizeIdentifiant(String(body?.identifiant ?? ''));
     const motDePasse = String(body?.motDePasse ?? '');
+    const source = String(body?.source ?? 'web').toLowerCase();
 
     if (!identifiant || !motDePasse) {
       return jsonResponse({ ok: false, error: 'Identifiant ou mot de passe incorrect.' });
@@ -229,6 +203,13 @@ Deno.serve(async (req) => {
     const profilWithFirstLogin = await recordProfilFirstLogin(supabase, profilRow as Record<string, unknown>);
     profilRow = { ...profilRow, ...profilWithFirstLogin };
 
+    entreprise = await recordAdminMobileLogin(
+      supabase,
+      entreprise as Record<string, unknown>,
+      profilRow as Record<string, unknown>,
+      source
+    );
+
     const entrepriseId = String(entreprise.id);
     const isProAccount = Number(entreprise.ind_pro) === 1;
 
@@ -254,8 +235,7 @@ Deno.serve(async (req) => {
           entreprise,
           profil: stripProfil(profilRow as Record<string, unknown>),
           profils: profilsResult.data ?? [],
-          metiers: metiersPull.metiers,
-          metiers_entreprise: metiersPull.metiers_entreprise,
+          metiers: metiersPull,
           unites: unitesResult.data ?? [],
           ouvrages: [],
           ouvrage_unites: [],
@@ -351,8 +331,7 @@ Deno.serve(async (req) => {
         entreprise,
         profil: stripProfil(profilRow as Record<string, unknown>),
         profils: profilsResult.data ?? [],
-        metiers: metiersPull.metiers,
-        metiers_entreprise: metiersPull.metiers_entreprise,
+        metiers: metiersPull,
         unites: unitesResult.data ?? [],
         fournisseurs,
         ouvrages,

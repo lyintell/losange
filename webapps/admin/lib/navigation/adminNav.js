@@ -1,14 +1,23 @@
-export const CLIENTS_SECTION_LABEL = 'Clients et chantiers';
-export const OUVRAGES_SECTION_LABEL = 'Métiers et ouvrages';
-export const ARTICLES_SECTION_LABEL = 'Métiers et articles';
+export const CLIENTS_SECTION_LABEL = 'Clients, chantiers, devis';
+export const CATALOGUE_SECTION_LABEL = 'Métiers, ouvrages, articles';
+
+export const DASHBOARD_NAV_SLUG = 'tableau-de-bord';
+
+export function getDashboardNavLabel(prenom) {
+  const name = String(prenom || '').trim();
+  return name ? `Bonjour ${name}` : 'Bonjour';
+}
 
 export const ADMIN_NAV_ITEMS = [
-  { slug: 'accueil', href: '/accueil', label: 'Accueil', icon: 'home' },
+  {
+    slug: DASHBOARD_NAV_SLUG,
+    href: '/tableau-de-bord',
+    label: 'Tableau de bord',
+    icon: 'view-dashboard',
+    greetingNav: true,
+  },
   { slug: 'clients', href: '/clients', label: CLIENTS_SECTION_LABEL, icon: 'account-group' },
-  { slug: 'ouvrages', href: '/ouvrages', label: OUVRAGES_SECTION_LABEL, icon: 'hammer-wrench' },
-  { slug: 'articles', href: '/articles', label: ARTICLES_SECTION_LABEL, icon: 'package-variant' },
-  { slug: 'parametres', href: '/parametres', label: 'Paramètres', icon: 'cog' },
-  { slug: 'tableau-de-bord', href: '/tableau-de-bord', label: 'Tableau de bord', icon: 'view-dashboard' },
+  { slug: 'ouvrages', href: '/ouvrages', label: CATALOGUE_SECTION_LABEL, icon: 'hammer-wrench' },
 ];
 
 export const ADMIN_FOOTER_NAV_ITEMS = [
@@ -18,6 +27,7 @@ export const ADMIN_FOOTER_NAV_ITEMS = [
 export const ADMIN_PROTECTED_PATHS = [
   ...ADMIN_NAV_ITEMS.map((item) => item.href),
   ...ADMIN_FOOTER_NAV_ITEMS.map((item) => item.href),
+  '/articles',
 ];
 
 export function getAdminNavItem(slug) {

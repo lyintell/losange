@@ -10,11 +10,13 @@ import { useTerrainSyncRefresh } from '../hooks/useTerrainSyncRefresh';
 import {
   getMetiersForEntrepriseLocal,
   getOuvragesByEntrepriseLocal,
+  getLoggedInProfilViewLocal,
   saveOuvragesOrderLocal,
   setOuvrageActifLocal,
 } from '../db/querries';
 import { formatArticleNomAvecFournisseur } from '../utils/formatLigneMesures';
 import { getMetierColor } from '../utils/metierColors';
+import { canReorderOuvrages, canToggleOuvrageActif } from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
 
 export default function ListeOuvragesScreen({
@@ -31,6 +33,33 @@ export default function ListeOuvragesScreen({
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [togglingId, setTogglingId] = useState(null);
+  const [canToggleActif, setCanToggleActif] = useState(false);
+  const [canReorder, setCanReorder] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAccess = async () => {
+      try {
+        const profil = await getLoggedInProfilViewLocal();
+        if (!cancelled) {
+          setCanToggleActif(canToggleOuvrageActif(profil));
+          setCanReorder(canReorderOuvrages(profil));
+        }
+      } catch (error) {
+        console.error('Erreur chargement acces ouvrages:', error);
+        if (!cancelled) {
+          setCanToggleActif(false);
+          setCanReorder(false);
+        }
+      }
+    };
+
+    loadAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadData = useCallback(async () => {
     if (!entrepriseId) {
@@ -110,7 +139,7 @@ export default function ListeOuvragesScreen({
   };
 
   const handleToggleActif = async (item) => {
-    if (togglingId) return;
+    if (!canToggleActif || togglingId) return;
 
     const nextActif = Number(item.ind_actif) === 1 ? 0 : 1;
     try {
@@ -127,7 +156,7 @@ export default function ListeOuvragesScreen({
   };
 
   const handleDragEnd = async ({ data }) => {
-    if (!entrepriseId || !selectedMetierId || searchQuery.trim()) return;
+    if (!canReorder || !entrepriseId || !selectedMetierId || searchQuery.trim()) return;
 
     setOuvrages((prev) => {
       const other = prev.filter((item) => item.metier_id !== selectedMetierId);
@@ -153,7 +182,7 @@ export default function ListeOuvragesScreen({
     const isArticle = Number(item.ind_article) === 1;
     const isActif = Number(item.ind_actif) !== 0;
     const isSearching = Boolean(searchQuery.trim());
-    const dragEnabled = !isSearching && !savingOrder && !togglingId;
+    const dragEnabled = canReorder && !isSearching && !savingOrder && !togglingId;
 
     const card = (
       <View style={[styles.rowInner, !isActif && styles.rowInactive, isActive && styles.rowActive]}>
@@ -187,18 +216,20 @@ export default function ListeOuvragesScreen({
             </Card.Content>
           </Card>
         </Pressable>
-        <Pressable
-          onPress={() => handleToggleActif(item)}
-          disabled={togglingId === item.id || savingOrder}
-          hitSlop={8}
-          style={styles.checkboxWrap}
-        >
-          <Checkbox
-            status={isActif ? 'checked' : 'unchecked'}
+        {canToggleActif ? (
+          <Pressable
             onPress={() => handleToggleActif(item)}
             disabled={togglingId === item.id || savingOrder}
-          />
-        </Pressable>
+            hitSlop={8}
+            style={styles.checkboxWrap}
+          >
+            <Checkbox
+              status={isActif ? 'checked' : 'unchecked'}
+              onPress={() => handleToggleActif(item)}
+              disabled={togglingId === item.id || savingOrder}
+            />
+          </Pressable>
+        ) : null}
       </View>
     );
 
@@ -236,7 +267,10 @@ export default function ListeOuvragesScreen({
     </View>
   );
 
-  const canDrag = !searchQuery.trim();
+  const canDrag = canReorder && !searchQuery.trim();
+  const subtitle = canReorder
+    ? 'Choisissez un métier, maintenez une ligne pour réordonner. Cochez pour la prise de cotes.'
+    : 'Choisissez un métier. Touchez une ligne pour voir ou modifier.';
 
   return (
     <View style={styles.container}>
@@ -246,7 +280,7 @@ export default function ListeOuvragesScreen({
           Ouvrages / Articles
         </Text>
         <Text variant="bodyMedium" style={styles.subtitle}>
-          Choisissez un métier, maintenez une ligne pour réordonner. Cochez pour la prise de cotes.
+          {subtitle}
         </Text>
         {!searchQuery.trim() && metiers.length > 0 ? (
           <ScrollView

@@ -199,6 +199,10 @@ export default function ClientChantierFormScreen({
   const isFormValid =
     Boolean(clientNom.trim()) && Boolean(clientTelephone.trim()) && Boolean(chantierNom.trim());
 
+  const canEditChantierFields =
+    Boolean(resolvedClientId) ||
+    (Boolean(clientNom.trim()) && Boolean(clientTelephone.trim()));
+
   const runClientSearch = useCallback(
     async (query) => {
       if (!entrepriseId || !query.trim()) {
@@ -370,7 +374,10 @@ export default function ClientChantierFormScreen({
       await onNextRef.current?.(buildPayload());
     } catch (error) {
       console.error('Erreur enregistrement client/chantier:', error);
-      Alert.alert('Erreur', "Impossible d'enregistrer le client et le chantier.");
+      Alert.alert(
+        'Erreur',
+        error?.message || "Impossible d'enregistrer le client et le chantier."
+      );
     } finally {
       setSaving(false);
     }
@@ -487,20 +494,26 @@ export default function ClientChantierFormScreen({
           Chantier
         </Text>
 
-        {!resolvedClientId ? (
+        {!canEditChantierFields ? (
           <Text style={styles.hintText}>
-            Sélectionnez un client existant pour rechercher parmi ses chantiers.
+            Renseignez le nom et le téléphone du client, ou sélectionnez un client existant.
           </Text>
-        ) : null}
+        ) : resolvedClientId ? (
+          <Text style={styles.hintText}>
+            Saisissez un nouveau chantier ou choisissez-en un dans la liste.
+          </Text>
+        ) : (
+          <Text style={styles.hintText}>Nouveau client : saisissez le nom du chantier.</Text>
+        )}
 
         <TextInput
           mode="outlined"
           label="Nom du chantier"
-          placeholder={resolvedClientId ? 'Nom du chantier' : 'Client requis'}
+          placeholder={canEditChantierFields ? 'Nom du chantier' : 'Client requis'}
           value={chantierNom}
           onChangeText={handleChantierNomChange}
           onFocus={handleChantierNomFocus}
-          editable={Boolean(resolvedClientId)}
+          editable={canEditChantierFields}
           style={styles.input}
           right={
             searchingChantiers ? (

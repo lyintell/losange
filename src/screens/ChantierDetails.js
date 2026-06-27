@@ -16,12 +16,13 @@ import {
   getLignesByReleveIdLocal,
   getLoggedInProfilViewLocal,
   getReleveByIdLocal,
+  getSectionOrderByReleveIdLocal,
   updateChantierStatusLocal,
   updateLigneReleveIndCompleteLocal,
   updateReleveStatusLocal,
 } from '../db/querries';
 import { CHANTIER_PHOTO_SLOTS, resolveTerrainImageUri } from '../db/terrainImageStorage';
-import { canModifyReleveForProfil, hidesPriceUiForRole } from '../utils/terrainAccess';
+import { canModifyReleveForProfil, canChangeReleveStatus, hidesPriceUiForRole } from '../utils/terrainAccess';
 import { formatPriseParLine } from '../utils/releveDisplay';
 import {
   downloadDevisPdf,
@@ -69,6 +70,7 @@ export default function ChantierDetails({
 }) {
   const [loading, setLoading] = useState(false);
   const [lignes, setLignes] = useState([]);
+  const [sectionOrder, setSectionOrder] = useState([]);
   const [releve, setReleve] = useState(null);
   const [chantierData, setChantierData] = useState(chantier);
   const [showPrices, setShowPrices] = useState(false);
@@ -78,7 +80,7 @@ export default function ChantierDetails({
   const [noteModal, setNoteModal] = useState({ visible: false, note: '', ouvrageNom: '' });
   const [hidesDevisUi, setHidesDevisUi] = useState(false);
   const [isProAccount, setIsProAccount] = useState(false);
-  const [canModifyReleve, setCanModifyReleve] = useState(false);
+  const [canEditReleveStatus, setCanEditReleveStatus] = useState(false);
   const [imageModal, setImageModal] = useState({
     visible: false,
     uri: null,
@@ -111,25 +113,29 @@ export default function ChantierDetails({
   const loadLignes = useCallback(async () => {
     if (!chantier?.id || !releveId) {
       setLignes([]);
+      setSectionOrder([]);
       setReleve(null);
       return;
     }
 
     try {
       setLoading(true);
-      const [releveData, lignesData, freshChantier] = await Promise.all([
+      const [releveData, lignesData, freshChantier, order] = await Promise.all([
         getReleveByIdLocal(releveId),
         getLignesByReleveIdLocal(releveId),
         getChantierWithClientByIdLocal(chantier.id),
+        getSectionOrderByReleveIdLocal(releveId),
       ]);
       setReleve(releveData || null);
       setLignes(lignesData || []);
+      setSectionOrder(order || []);
       if (freshChantier) {
         setChantierData(freshChantier);
       }
     } catch (error) {
       console.error('Erreur chargement lignes chantier:', error);
       setLignes([]);
+      setSectionOrder([]);
       setReleve(null);
     } finally {
       setLoading(false);
@@ -146,7 +152,9 @@ export default function ChantierDetails({
         const profil = await getLoggedInProfilViewLocal();
         setHidesDevisUi(hidesPriceUiForRole(profil?.role));
         setIsProAccount(Boolean(profil?.is_pro));
-        setCanModifyReleve(canModifyReleveForProfil(profil, releve));
+        setCanEditReleveStatus(
+          canChangeReleveStatus(profil) && canModifyReleveForProfil(profil, releve)
+        );
         if (hidesPriceUiForRole(profil?.role)) {
           setShowPrices(false);
         }
@@ -154,7 +162,7 @@ export default function ChantierDetails({
         console.error('Erreur chargement acces chantier:', error);
         setHidesDevisUi(false);
         setIsProAccount(false);
-        setCanModifyReleve(false);
+        setCanEditReleveStatus(false);
       }
     };
     loadAccess();
@@ -316,7 +324,7 @@ export default function ChantierDetails({
   const generateExportPdf = async () => {
     const entreprise = await getEntrepriseByIdLocal(entrepriseId);
     if (exportOverlayMode === 'pdf') {
-      return generateDimensionsPdfFile({ entreprise, chantier, lignes });
+      return generateDimensionsPdfFile({ entreprise, chantier, lignes, sectionOrder });
     }
     return generateDevisPdfFile({
       entreprise,
@@ -403,7 +411,7 @@ export default function ChantierDetails({
             </Text>
             <ReleveStatutBadge
               status={releve?.status}
-              disabled={!canModifyReleve}
+              disabled={!canEditReleveStatus}
               onStatusChange={handleReleveStatusChange}
             />
           </View>
@@ -411,7 +419,7 @@ export default function ChantierDetails({
           <View style={styles.releveMetaRow}>
             <ReleveStatutBadge
               status={releve?.status}
-              disabled={!canModifyReleve}
+              disabled={!canEditReleveStatus}
               onStatusChange={handleReleveStatusChange}
             />
           </View>
@@ -421,6 +429,7 @@ export default function ChantierDetails({
       <LignesReleveGroupedSections
         lignes={lignes}
         variant="details"
+        sectionOrder={sectionOrder}
         showPrices={showPrices}
         onLignePress={handleLignePress}
         onLigneDoublePress={isProAccount ? handleToggleComplete : undefined}

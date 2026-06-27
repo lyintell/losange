@@ -11,6 +11,7 @@ export default function ArticlesTable({
   metierId = null,
   showMetierColumn = true,
   showFournisseurColumn = true,
+  onRowSelect = null,
 }) {
   if (!rows.length) {
     return <p className="empty-state">Aucun article trouvé.</p>;
@@ -39,6 +40,7 @@ export default function ArticlesTable({
               href={articleHref(row)}
               showMetierColumn={showMetierColumn}
               showFournisseurColumn={showFournisseurColumn}
+              onRowSelect={onRowSelect}
             />
           ))}
         </tbody>
@@ -47,17 +49,27 @@ export default function ArticlesTable({
   );
 }
 
-function ArticleRow({ row, href, showMetierColumn, showFournisseurColumn }) {
-  const handleRowClick = useRowNavigate(href);
+function ArticleRow({ row, href, showMetierColumn, showFournisseurColumn, onRowSelect }) {
+  const handleNavigate = useRowNavigate(href);
+  const handleRowClick = onRowSelect
+    ? (event) => {
+        event.preventDefault();
+        onRowSelect(row);
+      }
+    : handleNavigate;
   const metierColor = getMetierColor(row.metier_id);
 
   return (
     <tr className="data-table-row--clickable" onClick={handleRowClick}>
       <td>{row.numero}</td>
       <td>
-        <Link href={href} className="table-link">
-          {formatArticleDisplayName(row)}
-        </Link>
+        {onRowSelect ? (
+          <span className="table-link">{formatArticleDisplayName(row)}</span>
+        ) : (
+          <Link href={href} className="table-link">
+            {formatArticleDisplayName(row)}
+          </Link>
+        )}
       </td>
       {showMetierColumn ? (
         <td>

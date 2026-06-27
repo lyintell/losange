@@ -13,8 +13,10 @@ import {
   isLigneDimension,
   shouldAfficherFormuleDerivee,
 } from './formatLigneMesures';
+import { isDefaultSectionNom } from './defaultSection';
 import { getMetierColor } from './metierColors';
 import { groupLignesByMetier } from './groupLignesByMetier';
+import { groupLignesBySection } from './groupLignesBySection';
 
 export function formatDevisDimension(ligne) {
   if (!isLigneDimension(ligne)) return null;
@@ -36,7 +38,8 @@ export function formatDevisQuantite(ligne) {
   return nomUnite ? `${qty} ${nomUnite}` : qty;
 }
 
-function groupByMetierThenOuvrage(lignes = []) {
+function groupByMetierThenOuvrageInOrder(lignes = []) {
+  const metierOrder = [];
   const metierMap = new Map();
 
   lignes.forEach((ligne) => {
@@ -48,20 +51,20 @@ function groupByMetierThenOuvrage(lignes = []) {
     const ouvrageKey = `${metierId}::${ouvrageNom}::${isDimension ? `dim::${ligne.formule || ''}` : nomUnite}`;
 
     if (!metierMap.has(metierId)) {
+      metierOrder.push(metierId);
       metierMap.set(metierId, {
         metierId,
         metierNom,
+        ouvrageOrder: [],
         ouvrageMap: new Map(),
       });
     }
 
     const metierGroup = metierMap.get(metierId);
     if (!metierGroup.ouvrageMap.has(ouvrageKey)) {
+      metierGroup.ouvrageOrder.push(ouvrageKey);
       metierGroup.ouvrageMap.set(ouvrageKey, {
         ouvrageNom,
-        nomUnite,
-        formule: ligne.formule || null,
-        indDimension: isDimension ? 1 : 0,
         lignes: [],
       });
     }
@@ -69,18 +72,14 @@ function groupByMetierThenOuvrage(lignes = []) {
     metierGroup.ouvrageMap.get(ouvrageKey).lignes.push(ligne);
   });
 
-  return Array.from(metierMap.values())
-    .sort((a, b) => a.metierNom.localeCompare(b.metierNom, 'fr', { sensitivity: 'base' }))
-    .map((metierGroup) => ({
+  return metierOrder.map((metierId) => {
+    const metierGroup = metierMap.get(metierId);
+    return {
       metierId: metierGroup.metierId,
       metierNom: metierGroup.metierNom,
-      ouvrages: Array.from(metierGroup.ouvrageMap.values())
-        .sort((a, b) => a.ouvrageNom.localeCompare(b.ouvrageNom, 'fr', { sensitivity: 'base' }))
-        .map((ouvrageGroup) => ({
-          ouvrageNom: ouvrageGroup.ouvrageNom,
-          lignes: ouvrageGroup.lignes,
-        })),
-    }));
+      ouvrages: metierGroup.ouvrageOrder.map((ouvrageKey) => metierGroup.ouvrageMap.get(ouvrageKey)),
+    };
+  });
 }
 
 function buildOuvrageKey(metierId, ligne) {
@@ -97,69 +96,104 @@ function buildOuvrageLabel(ligne) {
   return formatOuvrageNomAvecUnite(ouvrageNom, nomUnite, isDimension ? 1 : 0, ligne.formule);
 }
 
-/** PDF relevés : groupement par métier, ordre de saisie conservé (devis inchangé). */
-export function buildRelevesTableRows(lignes = []) {
-  const metierGroups = groupLignesByMetier(lignes);
+/** PDF relevés : sections puis métiers, ordre de saisie conservé. */
+export function buildRelevesTableRows(lignes = [], sectionOrder = null) {
+  const sectionGroups = groupLignesBySection(lignes, sectionOrder);
   const rows = [];
+  let hasPreviousContent = false;
 
-  metierGroups.forEach((metierGroup, metierIndex) => {
-    let previousOuvrageKey = null;
+  sectionGroups.forEach((sectionGroup) => {
+    const isDefaultSection = isDefaultSectionNom(sectionGroup.sectionNom);
+    const metierGroups = groupLignesByMetier(sectionGroup.lignes);
 
-    metierGroup.lignes.forEach((ligne, ligneIndex) => {
-      const ouvrageKey = buildOuvrageKey(metierGroup.metierId, ligne);
-      const showOuvrage = ouvrageKey !== previousOuvrageKey;
-      previousOuvrageKey = ouvrageKey;
+    if (hasPreviousContent && sectionGroup.lignes.length) {
+      rows.push({ isSectionSeparator: true });
+    }
 
-      rows.push({
-        metierDivider: metierIndex > 0 && ligneIndex === 0,
-        showMetier: ligneIndex === 0,
-        showOuvrage,
-        metierId: metierGroup.metierId,
-        metierNom: metierGroup.metierNom,
-        metierColor: getMetierColor(metierGroup.metierId),
-        ouvrageNom: buildOuvrageLabel(ligne),
-        dimension: formatDevisDimension(ligne),
-        dimensionLxhN: formatLigneDimensionsLxhN(ligne),
-        dimensionEquivalence: formatReleveDimensionEquivalence(ligne),
-        nombrePdf: formatLigneNombrePdf(ligne),
-        isDimensionLine: isLigneDimension(ligne),
-        note: ligne.note?.trim() || '',
+    if (!isDefaultSection && sectionGroup.lignes.length) {
+      rows.push({ isSectionHeader: true, sectionNom: sectionGroup.sectionNom });
+    }
+
+    metierGroups.forEach((metierGroup, metierIndex) => {
+      let previousOuvrageKey = null;
+
+      metierGroup.lignes.forEach((ligne, ligneIndex) => {
+        const ouvrageKey = buildOuvrageKey(metierGroup.metierId, ligne);
+        const showOuvrage = ouvrageKey !== previousOuvrageKey;
+        previousOuvrageKey = ouvrageKey;
+
+        rows.push({
+          metierDivider: metierIndex > 0 && ligneIndex === 0,
+          showMetier: ligneIndex === 0,
+          showOuvrage,
+          metierId: metierGroup.metierId,
+          metierNom: metierGroup.metierNom,
+          metierColor: getMetierColor(metierGroup.metierId),
+          ouvrageNom: buildOuvrageLabel(ligne),
+          dimension: formatDevisDimension(ligne),
+          dimensionLxhN: formatLigneDimensionsLxhN(ligne),
+          dimensionEquivalence: formatReleveDimensionEquivalence(ligne),
+          nombrePdf: formatLigneNombrePdf(ligne),
+          isDimensionLine: isLigneDimension(ligne),
+          note: ligne.note?.trim() || '',
+        });
       });
     });
+
+    if (sectionGroup.lignes.length) {
+      hasPreviousContent = true;
+    }
   });
 
   return rows;
 }
 
-export function buildDevisTableRows(lignes = []) {
-  const metierGroups = groupByMetierThenOuvrage(lignes);
+export function buildDevisTableRows(lignes = [], sectionOrder = null) {
+  const sectionGroups = groupLignesBySection(lignes, sectionOrder);
   const rows = [];
+  let hasPreviousContent = false;
 
-  metierGroups.forEach((metierGroup, metierIndex) => {
-    metierGroup.ouvrages.forEach((ouvrageGroup, ouvrageIndex) => {
-      const ligneCount = ouvrageGroup.lignes.length;
-      ouvrageGroup.lignes.forEach((ligne, ligneIndex) => {
-        rows.push({
-          metierDivider: metierIndex > 0 && ouvrageIndex === 0 && ligneIndex === 0,
-          ouvrageLigneSuite: ligneIndex > 0,
-          ouvrageLigneBeforeSuite: ligneIndex < ligneCount - 1,
-          showMetier: ouvrageIndex === 0 && ligneIndex === 0,
-          showOuvrage: ligneIndex === 0,
-          metierId: metierGroup.metierId,
-          metierNom: metierGroup.metierNom,
-          metierColor: getMetierColor(metierGroup.metierId),
-          ouvrageNom: ouvrageGroup.ouvrageNom,
-          dimension: formatDevisDimension(ligne),
-          dimensionLxhN: formatLigneDimensionsLxhN(ligne),
-          nombrePdf: formatLigneNombrePdf(ligne),
-          isDimensionLine: isLigneDimension(ligne),
-          note: ligne.note?.trim() || '',
-          quantiteLabel: formatDevisQuantite(ligne),
-          prixUnitaire: getLignePrixUnitaireApplique(ligne),
-          montant: getLigneMontant(ligne),
+  sectionGroups.forEach((sectionGroup) => {
+    const isDefaultSection = isDefaultSectionNom(sectionGroup.sectionNom);
+    const metierGroups = groupByMetierThenOuvrageInOrder(sectionGroup.lignes);
+
+    if (hasPreviousContent && sectionGroup.lignes.length) {
+      rows.push({ isSectionSeparator: true });
+    }
+
+    if (!isDefaultSection && sectionGroup.lignes.length) {
+      rows.push({ isSectionHeader: true, sectionNom: sectionGroup.sectionNom });
+    }
+
+    metierGroups.forEach((metierGroup) => {
+      metierGroup.ouvrages.forEach((ouvrageGroup, ouvrageIndex) => {
+        const ligneCount = ouvrageGroup.lignes.length;
+        ouvrageGroup.lignes.forEach((ligne, ligneIndex) => {
+          rows.push({
+            ouvrageLigneSuite: ligneIndex > 0,
+            ouvrageLigneBeforeSuite: ligneIndex < ligneCount - 1,
+            showMetier: ouvrageIndex === 0 && ligneIndex === 0,
+            showOuvrage: ligneIndex === 0,
+            metierId: metierGroup.metierId,
+            metierNom: metierGroup.metierNom,
+            metierColor: getMetierColor(metierGroup.metierId),
+            ouvrageNom: ouvrageGroup.ouvrageNom,
+            dimension: formatDevisDimension(ligne),
+            dimensionLxhN: formatLigneDimensionsLxhN(ligne),
+            nombrePdf: formatLigneNombrePdf(ligne),
+            isDimensionLine: isLigneDimension(ligne),
+            note: ligne.note?.trim() || '',
+            quantiteLabel: formatDevisQuantite(ligne),
+            prixUnitaire: getLignePrixUnitaireApplique(ligne),
+            montant: getLigneMontant(ligne),
+          });
         });
       });
     });
+
+    if (sectionGroup.lignes.length) {
+      hasPreviousContent = true;
+    }
   });
 
   return rows;

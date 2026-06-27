@@ -19,13 +19,27 @@ export const canAccessRapports = (profil) =>
 
 export const canAccessDatabaseMetiers = (profil) => isAdminRole(profil?.role);
 
+export const canAccessDatabaseSections = (profil) => isAdminRole(profil?.role);
+
 export const canAccessDatabaseOuvrages = (profil) =>
   ROLES_DATABASE_OUVRAGES.has(profil?.role);
 
 export const canManageDatabaseOuvrages = (profil) =>
   ROLES_DATABASE_OUVRAGES.has(profil?.role);
 
+export const canToggleOuvrageActif = (profil) => isAdminRole(profil?.role);
+
+export const canReorderOuvrages = (profil) => isAdminRole(profil?.role);
+
+export const canDeleteOuvrage = (profil) => isAdminRole(profil?.role);
+
+export const canEditOuvrageNomAndUnite = (profil) => isAdminRole(profil?.role);
+
 export const canManageClients = (profil) => isAdminRole(profil?.role);
+
+export const canSeeClientPhone = (profil) => !ROLES_HIDING_PRICE_UI.has(profil?.role);
+
+export const canChangeReleveStatus = (profil) => !ROLES_HIDING_PRICE_UI.has(profil?.role);
 
 export const canCreateReleveOrLigne = (profil) => profil?.role !== ROLE_COMMERCIAL_S;
 

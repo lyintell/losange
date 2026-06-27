@@ -3,11 +3,11 @@ import AdminPageShell from '@/components/layout/AdminPageShell';
 import ClientChantiersClient from '@/components/clients/ClientChantiersClient';
 import { fetchChantiersByClientId, fetchClientById } from '@/lib/chantiers/queries';
 import { getSession } from '@/lib/auth/session';
-import { getAdminNavItem } from '@/lib/navigation/adminNav';
+import { CLIENTS_SECTION_LABEL, getAdminNavItem } from '@/lib/navigation/adminNav';
 import { breadcrumbClientChantiers } from '@/lib/navigation/breadcrumbs';
 
 export const metadata = {
-  title: 'Clients et chantiers — Losange Admin',
+  title: `${CLIENTS_SECTION_LABEL} — Losange Admin`,
 };
 
 export default async function ClientChantiersPage({ params }) {

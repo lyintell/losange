@@ -14,6 +14,7 @@ export default function OuvragesListClient({
   metierId = null,
   showMetierColumn = true,
   searchMode = 'default',
+  onRowSelect = null,
 }) {
   const [query, setQuery] = useState('');
 
@@ -41,6 +42,7 @@ export default function OuvragesListClient({
         rows={filtered}
         metierId={metierId}
         showMetierColumn={showMetierColumn}
+        onRowSelect={onRowSelect}
       />
     </div>
   );

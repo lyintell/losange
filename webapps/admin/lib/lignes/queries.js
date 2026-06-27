@@ -14,13 +14,16 @@ export async function fetchLignesByReleveId(releveId) {
   if (releveError) throw new Error(releveError.message || 'Erreur chargement relevé.');
   if (!releve) return { releve: null, lignes: [] };
 
-  const { data: lignes, error } = await supabase
-    .from('ligne_releves')
-    .select(
-      `
+  const [{ data: lignes, error }, { data: sectionReleves, error: sectionRelevesError }] =
+    await Promise.all([
+      supabase
+        .from('ligne_releves')
+        .select(
+          `
       id,
       releve_id,
       ouvrage_unite_id,
+      section_id,
       largeur,
       hauteur,
       profondeur,
@@ -30,6 +33,10 @@ export async function fetchLignesByReleveId(releveId) {
       montant,
       note,
       ind_complete,
+      ordre,
+      sections (
+        nom
+      ),
       ouvrage_unites!inner (
         prix_unitaire,
         unites!inner (
@@ -47,12 +54,26 @@ export async function fetchLignesByReleveId(releveId) {
         )
       )
     `
-    )
-    .eq('releve_id', releveId)
-    .is('supprime_le', null)
-    .order('cree_le', { ascending: true });
+        )
+        .eq('releve_id', releveId)
+        .is('supprime_le', null)
+        .order('ordre', { ascending: true })
+        .order('cree_le', { ascending: true }),
+      supabase
+        .from('section_releves')
+        .select('section_id, ordre')
+        .eq('releve_id', releveId)
+        .is('supprime_le', null),
+    ]);
 
   if (error) throw new Error(error.message || 'Erreur chargement lignes.');
+  if (sectionRelevesError) {
+    throw new Error(sectionRelevesError.message || 'Erreur chargement sections relevé.');
+  }
+
+  const sectionOrdreById = new Map(
+    (sectionReleves || []).map((row) => [row.section_id, row.ordre])
+  );
 
   const normalized = (lignes || []).map((ligne) => {
     const ou = ligne.ouvrage_unites;
@@ -74,6 +95,10 @@ export async function fetchLignesByReleveId(releveId) {
       montant: ligne.montant,
       note: ligne.note,
       ind_complete: ligne.ind_complete,
+      ordre: ligne.ordre,
+      section_id: ligne.section_id || null,
+      section_nom: ligne.sections?.nom || null,
+      section_ordre: sectionOrdreById.get(ligne.section_id) ?? null,
       releve_date_facture: releve.date_facture,
       ouvrage_nom: ouvrage?.nom,
       metier_id: metier?.id,

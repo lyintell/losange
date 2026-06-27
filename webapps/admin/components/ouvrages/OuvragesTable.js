@@ -5,7 +5,12 @@ import UnitesPrixCell from '@/components/catalogue/UnitesPrixCell';
 import { useRowNavigate } from '@/components/ui/useRowNavigate';
 import { getMetierColor } from '@/lib/format/metierColors';
 
-export default function OuvragesTable({ rows, metierId = null, showMetierColumn = true }) {
+export default function OuvragesTable({
+  rows,
+  metierId = null,
+  showMetierColumn = true,
+  onRowSelect = null,
+}) {
   if (!rows.length) {
     return <p className="empty-state">Aucun ouvrage trouvé.</p>;
   }
@@ -31,6 +36,7 @@ export default function OuvragesTable({ rows, metierId = null, showMetierColumn 
               row={row}
               href={ouvrageHref(row)}
               showMetierColumn={showMetierColumn}
+              onRowSelect={onRowSelect}
             />
           ))}
         </tbody>
@@ -39,17 +45,27 @@ export default function OuvragesTable({ rows, metierId = null, showMetierColumn 
   );
 }
 
-function OuvrageRow({ row, href, showMetierColumn }) {
-  const handleRowClick = useRowNavigate(href);
+function OuvrageRow({ row, href, showMetierColumn, onRowSelect }) {
+  const handleNavigate = useRowNavigate(href);
+  const handleRowClick = onRowSelect
+    ? (event) => {
+        event.preventDefault();
+        onRowSelect(row);
+      }
+    : handleNavigate;
   const metierColor = getMetierColor(row.metier_id);
 
   return (
     <tr className="data-table-row--clickable" onClick={handleRowClick}>
       <td>{row.numero}</td>
       <td>
-        <Link href={href} className="table-link">
-          {row.nom}
-        </Link>
+        {onRowSelect ? (
+          <span className="table-link">{row.nom}</span>
+        ) : (
+          <Link href={href} className="table-link">
+            {row.nom}
+          </Link>
+        )}
       </td>
       {showMetierColumn ? (
         <td>

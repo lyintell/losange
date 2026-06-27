@@ -37,62 +37,18 @@ export function breadcrumbChantierDetail({
   ];
 }
 
-export function breadcrumbOuvragesMetiersList() {
+export function breadcrumbMetiersList() {
   return breadcrumbSingle('Liste des métiers');
 }
 
-export function breadcrumbMetierOuvrages(metier) {
+export function breadcrumbMetierCatalogue(metier, tab = 'ouvrages') {
   const name = metier?.nom?.trim() || 'Métier';
   const metierId = metier?.id;
+  const listLabel = tab === 'articles' ? 'Liste des articles' : 'Liste des ouvrages';
 
   return [
     { label: 'Liste des métiers', href: '/ouvrages' },
     { label: name, href: metierId ? `/ouvrages/${metierId}` : undefined },
-    { label: 'Liste des ouvrages' },
-  ];
-}
-
-export function breadcrumbOuvrageDetail({ metier, ouvrage }) {
-  const metierLabel = metier?.nom?.trim() || 'Métier';
-  const ouvrageLabel = ouvrage?.nom?.trim() || 'Ouvrage';
-  const metierId = metier?.id;
-  const ouvrageId = ouvrage?.id;
-
-  return [
-    { label: 'Liste des métiers', href: '/ouvrages' },
-    { label: metierLabel, href: metierId ? `/ouvrages/${metierId}` : undefined },
-    { label: 'Liste des ouvrages', href: metierId ? `/ouvrages/${metierId}` : undefined },
-    { label: ouvrageLabel, href:
-        metierId && ouvrageId ? `/ouvrages/${metierId}/ouvrages/${ouvrageId}` : undefined },
-  ];
-}
-
-export function breadcrumbArticlesMetiersList() {
-  return breadcrumbSingle('Liste des métiers');
-}
-
-export function breadcrumbMetierArticles(metier) {
-  const name = metier?.nom?.trim() || 'Métier';
-  const metierId = metier?.id;
-
-  return [
-    { label: 'Liste des métiers', href: '/articles' },
-    { label: name, href: metierId ? `/articles/${metierId}` : undefined },
-    { label: 'Liste des articles' },
-  ];
-}
-
-export function breadcrumbArticleDetail({ metier, article }) {
-  const metierLabel = metier?.nom?.trim() || 'Métier';
-  const articleLabel = article?.nom?.trim() || 'Article';
-  const metierId = metier?.id;
-  const articleId = article?.id;
-
-  return [
-    { label: 'Liste des métiers', href: '/articles' },
-    { label: metierLabel, href: metierId ? `/articles/${metierId}` : undefined },
-    { label: 'Liste des articles', href: metierId ? `/articles/${metierId}` : undefined },
-    { label: articleLabel, href:
-        metierId && articleId ? `/articles/${metierId}/articles/${articleId}` : undefined },
+    { label: listLabel },
   ];
 }

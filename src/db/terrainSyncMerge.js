@@ -3,16 +3,17 @@ import { upsertRows } from './terrainSync';
 
 const TRANSACTIONAL_TABLES = [
   'metiers',
-  'metiers_entreprise',
+  'sections',
   'fournisseurs',
   'ouvrages',
   'ouvrage_unites',
   'clients',
   'chantiers',
   'releves',
+  'section_releves',
   'ligne_releves',
 ];
-const CATALOGUE_TABLES = ['metiers', 'unites'];
+const CATALOGUE_TABLES = ['unites'];
 
 export const parseSyncTimestamp = (value) => {
   if (!value) return 0;
@@ -50,15 +51,7 @@ export const mergeCatalogueFromPull = async (pull = {}) => {
       const key = tableName === 'ouvrage_unites' ? 'ouvrage_unites' : tableName;
       const rows = Array.isArray(pull[key]) ? pull[key] : [];
       if (!rows.length) continue;
-
-      const toUpsert =
-        tableName === 'metiers'
-          ? rows.filter((row) => !row?.entreprise_id)
-          : rows;
-
-      if (toUpsert.length) {
-        await upsertRows(db, tableName, toUpsert);
-      }
+      await upsertRows(db, tableName, rows);
     }
   });
 };
@@ -77,17 +70,9 @@ export const mergeTransactionalFromPull = async (pull = {}, { forceAll = false }
           continue;
         }
 
-        let localRow = null;
-        if (tableName === 'metiers_entreprise') {
-          localRow = await db.getFirstAsync(
-            `SELECT * FROM metiers_entreprise WHERE entreprise_id = ? AND metier_id = ?;`,
-            [remoteRow.entreprise_id, remoteRow.metier_id]
-          );
-        } else {
-          localRow = await db.getFirstAsync(`SELECT * FROM ${tableName} WHERE id = ?;`, [
-            remoteRow.id,
-          ]);
-        }
+        const localRow = await db.getFirstAsync(`SELECT * FROM ${tableName} WHERE id = ?;`, [
+          remoteRow.id,
+        ]);
 
         if (shouldApplyRemoteRow(localRow, remoteRow)) {
           toApply.push(remoteRow);

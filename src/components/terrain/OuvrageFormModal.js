@@ -30,7 +30,14 @@ const buildUniteDrafts = (unites) =>
     prixUnitaire: String(unite.prix_unitaire ?? ''),
   }));
 
-export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, onSaved }) {
+export default function OuvrageFormModal({
+  visible,
+  ouvrage,
+  unites,
+  editPriceOnly = false,
+  onDismiss,
+  onSaved,
+}) {
   const isArticle = Number(ouvrage?.ind_article) === 1;
   const [catalogueUnites, setCatalogueUnites] = useState([]);
   const [loadingUnites, setLoadingUnites] = useState(false);
@@ -88,6 +95,12 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
     setShowFournisseurDropdown(false);
 
     const load = async () => {
+      if (editPriceOnly) {
+        setCatalogueUnites([]);
+        setLoadingUnites(false);
+        return;
+      }
+
       setLoadingUnites(true);
       try {
         const data = await getAllUnitesLocal();
@@ -102,7 +115,7 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
     };
 
     load();
-  }, [visible, ouvrage, unites]);
+  }, [visible, ouvrage, unites, editPriceOnly]);
 
   const handleUnitePrixChange = (ouvrageUniteId, value) => {
     setUniteDrafts((prev) =>
@@ -138,11 +151,12 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
 
   const handleSave = async () => {
     if (!ouvrage?.id) return;
-    if (!nom.trim()) {
+
+    if (!editPriceOnly && !nom.trim()) {
       setError(isArticle ? "Saisissez le nom de l'article." : "Saisissez le nom de l'ouvrage.");
       return;
     }
-    if (uniteDrafts.some((draft) => !draft.uniteId)) {
+    if (!editPriceOnly && uniteDrafts.some((draft) => !draft.uniteId)) {
       setError('Choisissez une unité pour chaque ligne.');
       return;
     }
@@ -152,15 +166,20 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
     try {
       const payload = {
         ouvrageId: ouvrage.id,
-        nom: nom.trim(),
-        unites: uniteDrafts.map((draft) => ({
-          ouvrageUniteId: draft.ouvrageUniteId,
-          uniteId: draft.uniteId,
-          prixUnitaire: draft.prixUnitaire,
-        })),
+        nom: editPriceOnly ? ouvrage.nom : nom.trim(),
+        unites: uniteDrafts.map((draft) => {
+          const originalUnite = (unites || []).find(
+            (unite) => unite.ouvrage_unite_id === draft.ouvrageUniteId
+          );
+          return {
+            ouvrageUniteId: draft.ouvrageUniteId,
+            uniteId: editPriceOnly ? originalUnite?.unite_id || draft.uniteId : draft.uniteId,
+            prixUnitaire: draft.prixUnitaire,
+          };
+        }),
       };
 
-      if (isArticle) {
+      if (isArticle && !editPriceOnly) {
         payload.fournisseurId = selectedFournisseurId;
         payload.fournisseurNom = fournisseurNom.trim() || null;
       }
@@ -180,7 +199,13 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
       <Modal visible={visible} onDismiss={onDismiss} contentContainerStyle={styles.modal}>
         <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <Text variant="titleLarge" style={styles.title}>
-            {isArticle ? "Modifier l'article" : "Modifier l'ouvrage"}
+            {editPriceOnly
+              ? isArticle
+                ? "Modifier le prix de l'article"
+                : "Modifier le prix de l'ouvrage"
+              : isArticle
+                ? "Modifier l'article"
+                : "Modifier l'ouvrage"}
           </Text>
 
           <View style={styles.contextBlock}>
@@ -195,15 +220,24 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
             </Text>
           </View>
 
-          <TextInput
-            mode="outlined"
-            label={isArticle ? "Nom de l'article" : "Nom de l'ouvrage"}
-            value={nom}
-            onChangeText={setNom}
-            style={styles.input}
-          />
+          {editPriceOnly ? (
+            <View style={styles.contextBlock}>
+              <Text style={styles.contextLabel}>
+                {isArticle ? "Nom de l'article" : "Nom de l'ouvrage"}
+              </Text>
+              <Text style={styles.contextValue}>{nom || '—'}</Text>
+            </View>
+          ) : (
+            <TextInput
+              mode="outlined"
+              label={isArticle ? "Nom de l'article" : "Nom de l'ouvrage"}
+              value={nom}
+              onChangeText={setNom}
+              style={styles.input}
+            />
+          )}
 
-          {isArticle ? (
+          {isArticle && !editPriceOnly ? (
             <>
               <TextInput
                 mode="outlined"
@@ -246,6 +280,13 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
             </>
           ) : null}
 
+          {isArticle && editPriceOnly ? (
+            <View style={styles.contextBlock}>
+              <Text style={styles.contextLabel}>Fournisseur</Text>
+              <Text style={styles.contextValue}>{fournisseurNom || '—'}</Text>
+            </View>
+          ) : null}
+
           {uniteDrafts.length === 0 ? (
             <Text style={styles.mutedText}>Aucune unité associée.</Text>
           ) : (
@@ -259,7 +300,12 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
                     {isArticle ? 'Unité article' : 'Ouvrage unité'}
                   </Text>
 
-                  {loadingUnites ? (
+                  {editPriceOnly ? (
+                    <>
+                      <Text style={styles.uniteMeta}>Unité : {draft.label || '—'}</Text>
+                      <Text style={styles.uniteMeta}>Type : {draft.typeLabel}</Text>
+                    </>
+                  ) : loadingUnites ? (
                     <ActivityIndicator
                       size="small"
                       color={chantierColors.primary}
@@ -298,7 +344,7 @@ export default function OuvrageFormModal({ visible, ouvrage, unites, onDismiss, 
                     </Menu>
                   )}
 
-                  <Text style={styles.uniteMeta}>Type : {draft.typeLabel}</Text>
+                  {!editPriceOnly ? <Text style={styles.uniteMeta}>Type : {draft.typeLabel}</Text> : null}
 
                   <TextInput
                     mode="outlined"

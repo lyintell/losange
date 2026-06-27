@@ -70,29 +70,30 @@ const ADMIN_TABLE_KEYS = [
   'clients',
   'chantiers',
   'metiers',
-  'metiers_entreprise',
+  'sections',
   'fournisseurs',
   'ouvrages',
   'unites',
   'ouvrage_unites',
   'releves',
+  'section_releves',
   'ligne_releves',
 ] as const;
 
 const SOFT_DELETE_TABLES = new Set([
   'clients',
   'chantiers',
+  'metiers',
+  'sections',
   'releves',
+  'section_releves',
   'ligne_releves',
   'fournisseurs',
   'ouvrages',
   'ouvrage_unites',
-  'metiers_entreprise',
 ]);
 
-const COMPOSITE_KEY_TABLES: Record<string, string[]> = {
-  metiers_entreprise: ['entreprise_id', 'metier_id'],
-};
+const COMPOSITE_KEY_TABLES: Record<string, string[]> = {};
 
 const parseCompositeRecordId = (tableKey: string, recordId: string) => {
   const parts = COMPOSITE_KEY_TABLES[tableKey];
@@ -128,6 +129,25 @@ const assertTableKey = (tableKey: string) => {
 };
 
 const TIER_MARKER_FIELDS = ['pro_activated_le', 'pro_downgraded_le'] as const;
+const DEFAULT_SECTION_NOM = 'Pas de section';
+
+const createDefaultSectionForEntreprise = async (
+  supabase: ReturnType<typeof createClient>,
+  entrepriseId: string
+) => {
+  const now = new Date().toISOString();
+  const { error } = await supabase.from('sections').insert({
+    id: crypto.randomUUID(),
+    nom: DEFAULT_SECTION_NOM,
+    entreprise_id: entrepriseId,
+    cree_le: now,
+    mis_a_jour_le: now,
+    _synced: 1,
+  });
+  if (error) {
+    throw new Error(error.message || 'Erreur creation section par defaut.');
+  }
+};
 
 const normalizeRecordPayload = (record: Record<string, unknown>) => {
   const payload = { ...record };
@@ -195,6 +215,17 @@ Deno.serve(async (req) => {
       if (error) {
         return jsonResponse({ ok: false, error: error.message || 'Erreur insertion.' }, 500);
       }
+
+      if (tableKey === 'entreprises' && data?.id) {
+        try {
+          await createDefaultSectionForEntreprise(supabase, String(data.id));
+        } catch (sectionError) {
+          const message =
+            sectionError instanceof Error ? sectionError.message : 'Erreur section par defaut.';
+          return jsonResponse({ ok: false, error: message }, 500);
+        }
+      }
+
       return jsonResponse({ ok: true, record: data });
     }
 

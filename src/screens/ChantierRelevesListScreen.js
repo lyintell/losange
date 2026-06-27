@@ -11,7 +11,7 @@ import {
   updateReleveStatusLocal,
 } from '../db/querries';
 import { chantierColors } from '../styles/theme';
-import { canModifyReleveForProfil } from '../utils/terrainAccess';
+import { canModifyReleveForProfil, canChangeReleveStatus } from '../utils/terrainAccess';
 import { formatPriseLe, formatPriseParLine } from '../utils/releveDisplay';
 
 const CARD_PRESS_DELAY_MS = 350;
@@ -20,6 +20,7 @@ function ReleveListCard({ item, position, profil, onPress, onDelete, onStatusCha
   const pressCountRef = useRef(0);
   const pressTimerRef = useRef(null);
   const canModify = canModifyReleveForProfil(profil, item);
+  const canEditStatus = canChangeReleveStatus(profil) && canModify;
   const priseParLine = formatPriseParLine(item.cree_le, item.prise_par_nom);
 
   useEffect(
@@ -59,7 +60,7 @@ function ReleveListCard({ item, position, profil, onPress, onDelete, onStatusCha
           </Pressable>
           <ReleveStatutBadge
             status={item.status}
-            disabled={!canModify}
+            disabled={!canEditStatus}
             onStatusChange={(nextStatus) => onStatusChange?.(item, nextStatus)}
           />
         </View>
@@ -118,6 +119,10 @@ export default function ChantierRelevesListScreen({ chantier, onRelevePress, onR
     if (!releve?.id) return;
 
     try {
+      if (!canChangeReleveStatus(profil)) {
+        return;
+      }
+
       if (!canModifyReleveForProfil(profil, releve)) {
         Alert.alert(
           'Modification refusée',
@@ -193,7 +198,7 @@ export default function ChantierRelevesListScreen({ chantier, onRelevePress, onR
         renderItem={({ item, index }) => (
           <ReleveListCard
             item={item}
-            position={releves.length - index}
+            position={item.numero ?? 1}
             profil={profil}
             onPress={onRelevePress}
             onDelete={handleDeleteReleve}

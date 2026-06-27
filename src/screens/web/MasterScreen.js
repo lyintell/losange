@@ -37,6 +37,12 @@ const FIELD_LABELS = {
   ind_active: 'Compte actif',
   ind_tva: 'Afficher TVA et TTC sur le devis',
   ind_actif: 'Actif (prise de cotes)',
+  ind_default: 'Métier catalogue par défaut',
+  ind_admin_connecte_mobile: 'Admin connecté sur mobile',
+  ind_metiers_preselectionnes: 'Métiers présélectionnés (onboarding)',
+  ordre: "Ordre d'affichage",
+  status: 'Statut relevé',
+  ind_complete: 'Ligne complète',
   date_actif_jusqua: "Actif jusqu'au (AAAA-MM-JJ)",
   date_premier_login: 'Premier login terrain',
   date_facture: 'Date facture (AAAA-MM-JJ)',
@@ -61,12 +67,13 @@ const TABLE_GROUPS = [
       { key: 'clients', label: 'Clients' },
       { key: 'chantiers', label: 'Chantiers' },
       { key: 'metiers', label: 'Métiers' },
-      { key: 'metiers_entreprise', label: 'Métiers entreprise' },
+      { key: 'sections', label: 'Sections' },
       { key: 'fournisseurs', label: 'Fournisseurs' },
       { key: 'ouvrages', label: 'Ouvrages / Articles' },
       { key: 'unites', label: 'Unités' },
       { key: 'ouvrage_unites', label: 'Ouvrage unités' },
       { key: 'releves', label: 'Relevés' },
+      { key: 'section_releves', label: 'Section relevés' },
       { key: 'ligne_releves', label: 'Ligne relevés' },
     ],
   },
@@ -97,6 +104,20 @@ const TABLE_SCHEMAS = {
       type: 'TEXT',
       section: 'Devis et validité',
       placeholder: 'AAAA-MM-JJ',
+    },
+    {
+      name: 'ind_admin_connecte_mobile',
+      type: 'INTEGER',
+      isBinaryToggle: true,
+      defaultValue: 0,
+      section: 'Onboarding',
+    },
+    {
+      name: 'ind_metiers_preselectionnes',
+      type: 'INTEGER',
+      isBinaryToggle: true,
+      defaultValue: 0,
+      section: 'Onboarding',
     },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
@@ -167,35 +188,19 @@ const TABLE_SCHEMAS = {
     { name: 'nom', type: 'TEXT', required: true },
     { name: 'abbrev', type: 'TEXT' },
     { name: 'icon', type: 'TEXT' },
-    { name: 'entreprise_id', type: 'TEXT', fkTable: 'entreprises' },
+    { name: 'entreprise_id', type: 'TEXT', required: true, fkTable: 'entreprises' },
+    { name: 'ordre', type: 'INTEGER', defaultValue: 0 },
+    { name: 'ind_actif', type: 'INTEGER', isBinaryToggle: true, defaultValue: 1 },
+    { name: 'ind_default', type: 'INTEGER', isBinaryToggle: true, defaultValue: 0 },
     { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
     { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
   ],
-  metiers_entreprise: [
-    {
-      name: 'entreprise_id',
-      type: 'TEXT',
-      required: true,
-      isCompositeKeyPart: true,
-      fkTable: 'entreprises',
-    },
-    {
-      name: 'metier_id',
-      type: 'TEXT',
-      required: true,
-      isCompositeKeyPart: true,
-      fkTable: 'metiers',
-    },
-    { name: 'ordre', type: 'INTEGER', required: true, defaultValue: 0 },
-    {
-      name: 'ind_actif',
-      type: 'INTEGER',
-      required: true,
-      isBinaryToggle: true,
-      defaultValue: 1,
-    },
+  sections: [
+    { name: 'id', type: 'TEXT', required: true, isId: true },
+    { name: 'nom', type: 'TEXT', required: true },
+    { name: 'entreprise_id', type: 'TEXT', required: true, fkTable: 'entreprises' },
     { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
@@ -216,6 +221,8 @@ const TABLE_SCHEMAS = {
     },
     { name: 'fournisseur_id', type: 'TEXT', fkTable: 'fournisseurs', section: 'Type catalogue' },
     { name: 'photo', type: 'TEXT', isImageFile: true, section: 'Type catalogue' },
+    { name: 'ind_actif', type: 'INTEGER', isBinaryToggle: true, defaultValue: 1, section: 'Catalogue' },
+    { name: 'ordre', type: 'INTEGER', defaultValue: 0, section: 'Catalogue' },
     { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
@@ -261,8 +268,29 @@ const TABLE_SCHEMAS = {
     { name: 'tva_facture', type: 'REAL' },
     { name: 'total_ttc_facture', type: 'REAL' },
     { name: 'remise', type: 'REAL', defaultValue: 0 },
-    { name: 'ind_tva', type: 'INTEGER', defaultValue: 0 },
+    { name: 'ind_tva', type: 'INTEGER', isBinaryToggle: true, defaultValue: 0 },
+    {
+      name: 'status',
+      type: 'TEXT',
+      required: true,
+      enumOptions: [
+        { value: 'E', label: 'E - en attente' },
+        { value: 'V', label: 'V - validé' },
+        { value: 'N', label: 'N - non validé' },
+      ],
+      defaultValue: 'E',
+    },
     { name: 'note', type: 'TEXT', isMultiline: true },
+    { name: 'supprime_le', type: 'TEXT' },
+    { name: 'cree_le', type: 'TEXT' },
+    { name: 'mis_a_jour_le', type: 'TEXT' },
+    { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
+  ],
+  section_releves: [
+    { name: 'id', type: 'TEXT', required: true, isId: true },
+    { name: 'section_id', type: 'TEXT', required: true, fkTable: 'sections' },
+    { name: 'releve_id', type: 'TEXT', required: true, fkTable: 'releves' },
+    { name: 'ordre', type: 'INTEGER', required: true, defaultValue: 0 },
     { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
@@ -281,7 +309,9 @@ const TABLE_SCHEMAS = {
     { name: 'montant', type: 'REAL', required: true, isAutoComputed: true },
     { name: 'note', type: 'TEXT', isMultiline: true },
     { name: 'photo', type: 'TEXT', isImageFile: true },
-    { name: 'ind_complete', type: 'INTEGER', defaultValue: 0 },
+    { name: 'section_id', type: 'TEXT', fkTable: 'sections' },
+    { name: 'ordre', type: 'INTEGER', required: true, defaultValue: 0 },
+    { name: 'ind_complete', type: 'INTEGER', isBinaryToggle: true, defaultValue: 0 },
     { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
@@ -291,9 +321,7 @@ const TABLE_SCHEMAS = {
 
 const ALL_TABLES = TABLE_GROUPS.flatMap((group) => group.tables);
 
-const COMPOSITE_KEY_TABLES = {
-  metiers_entreprise: ['entreprise_id', 'metier_id'],
-};
+const COMPOSITE_KEY_TABLES = {};
 
 const getRecordId = (tableKey, record) => {
   const keyParts = COMPOSITE_KEY_TABLES[tableKey];
@@ -359,12 +387,30 @@ const getListLabel = (tableKey, record, recordsByTable) => {
     return `${ouvrageNom} / ${uniteNom}`;
   }
 
-  if (tableKey === 'metiers_entreprise') {
+  if (tableKey === 'metiers') {
     const entreprise = getById(recordsByTable.entreprises, record.entreprise_id);
-    const metier = getById(recordsByTable.metiers, record.metier_id);
-    const entrepriseNom = entreprise?.nom || 'Entreprise inconnue';
-    const metierNom = metier?.nom || 'Métier inconnu';
-    return `${entrepriseNom} / ${metierNom}`;
+    const entrepriseNom = entreprise?.nom || 'Sans entreprise';
+    const metierNom = record.nom || 'Sans titre';
+    return `${metierNom} (${entrepriseNom})`;
+  }
+
+  if (tableKey === 'sections') {
+    const entreprise = getById(recordsByTable.entreprises, record.entreprise_id);
+    const entrepriseNom = entreprise?.nom || 'Sans entreprise';
+    const sectionNom = record.nom || 'Sans titre';
+    return `${sectionNom} (${entrepriseNom})`;
+  }
+
+  if (tableKey === 'section_releves') {
+    const section = getById(recordsByTable.sections, record.section_id);
+    const releve = getById(recordsByTable.releves, record.releve_id);
+    const chantier = releve ? getById(recordsByTable.chantiers, releve.chantier_id) : null;
+    const client = chantier ? getById(recordsByTable.clients, chantier.client_id) : null;
+    const sectionNom = section?.nom || 'Section inconnue';
+    const clientNom = client?.nom_complet || 'Client inconnu';
+    const chantierNom = chantier?.nom || 'Chantier inconnu';
+    const ordreLabel = Number.isFinite(Number(record.ordre)) ? `#${Number(record.ordre) + 1} ` : '';
+    return `${ordreLabel}${sectionNom} / ${clientNom} / ${chantierNom}`;
   }
 
   if (tableKey === 'releves') {
@@ -389,7 +435,12 @@ const getListLabel = (tableKey, record, recordsByTable) => {
     const chantierNom = chantier?.nom || 'Chantier inconnu';
     const ouvrageNom = ouvrage?.nom || 'Ouvrage inconnu';
     const uniteNom = unite?.nom_unite || 'Unité inconnue';
-    return `${clientNom} / ${chantierNom} / ${ouvrageNom} / ${uniteNom}`;
+    const section = record.section_id
+      ? getById(recordsByTable.sections, record.section_id)
+      : null;
+    const sectionNom = section?.nom || null;
+    const base = `${clientNom} / ${chantierNom} / ${ouvrageNom} / ${uniteNom}`;
+    return sectionNom ? `${sectionNom} · ${base}` : base;
   }
 
   return getPrimaryText(record);
@@ -930,9 +981,11 @@ export default function MasterScreen({ onLogout }) {
                   <Text variant="bodyMedium" style={styles.rowSubtitle}>
                     {selectedTable === 'releves' && item.note
                       ? `Note: ${truncateText(item.note, 120)}`
-                      : selectedTable === 'metiers_entreprise'
+                      : selectedTable === 'metiers' || selectedTable === 'ouvrages'
                         ? `Ordre ${item.ordre ?? 0} · Actif ${Number(item.ind_actif) === 1 ? 'oui' : 'non'}`
-                        : String(item.id || '')}
+                        : selectedTable === 'releves'
+                          ? `Statut ${item.status || 'E'}`
+                          : String(item.id || '')}
                   </Text>
                 </View>
               </Pressable>

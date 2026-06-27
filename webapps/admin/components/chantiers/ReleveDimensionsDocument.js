@@ -33,7 +33,20 @@ export default function ReleveDimensionsDocument({
 
       <div className="dimensions-list">
         {rows.length ? (
-          rows.map((row, index) => (
+          rows.map((row, index) => {
+            if (row.isSectionSeparator) {
+              return <div key={`section-sep-${index}`} className="dim-section-divider" />;
+            }
+
+            if (row.isSectionHeader) {
+              return (
+                <p key={`section-header-${index}`} className="dim-section">
+                  {row.sectionNom}
+                </p>
+              );
+            }
+
+            return (
             <section
               key={`${row.metierId}-${row.ouvrageNom}-${index}`}
               className={`dim-block ${row.metierDivider ? 'dim-block--divider' : ''}`}
@@ -46,7 +59,8 @@ export default function ReleveDimensionsDocument({
               {row.showOuvrage ? <p className="dim-ouvrage">{row.ouvrageNom}</p> : null}
               <DimensionLigne row={row} />
             </section>
-          ))
+            );
+          })
         ) : (
           <p className="empty-state">Aucune dimension dans ce relevé.</p>
         )}

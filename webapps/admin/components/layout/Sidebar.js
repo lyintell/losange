@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import SidebarNavItem from '@/components/layout/SidebarNavItem';
 import { APP_NAME } from '@/lib/theme/colors';
 import { ROLE_LABELS } from '@/lib/auth/constants';
-import { ADMIN_FOOTER_NAV_ITEMS, ADMIN_NAV_ITEMS } from '@/lib/navigation/adminNav';
+import { ADMIN_FOOTER_NAV_ITEMS, ADMIN_NAV_ITEMS, getDashboardNavLabel } from '@/lib/navigation/adminNav';
 
 function isNavItemActive(pathname, href) {
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -26,7 +26,7 @@ export default function Sidebar({ session }) {
           <SidebarNavItem
             key={item.href}
             href={item.href}
-            label={item.label}
+            label={item.greetingNav ? getDashboardNavLabel(session.prenom) : item.label}
             icon={item.icon}
             active={isNavItemActive(pathname, item.href)}
           />

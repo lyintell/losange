@@ -9,7 +9,7 @@ export const metadata = {
 export default async function LoginPage() {
   const session = await getSession();
   if (session) {
-    redirect('/accueil');
+    redirect('/tableau-de-bord');
   }
 
   return <LoginForm />;

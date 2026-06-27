@@ -4,11 +4,7 @@ import { useMemo, useState } from 'react';
 import MetiersTable from '@/components/metiers/MetiersTable';
 import { matchesMetierSearch } from '@/lib/metiers/format';
 
-export default function MetiersListClient({
-  metiers = [],
-  basePath = 'ouvrages',
-  countLabel = 'Ouvrages',
-}) {
+export default function MetiersListClient({ metiers = [] }) {
   const [query, setQuery] = useState('');
 
   const filtered = useMemo(
@@ -28,7 +24,7 @@ export default function MetiersListClient({
           onChange={(event) => setQuery(event.target.value)}
         />
       </label>
-      <MetiersTable rows={filtered} basePath={basePath} countLabel={countLabel} />
+      <MetiersTable rows={filtered} />
     </div>
   );
 }

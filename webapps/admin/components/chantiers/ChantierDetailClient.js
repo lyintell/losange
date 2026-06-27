@@ -12,14 +12,14 @@ import { getNextReleveStatus } from '@/lib/chantiers/releveStatus';
 import { updateChantierStatusClient } from '@/lib/chantiers/updateChantierStatusClient';
 import { updateReleveStatusClient } from '@/lib/chantiers/updateReleveStatusClient';
 
-function ReleveListItem({ chantierId, releve, index }) {
+function ReleveListItem({ chantierId, releve }) {
   const href = `/chantiers/${chantierId}/releves/${releve.id}`;
   const handleRowClick = useRowOpen(href, { newTab: true });
 
   return (
     <li className="doc-list-item doc-list-item--clickable" onClick={handleRowClick}>
       <div>
-        <p className="doc-list-title">Relevé {index + 1}</p>
+        <p className="doc-list-title">Relevé {releve.numero ?? 1}</p>
         <p className="doc-list-meta">
           {formatDisplayDateTime(releve.cree_le)} · {formatDisplayDate(releve.date_facture)}
         </p>
@@ -35,21 +35,21 @@ function ReleveList({ chantierId, releves, emptyLabel }) {
 
   return (
     <ul className="doc-list">
-      {releves.map((releve, index) => (
-        <ReleveListItem key={releve.id} chantierId={chantierId} releve={releve} index={index} />
+      {releves.map((releve) => (
+        <ReleveListItem key={releve.id} chantierId={chantierId} releve={releve} />
       ))}
     </ul>
   );
 }
 
-function DevisListItem({ chantierId, releve, index, savingReleveId, onReleveStatusClick }) {
+function DevisListItem({ chantierId, releve, savingReleveId, onReleveStatusClick }) {
   const href = `/chantiers/${chantierId}/devis/${releve.id}`;
   const handleRowClick = useRowOpen(href, { newTab: true });
 
   return (
     <li className="doc-list-item doc-list-item--clickable" onClick={handleRowClick}>
       <div>
-        <p className="doc-list-title">Devis {index + 1}</p>
+        <p className="doc-list-title">Devis {releve.numero ?? 1}</p>
         <p className="doc-list-meta">
           {formatDisplayDate(releve.date_facture)} · HT{' '}
           {Math.round(Number(releve.total_ht_facture) || 0).toLocaleString('fr-FR')} FCFA
@@ -73,12 +73,11 @@ function DevisList({ chantierId, releves, savingReleveId, onReleveStatusClick })
 
   return (
     <ul className="doc-list">
-      {releves.map((releve, index) => (
+      {releves.map((releve) => (
         <DevisListItem
           key={releve.id}
           chantierId={chantierId}
           releve={releve}
-          index={index}
           savingReleveId={savingReleveId}
           onReleveStatusClick={onReleveStatusClick}
         />

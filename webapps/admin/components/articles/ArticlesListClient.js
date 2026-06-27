@@ -15,6 +15,7 @@ export default function ArticlesListClient({
   showMetierColumn = true,
   showFournisseurColumn = true,
   searchMode = 'default',
+  onRowSelect = null,
 }) {
   const [query, setQuery] = useState('');
 
@@ -43,6 +44,7 @@ export default function ArticlesListClient({
         metierId={metierId}
         showMetierColumn={showMetierColumn}
         showFournisseurColumn={showFournisseurColumn}
+        onRowSelect={onRowSelect}
       />
     </div>
   );

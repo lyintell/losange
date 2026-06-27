@@ -120,21 +120,6 @@ export const resolveExportLogoDataUri = async (entreprise) => {
 };
 
 export const EXPORT_LOGO_STYLES = `
-  .export-watermark {
-    position: fixed;
-    right: 24px;
-    bottom: 24px;
-    width: 140px;
-    height: 140px;
-    opacity: 0.14;
-    z-index: 0;
-    pointer-events: none;
-  }
-  .export-watermark img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-  }
   .header-top {
     display: flex;
     flex-direction: row;
@@ -176,6 +161,3 @@ export const EXPORT_LOGO_STYLES = `
 
 export const renderExportLogoHeaderHtml = (logoDataUri) =>
   logoDataUri ? `<div class="header-logo"><img src="${logoDataUri}" alt="Logo" /></div>` : '';
-
-export const renderExportLogoWatermarkHtml = (logoDataUri) =>
-  logoDataUri ? `<div class="export-watermark"><img src="${logoDataUri}" alt="" /></div>` : '';

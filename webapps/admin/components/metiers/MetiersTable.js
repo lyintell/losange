@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRowNavigate } from '@/components/ui/useRowNavigate';
 import { getMetierColor } from '@/lib/format/metierColors';
 
-export default function MetiersTable({ rows, basePath = 'ouvrages', countLabel = 'Ouvrages' }) {
+export default function MetiersTable({ rows }) {
   if (!rows.length) {
     return <p className="empty-state">Aucun métier trouvé.</p>;
   }
@@ -15,12 +15,13 @@ export default function MetiersTable({ rows, basePath = 'ouvrages', countLabel =
         <thead>
           <tr>
             <th>Métier</th>
-            <th className="num">{countLabel}</th>
+            <th className="num">Ouvrages</th>
+            <th className="num">Articles</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
-            <MetierRow key={row.id} row={row} basePath={basePath} />
+            <MetierRow key={row.id} row={row} />
           ))}
         </tbody>
       </table>
@@ -28,8 +29,8 @@ export default function MetiersTable({ rows, basePath = 'ouvrages', countLabel =
   );
 }
 
-function MetierRow({ row, basePath }) {
-  const href = `/${basePath}/${row.id}`;
+function MetierRow({ row }) {
+  const href = `/ouvrages/${row.id}`;
   const handleRowClick = useRowNavigate(href);
   const metierColor = getMetierColor(row.id);
 
@@ -43,7 +44,8 @@ function MetierRow({ row, basePath }) {
         </Link>
         {row.abbrev ? <span className="table-secondary-label">{row.abbrev}</span> : null}
       </td>
-      <td className="num">{row.item_count || 0}</td>
+      <td className="num">{row.ouvrage_count || 0}</td>
+      <td className="num">{row.article_count || 0}</td>
     </tr>
   );
 }

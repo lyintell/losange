@@ -8,15 +8,17 @@ import {
   persistTerrainImage,
 } from './terrainImageStorage';
 import { getLoggedInProfilLocal, getTerrainSessionLocal } from './terrainSync';
+import { markMetiersPreselectedLocal } from './metiersPreselection';
 import { scheduleTerrainSyncAfterWrite } from './terrainSyncScheduler';
-import { canModifyReleveForProfil, canSeeAllChantiers } from '../utils/terrainAccess';
+import { withReleveNumbers } from '../utils/releveNumber';
+import { canModifyReleveForProfil, canSeeAllChantiers, canChangeReleveStatus } from '../utils/terrainAccess';
 import { computeReleveFacturation } from '../utils/releveFacturation';
 import { normalizeReleveStatus, RELEVE_STATUS_DEFAULT } from '../utils/releveStatus';
 import { computeChantierStatusFromReleves } from '../utils/chantierStatusFromReleves';
-import { DEFAULT_METIERS } from '../utils/defaultMetiers';
 import { FREE_TIER_LIMITS, filterDefaultMetiers, isProAccount } from '../utils/freeTierLimits';
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
+import { DEFAULT_SECTION_NOM, isDefaultSectionNom, sortSectionsForSelection } from '../utils/defaultSection';
 import {
   computeMontantLigneReleve,
   computeQuantiteLigneReleve,
@@ -221,18 +223,198 @@ export const getMetiersForSelectionLocal = async (entrepriseId = null) => {
   return active;
 };
 
-const hasMetiersEntrepriseTable = async (db) => {
-  const row = await db.getFirstAsync(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'metiers_entreprise';"
+export const ensureDefaultSectionLocal = async (entrepriseId) => {
+  if (!entrepriseId) return null;
+
+  const db = await ensureLocalDatabaseReady();
+  const tableExists = await db.getFirstAsync(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sections';"
   );
-  return Boolean(row?.name);
+  if (!tableExists) return null;
+
+  const hasSupprimeLe = await tableHasColumn(db, 'sections', 'supprime_le');
+  const tombstoneFilter = hasSupprimeLe ? ' AND supprime_le IS NULL' : '';
+
+  const existing = await db.getFirstAsync(
+    `
+    SELECT *
+    FROM sections
+    WHERE entreprise_id = ?
+      AND lower(trim(nom)) = lower(?)
+      ${tombstoneFilter}
+    LIMIT 1;
+    `,
+    [entrepriseId, DEFAULT_SECTION_NOM]
+  );
+  if (existing) return existing;
+
+  return insertSectionLocal(entrepriseId, DEFAULT_SECTION_NOM);
 };
 
-const mapMetierRow = (row) => ({
-  ...row,
-  ind_custom: Number(row?.ind_custom) === 1 ? 1 : 0,
-  ind_actif: Number(row?.ind_actif) === 0 ? 0 : 1,
-});
+export const getSectionsByEntrepriseLocal = async (entrepriseId) => {
+  if (!entrepriseId) return [];
+
+  const db = await ensureLocalDatabaseReady();
+  const tableExists = await db.getFirstAsync(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sections';"
+  );
+  if (!tableExists) return [];
+
+  await ensureDefaultSectionLocal(entrepriseId);
+
+  const hasSupprimeLe = await tableHasColumn(db, 'sections', 'supprime_le');
+  const filter = hasSupprimeLe ? ' AND supprime_le IS NULL' : '';
+
+  const rows = await db.getAllAsync(
+    `SELECT * FROM sections WHERE entreprise_id = ?${filter} ORDER BY nom COLLATE NOCASE ASC;`,
+    [entrepriseId]
+  );
+  return sortSectionsForSelection(rows);
+};
+
+export const insertSectionLocal = async (entrepriseId, nom) => {
+  const trimmed = String(nom || '').trim();
+  if (!trimmed) {
+    throw new Error('Nom de section requis.');
+  }
+  if (!entrepriseId) {
+    throw new Error('Entreprise requise.');
+  }
+
+  const db = await ensureLocalDatabaseReady();
+  const hasSupprimeLe = await tableHasColumn(db, 'sections', 'supprime_le');
+  const tombstoneFilter = hasSupprimeLe ? ' AND supprime_le IS NULL' : '';
+
+  if (isDefaultSectionNom(trimmed)) {
+    const existingDefault = await db.getFirstAsync(
+      `
+      SELECT *
+      FROM sections
+      WHERE entreprise_id = ?
+        AND lower(trim(nom)) = lower(?)
+        ${tombstoneFilter}
+      LIMIT 1;
+      `,
+      [entrepriseId, DEFAULT_SECTION_NOM]
+    );
+    if (existingDefault) {
+      return existingDefault;
+    }
+  }
+
+  const id = uuidv4();
+  const timestamp = nowIso();
+
+  await db.runAsync(
+    `
+    INSERT INTO sections (id, nom, entreprise_id, cree_le, mis_a_jour_le, _synced)
+    VALUES (?, ?, ?, ?, ?, 0);
+    `,
+    [id, trimmed, entrepriseId, timestamp, timestamp]
+  );
+  notifyLocalDataChanged();
+
+  return { id, nom: trimmed, entreprise_id: entrepriseId };
+};
+
+export const getSectionOrderByReleveIdLocal = async (releveId) => {
+  if (!releveId) return [];
+
+  const db = await ensureLocalDatabaseReady();
+  const tableExists = await db.getFirstAsync(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'section_releves';"
+  );
+  if (!tableExists) return [];
+
+  const hasSupprimeLe = await tableHasColumn(db, 'section_releves', 'supprime_le');
+  const filter = hasSupprimeLe ? ' AND supprime_le IS NULL' : '';
+  const rows = await db.getAllAsync(
+    `
+    SELECT section_id
+    FROM section_releves
+    WHERE releve_id = ?${filter}
+    ORDER BY ordre ASC, cree_le ASC;
+    `,
+    [releveId]
+  );
+
+  return (rows || []).map((row) => row.section_id).filter(Boolean);
+};
+
+export const replaceSectionRelevesForReleveLocal = async (
+  releveId,
+  lignes = [],
+  sectionOrder = null
+) => {
+  if (!releveId) return;
+
+  const db = await ensureLocalDatabaseReady();
+  const tableExists = await db.getFirstAsync(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'section_releves';"
+  );
+  if (!tableExists) return;
+
+  const deletedAt = nowIso();
+  await db.runAsync(
+    `
+    UPDATE section_releves
+    SET supprime_le = ?, _synced = 0, mis_a_jour_le = datetime('now')
+    WHERE releve_id = ? AND supprime_le IS NULL;
+    `,
+    [deletedAt, releveId]
+  );
+
+  const resolvedOrder =
+    Array.isArray(sectionOrder) && sectionOrder.length
+      ? [...sectionOrder]
+      : (() => {
+          const fallback = [];
+          const seen = new Set();
+          [...(lignes || [])]
+            .sort(
+              (left, right) =>
+                (Number(left.section_ordre) || 0) - (Number(right.section_ordre) || 0) ||
+                (Number(left.ordre) || 0) - (Number(right.ordre) || 0)
+            )
+            .forEach((ligne) => {
+              const sectionId = ligne?.section_id;
+              if (!sectionId || sectionId === 'sans-section' || seen.has(sectionId)) return;
+              seen.add(sectionId);
+              fallback.push(sectionId);
+            });
+          return fallback;
+        })();
+
+  const timestamp = nowIso();
+  for (let ordre = 0; ordre < resolvedOrder.length; ordre += 1) {
+    const sectionId = resolvedOrder[ordre];
+    if (!sectionId || sectionId === 'sans-section') continue;
+    await db.runAsync(
+      `
+      INSERT INTO section_releves (
+        id, section_id, releve_id, ordre, cree_le, mis_a_jour_le, _synced
+      ) VALUES (?, ?, ?, ?, ?, ?, 0);
+      `,
+      [uuidv4(), sectionId, releveId, ordre, timestamp, timestamp]
+    );
+  }
+};
+
+const mapMetierRow = (row) => {
+  let ind_custom = 0;
+  if (row?.ind_default != null) {
+    ind_custom = Number(row.ind_default) === 1 ? 0 : 1;
+  } else if (Number(row?.ind_custom) === 1) {
+    ind_custom = 1;
+  } else if (row?.entreprise_id) {
+    ind_custom = 1;
+  }
+  return {
+    ...row,
+    ind_custom,
+    ind_actif: Number(row?.ind_actif) === 0 ? 0 : 1,
+  };
+};
 
 const ouvrageActifFilterSql = (hasIndActif, alias = '') => {
   const prefix = alias ? `${alias}.` : '';
@@ -247,104 +429,59 @@ const ouvrageOrderBySql = (hasOrdre, alias = '') => {
   return ` ORDER BY ${prefix}nom ASC`;
 };
 
-const ensureGlobalDefaultMetiersLocal = async () => {
-  const db = await ensureLocalDatabaseReady();
-  const timestamp = nowIso();
-  const hasEntrepriseIdCol = await tableHasColumn(db, 'metiers', 'entreprise_id');
-  const hasSupprimeLeCol = await tableHasColumn(db, 'metiers', 'supprime_le');
+const fetchOwnedMetiersLocal = async (db, entrepriseId) => {
+  const hasOrdre = await tableHasColumn(db, 'metiers', 'ordre');
+  const hasIndActif = await tableHasColumn(db, 'metiers', 'ind_actif');
+  const hasIndDefault = await tableHasColumn(db, 'metiers', 'ind_default');
+  const hasSupprimeLe = await tableHasColumn(db, 'metiers', 'supprime_le');
+  const indCustomSql = hasIndDefault
+    ? 'CASE WHEN m.ind_default = 1 THEN 0 ELSE 1 END AS ind_custom'
+    : 'CASE WHEN m.entreprise_id IS NOT NULL AND m.entreprise_id != \'\' THEN 1 ELSE 0 END AS ind_custom';
+  const indActifSql = hasIndActif ? 'm.ind_actif' : '1 AS ind_actif';
+  const tombstone = hasSupprimeLe ? ' AND m.supprime_le IS NULL' : '';
+  const orderSql = hasOrdre ? 'm.ordre ASC, m.nom ASC' : 'm.nom ASC';
 
-  await db.withTransactionAsync(async () => {
-    for (const metier of DEFAULT_METIERS) {
-      const existing = await db.getFirstAsync('SELECT id FROM metiers WHERE id = ?;', [metier.id]);
-      if (existing?.id) {
-        if (hasEntrepriseIdCol && hasSupprimeLeCol) {
-          await db.runAsync(
-            `UPDATE metiers
-             SET nom = ?, abbrev = ?, entreprise_id = NULL, supprime_le = NULL, mis_a_jour_le = ?
-             WHERE id = ?;`,
-            [metier.nom, metier.abbrev, timestamp, metier.id]
-          );
-        } else {
-          await db.runAsync(
-            'UPDATE metiers SET nom = ?, abbrev = ?, mis_a_jour_le = ? WHERE id = ?;',
-            [metier.nom, metier.abbrev, timestamp, metier.id]
-          );
-        }
-        continue;
-      }
-
-      if (hasEntrepriseIdCol) {
-        await db.runAsync(
-          `INSERT INTO metiers (
-            id, nom, abbrev, icon, entreprise_id, cree_le, mis_a_jour_le, _synced
-          ) VALUES (?, ?, ?, NULL, NULL, ?, ?, 1);`,
-          [metier.id, metier.nom, metier.abbrev, timestamp, timestamp]
-        );
-      } else {
-        await db.runAsync(
-          `INSERT INTO metiers (id, nom, abbrev, icon, cree_le, mis_a_jour_le, _synced)
-           VALUES (?, ?, ?, NULL, ?, ?, 1);`,
-          [metier.id, metier.nom, metier.abbrev, timestamp, timestamp]
-        );
-      }
-    }
-  });
-};
-
-const ensureMetiersEntrepriseSeededLocal = async (entrepriseId) => {
-  if (!entrepriseId) return;
-
-  const db = await ensureLocalDatabaseReady();
-  if (!(await hasMetiersEntrepriseTable(db))) return;
-
-  await ensureGlobalDefaultMetiersLocal();
-
-  const linkedRows = await db.getAllAsync(
-    'SELECT metier_id FROM metiers_entreprise WHERE entreprise_id = ? AND supprime_le IS NULL;',
+  return db.getAllAsync(
+    `
+    SELECT m.*, ${indActifSql}, ${indCustomSql}
+    FROM metiers m
+    WHERE m.entreprise_id = ?${tombstone}
+    ORDER BY ${orderSql};
+    `,
     [entrepriseId]
   );
-  const linkedIds = new Set((linkedRows || []).map((row) => row.metier_id));
-  const missing = DEFAULT_METIERS.filter((metier) => !linkedIds.has(metier.id));
-  if (missing.length === 0) return;
+};
 
-  const timestamp = nowIso();
-  await db.withTransactionAsync(async () => {
-    for (const metier of missing) {
-      await db.runAsync(
-        `INSERT OR IGNORE INTO metiers_entreprise (
-          entreprise_id, metier_id, ordre, ind_actif, cree_le, mis_a_jour_le, _synced
-        ) VALUES (?, ?, ?, 1, ?, ?, 0);`,
-        [entrepriseId, metier.id, metier.ordre, timestamp, timestamp]
-      );
-    }
-  });
+export const getMetierPreselectionRequiredLocal = async () => {
+  const profil = await getLoggedInProfilLocal();
+  if (String(profil?.role || '').toUpperCase() !== 'A') return false;
+
+  const entrepriseId = profil.entreprise_id;
+  if (!entrepriseId) return false;
+
+  const db = await ensureLocalDatabaseReady();
+  const ownedRows = await fetchOwnedMetiersLocal(db, entrepriseId);
+  if ((ownedRows ?? []).length > 0) {
+    await markMetiersPreselectedLocal(entrepriseId);
+    return false;
+  }
+
+  const hasFlag = await tableHasColumn(db, 'entreprises', 'ind_metiers_preselectionnes');
+  if (!hasFlag) return false;
+
+  const row = await db.getFirstAsync(
+    'SELECT ind_metiers_preselectionnes FROM entreprises WHERE id = ?;',
+    [entrepriseId]
+  );
+  return Number(row?.ind_metiers_preselectionnes) !== 1;
 };
 
 export const getMetiersLocal = async (entrepriseId = null) => {
   const db = await ensureLocalDatabaseReady();
 
-  if (entrepriseId && (await hasMetiersEntrepriseTable(db))) {
-    await ensureMetiersEntrepriseSeededLocal(entrepriseId);
-
-    const hasEntrepriseIdCol = await tableHasColumn(db, 'metiers', 'entreprise_id');
-    const hasMetierSupprimeLe = await tableHasColumn(db, 'metiers', 'supprime_le');
-    const customSelect = hasEntrepriseIdCol
-      ? 'CASE WHEN m.entreprise_id IS NOT NULL AND m.entreprise_id != \'\' THEN 1 ELSE 0 END AS ind_custom'
-      : '0 AS ind_custom';
-    const metierTombstoneFilter = hasMetierSupprimeLe ? ' AND m.supprime_le IS NULL' : '';
-
-    const rows = await db.getAllAsync(
-      `
-      SELECT m.*, me.ind_actif, ${customSelect}
-      FROM metiers m
-      INNER JOIN metiers_entreprise me ON me.metier_id = m.id
-      WHERE me.entreprise_id = ?
-        AND me.supprime_le IS NULL${metierTombstoneFilter}
-      ORDER BY me.ordre ASC, m.nom ASC;
-      `,
-      [entrepriseId]
-    );
-    return (rows || []).map(mapMetierRow);
+  if (entrepriseId) {
+    const ownedRows = await fetchOwnedMetiersLocal(db, entrepriseId);
+    return (ownedRows ?? []).map(mapMetierRow);
   }
 
   const orderedQuery = `
@@ -383,13 +520,7 @@ export const loadMetiersWithCatalogueRefreshLocal = async (entrepriseId = null) 
     console.warn('Erreur rechargement catalogue métiers:', error);
   }
 
-  metiers = await getMetiersLocal(entrepriseId);
-  if (metiers.length === 0 && entrepriseId) {
-    await ensureCatalogueLocal(entrepriseId);
-    await ensureMetiersEntrepriseSeededLocal(entrepriseId);
-    metiers = await getMetiersLocal(entrepriseId);
-  }
-  return metiers;
+  return getMetiersLocal(entrepriseId);
 };
 
 export const saveMetiersOrderLocal = async (entrepriseId, metierIds = []) => {
@@ -400,18 +531,18 @@ export const saveMetiersOrderLocal = async (entrepriseId, metierIds = []) => {
   const db = await ensureLocalDatabaseReady();
   const ids = (metierIds || []).filter(Boolean);
   const timestamp = nowIso();
+  const hasOrdreOnMetiers = await tableHasColumn(db, 'metiers', 'ordre');
 
-  if (await hasMetiersEntrepriseTable(db)) {
-    await ensureMetiersEntrepriseSeededLocal(entrepriseId);
+  if (hasOrdreOnMetiers) {
     await db.withTransactionAsync(async () => {
       for (let index = 0; index < ids.length; index += 1) {
         await db.runAsync(
           `
-          UPDATE metiers_entreprise
+          UPDATE metiers
           SET ordre = ?, mis_a_jour_le = ?, _synced = 0
-          WHERE entreprise_id = ? AND metier_id = ? AND supprime_le IS NULL;
+          WHERE id = ? AND entreprise_id = ?;
           `,
-          [index, timestamp, entrepriseId, ids[index]]
+          [index, timestamp, ids[index], entrepriseId]
         );
       }
     });
@@ -443,21 +574,15 @@ export const insertMetierEntrepriseLocal = async ({ entrepriseId, nom }) => {
   }
 
   const db = await ensureLocalDatabaseReady();
-  if (!(await hasMetiersEntrepriseTable(db))) {
-    throw new Error('Catalogue métiers non disponible.');
-  }
-
-  await ensureMetiersEntrepriseSeededLocal(entrepriseId);
+  const hasOrdreOnMetiers = await tableHasColumn(db, 'metiers', 'ordre');
+  const hasIndDefault = await tableHasColumn(db, 'metiers', 'ind_default');
 
   const duplicate = await db.getFirstAsync(
     `
-    SELECT m.id
-    FROM metiers m
-    INNER JOIN metiers_entreprise me ON me.metier_id = m.id
-    WHERE me.entreprise_id = ?
-      AND me.supprime_le IS NULL
-      AND m.supprime_le IS NULL
-      AND LOWER(TRIM(m.nom)) = LOWER(?);
+    SELECT id FROM metiers
+    WHERE entreprise_id = ?
+      AND supprime_le IS NULL
+      AND LOWER(TRIM(nom)) = LOWER(?);
     `,
     [entrepriseId, trimmedNom]
   );
@@ -469,29 +594,33 @@ export const insertMetierEntrepriseLocal = async ({ entrepriseId, nom }) => {
   const timestamp = nowIso();
   const abbrev = trimmedNom.slice(0, 3).toUpperCase();
   const maxOrdreRow = await db.getFirstAsync(
-    'SELECT MAX(ordre) AS max_ordre FROM metiers_entreprise WHERE entreprise_id = ? AND supprime_le IS NULL;',
+    'SELECT MAX(ordre) AS max_ordre FROM metiers WHERE entreprise_id = ? AND supprime_le IS NULL;',
     [entrepriseId]
   );
   const ordre = Number(maxOrdreRow?.max_ordre ?? -1) + 1;
 
-  await db.withTransactionAsync(async () => {
+  if (hasOrdreOnMetiers && hasIndDefault) {
     await db.runAsync(
-      `
-      INSERT INTO metiers (
+      `INSERT INTO metiers (
+        id, nom, abbrev, icon, entreprise_id, ordre, ind_actif, ind_default, cree_le, mis_a_jour_le, _synced
+      ) VALUES (?, ?, ?, NULL, ?, ?, 1, 0, ?, ?, 0);`,
+      [metierId, trimmedNom, abbrev, entrepriseId, ordre, timestamp, timestamp]
+    );
+  } else if (hasOrdreOnMetiers) {
+    await db.runAsync(
+      `INSERT INTO metiers (
+        id, nom, abbrev, icon, entreprise_id, ordre, ind_actif, cree_le, mis_a_jour_le, _synced
+      ) VALUES (?, ?, ?, NULL, ?, ?, 1, ?, ?, 0);`,
+      [metierId, trimmedNom, abbrev, entrepriseId, ordre, timestamp, timestamp]
+    );
+  } else {
+    await db.runAsync(
+      `INSERT INTO metiers (
         id, nom, abbrev, icon, entreprise_id, cree_le, mis_a_jour_le, _synced
-      ) VALUES (?, ?, ?, NULL, ?, ?, ?, 0);
-      `,
+      ) VALUES (?, ?, ?, NULL, ?, ?, ?, 0);`,
       [metierId, trimmedNom, abbrev, entrepriseId, timestamp, timestamp]
     );
-    await db.runAsync(
-      `
-      INSERT INTO metiers_entreprise (
-        entreprise_id, metier_id, ordre, ind_actif, cree_le, mis_a_jour_le, _synced
-      ) VALUES (?, ?, ?, 1, ?, ?, 0);
-      `,
-      [entrepriseId, metierId, ordre, timestamp, timestamp]
-    );
-  });
+  }
 
   notifyLocalDataChanged();
 
@@ -501,6 +630,8 @@ export const insertMetierEntrepriseLocal = async ({ entrepriseId, nom }) => {
     abbrev,
     entreprise_id: entrepriseId,
     ind_custom: 1,
+    ordre,
+    ind_actif: 1,
   };
 };
 
@@ -510,37 +641,34 @@ export const setMetierActifLocal = async (entrepriseId, metierId, indActif) => {
   }
 
   const db = await ensureLocalDatabaseReady();
-  if (!(await hasMetiersEntrepriseTable(db))) {
-    throw new Error('Catalogue métiers non disponible.');
-  }
-
   const profil = await getLoggedInProfilLocal();
   const value = Number(indActif) === 1 ? 1 : 0;
+  const hasIndActifOnMetiers = await tableHasColumn(db, 'metiers', 'ind_actif');
+  const hasIndDefault = await tableHasColumn(db, 'metiers', 'ind_default');
 
   if (!isProAccount(profil)) {
     const metierRow = await db.getFirstAsync(
-      `
-      SELECT m.entreprise_id
-      FROM metiers m
-      WHERE m.id = ?;
-      `,
+      `SELECT entreprise_id, ind_default FROM metiers WHERE id = ?;`,
       [metierId]
     );
-    if (metierRow?.entreprise_id) {
+    const isCustom =
+      hasIndDefault && metierRow
+        ? Number(metierRow.ind_default) !== 1
+        : Boolean(metierRow?.entreprise_id);
+    if (isCustom) {
       throw new Error('Métier personnalisé non disponible en compte gratuit.');
     }
 
-    if (value === 1) {
+    if (value === 1 && hasIndActifOnMetiers) {
       const countRow = await db.getFirstAsync(
         `
         SELECT COUNT(*) AS count
-        FROM metiers_entreprise me
-        INNER JOIN metiers m ON m.id = me.metier_id
-        WHERE me.entreprise_id = ?
-          AND me.supprime_le IS NULL
-          AND me.ind_actif = 1
-          AND (m.entreprise_id IS NULL OR m.entreprise_id = '')
-          AND me.metier_id != ?;
+        FROM metiers
+        WHERE entreprise_id = ?
+          AND supprime_le IS NULL
+          AND ind_actif = 1
+          AND id != ?
+          ${hasIndDefault ? 'AND ind_default = 1' : ''};
         `,
         [entrepriseId, metierId]
       );
@@ -554,13 +682,17 @@ export const setMetierActifLocal = async (entrepriseId, metierId, indActif) => {
 
   const timestamp = nowIso();
 
+  if (!hasIndActifOnMetiers) {
+    throw new Error('Catalogue métiers non disponible.');
+  }
+
   await db.runAsync(
     `
-    UPDATE metiers_entreprise
+    UPDATE metiers
     SET ind_actif = ?, mis_a_jour_le = ?, _synced = 0
-    WHERE entreprise_id = ? AND metier_id = ? AND supprime_le IS NULL;
+    WHERE id = ? AND entreprise_id = ?;
     `,
-    [value, timestamp, entrepriseId, metierId]
+    [value, timestamp, metierId, entrepriseId]
   );
 
   notifyLocalDataChanged();
@@ -572,9 +704,6 @@ export const removeMetierEntrepriseLocal = async (entrepriseId, metierId) => {
   }
 
   const db = await ensureLocalDatabaseReady();
-  if (!(await hasMetiersEntrepriseTable(db))) {
-    throw new Error('Catalogue métiers non disponible.');
-  }
 
   const usageRow = await db.getFirstAsync(
     `
@@ -587,41 +716,35 @@ export const removeMetierEntrepriseLocal = async (entrepriseId, metierId) => {
     [metierId, entrepriseId]
   );
   if (Number(usageRow?.count) > 0) {
-    throw new Error('Impossible de retirer un métier utilisé par des ouvrages ou articles.');
+    throw new Error('Impossible de retirer un métier utilisé par des ouvrages.');
   }
 
-  const metier = await db.getFirstAsync('SELECT * FROM metiers WHERE id = ?;', [metierId]);
+  const metier = await db.getFirstAsync(
+    'SELECT * FROM metiers WHERE id = ? AND entreprise_id = ?;',
+    [metierId, entrepriseId]
+  );
   if (!metier) {
     throw new Error('Métier introuvable.');
   }
 
-  const isCustom = Boolean(metier.entreprise_id);
   const timestamp = nowIso();
   const hasMetierSupprimeLe = await tableHasColumn(db, 'metiers', 'supprime_le');
 
-  await db.withTransactionAsync(async () => {
+  if (hasMetierSupprimeLe) {
     await db.runAsync(
       `
-      UPDATE metiers_entreprise
+      UPDATE metiers
       SET supprime_le = ?, mis_a_jour_le = ?, _synced = 0
-      WHERE entreprise_id = ? AND metier_id = ?;
+      WHERE id = ? AND entreprise_id = ?;
       `,
-      [timestamp, timestamp, entrepriseId, metierId]
+      [timestamp, timestamp, metierId, entrepriseId]
     );
-
-    if (isCustom && hasMetierSupprimeLe) {
-      await db.runAsync(
-        `
-        UPDATE metiers
-        SET supprime_le = ?, mis_a_jour_le = ?, _synced = 0
-        WHERE id = ?;
-        `,
-        [timestamp, timestamp, metierId]
-      );
-    } else if (isCustom) {
-      await db.runAsync('DELETE FROM metiers WHERE id = ?;', [metierId]);
-    }
-  });
+  } else {
+    await db.runAsync('DELETE FROM metiers WHERE id = ? AND entreprise_id = ?;', [
+      metierId,
+      entrepriseId,
+    ]);
+  }
 
   notifyLocalDataChanged();
 };
@@ -778,6 +901,10 @@ export const updateReleveIndTvaLocal = async (releveId, indTva) => {
 export const updateReleveStatusLocal = async (releveId, status) => {
   if (!releveId) return;
   const releve = await getReleveByIdLocal(releveId);
+  const profil = await getLoggedInProfilLocal();
+  if (!canChangeReleveStatus(profil)) {
+    throw new Error('Vous ne pouvez pas modifier le statut du relevé.');
+  }
   await assertCanModifyReleveLocal(releve);
   const db = await ensureLocalDatabaseReady();
   const value = normalizeReleveStatus(status);
@@ -893,28 +1020,124 @@ export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) =>
     nombre: nombre || 1,
   });
 
-  const query = `
-    INSERT INTO ligne_releves (
-      id, releve_id, ouvrage_unite_id, largeur, hauteur, profondeur,
-      nombre, quantite, prix_unitaire_applique, montant, note, photo, ind_complete, _synced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
-  `;
+  const hasSectionId = await tableHasColumn(db, 'ligne_releves', 'section_id');
+  const hasOrdre = await tableHasColumn(db, 'ligne_releves', 'ordre');
+  const sectionId = cotes.sectionId || cotes.section_id || null;
 
-  await db.runAsync(query, [
-    id,
-    releveId,
-    ouvrageUniteId,
-    largeur || null,
-    hauteur || null,
-    profondeur || null,
-    nombre || 1,
-    quantite,
-    prixUnitaireApplique,
-    montant,
-    note?.trim() || null,
-    photo || null,
-    Number(indComplete) === 1 ? 1 : 0,
-  ]);
+  let ordre = cotes.ordre;
+  if (hasOrdre && !Number.isFinite(Number(ordre))) {
+    const row = await db.getFirstAsync(
+      `
+      SELECT COALESCE(MAX(ordre), -1) + 1 AS next_ordre
+      FROM ligne_releves
+      WHERE releve_id = ? AND supprime_le IS NULL;
+      `,
+      [releveId]
+    );
+    ordre = Number(row?.next_ordre) || 0;
+  }
+
+  if (hasSectionId && hasOrdre) {
+    await db.runAsync(
+      `
+      INSERT INTO ligne_releves (
+        id, releve_id, ouvrage_unite_id, section_id, ordre, largeur, hauteur, profondeur,
+        nombre, quantite, prix_unitaire_applique, montant, note, photo, ind_complete, _synced
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
+      `,
+      [
+        id,
+        releveId,
+        ouvrageUniteId,
+        sectionId,
+        Number(ordre) || 0,
+        largeur || null,
+        hauteur || null,
+        profondeur || null,
+        nombre || 1,
+        quantite,
+        prixUnitaireApplique,
+        montant,
+        note?.trim() || null,
+        photo || null,
+        Number(indComplete) === 1 ? 1 : 0,
+      ]
+    );
+  } else if (hasSectionId) {
+    await db.runAsync(
+      `
+      INSERT INTO ligne_releves (
+        id, releve_id, ouvrage_unite_id, section_id, largeur, hauteur, profondeur,
+        nombre, quantite, prix_unitaire_applique, montant, note, photo, ind_complete, _synced
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
+      `,
+      [
+        id,
+        releveId,
+        ouvrageUniteId,
+        sectionId,
+        largeur || null,
+        hauteur || null,
+        profondeur || null,
+        nombre || 1,
+        quantite,
+        prixUnitaireApplique,
+        montant,
+        note?.trim() || null,
+        photo || null,
+        Number(indComplete) === 1 ? 1 : 0,
+      ]
+    );
+  } else if (hasOrdre) {
+    await db.runAsync(
+      `
+      INSERT INTO ligne_releves (
+        id, releve_id, ouvrage_unite_id, ordre, largeur, hauteur, profondeur,
+        nombre, quantite, prix_unitaire_applique, montant, note, photo, ind_complete, _synced
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
+      `,
+      [
+        id,
+        releveId,
+        ouvrageUniteId,
+        Number(ordre) || 0,
+        largeur || null,
+        hauteur || null,
+        profondeur || null,
+        nombre || 1,
+        quantite,
+        prixUnitaireApplique,
+        montant,
+        note?.trim() || null,
+        photo || null,
+        Number(indComplete) === 1 ? 1 : 0,
+      ]
+    );
+  } else {
+    await db.runAsync(
+      `
+      INSERT INTO ligne_releves (
+        id, releve_id, ouvrage_unite_id, largeur, hauteur, profondeur,
+        nombre, quantite, prix_unitaire_applique, montant, note, photo, ind_complete, _synced
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
+      `,
+      [
+        id,
+        releveId,
+        ouvrageUniteId,
+        largeur || null,
+        hauteur || null,
+        profondeur || null,
+        nombre || 1,
+        quantite,
+        prixUnitaireApplique,
+        montant,
+        note?.trim() || null,
+        photo || null,
+        Number(indComplete) === 1 ? 1 : 0,
+      ]
+    );
+  }
 
   // Optionnel mais recommandé : Recalculer les totaux du relevé parent après l'ajout
   await refreshReleveTotaux(releveId);
@@ -927,7 +1150,8 @@ const resolveLignePrixUnitaire = (ligne) =>
   Number(ligne?.prix_unitaire_applique ?? ligne?.prixUnitaireApplique ?? 0);
 
 const insertLignesForReleveLocal = async (releveId, lignes = []) => {
-  for (const ligne of lignes) {
+  for (let index = 0; index < lignes.length; index += 1) {
+    const ligne = lignes[index];
     if (!ligne?.ouvrage_unite_id) continue;
     try {
       const ligneId = await insertLigneReleveLocal(releveId, ligne.ouvrage_unite_id, {
@@ -939,6 +1163,8 @@ const insertLignesForReleveLocal = async (releveId, lignes = []) => {
         note: ligne.note,
         photo: ligne.photo_pending_uri ? null : ligne.photo || null,
         indComplete: Number(ligne.ind_complete) === 1 ? 1 : 0,
+        sectionId: ligne.section_id || null,
+        ordre: Number.isFinite(Number(ligne.ordre)) ? Number(ligne.ordre) : index,
       });
       if (ligne.photo_pending_uri) {
         await setLigneRelevePhotoLocal(ligneId, ligne.photo_pending_uri, {
@@ -1000,7 +1226,7 @@ export const updateChantierStatusLocal = async (chantierId, status) => {
   notifyLocalDataChanged();
 };
 
-export const replaceLignesReleveLocal = async (releveId, lignes = []) => {
+export const replaceLignesReleveLocal = async (releveId, lignes = [], sectionOrder = null) => {
   const releve = await getReleveByIdLocal(releveId);
   await assertCanModifyReleveLocal(releve);
 
@@ -1015,6 +1241,7 @@ export const replaceLignesReleveLocal = async (releveId, lignes = []) => {
     [deletedAt, releveId]
   );
   await insertLignesForReleveLocal(releveId, lignes);
+  await replaceSectionRelevesForReleveLocal(releveId, lignes, sectionOrder);
   await refreshReleveTotaux(releveId);
   notifyLocalDataChanged();
 };
@@ -1633,6 +1860,24 @@ export const getLignesByReleveIdLocal = async (releveId) => {
   const db = await ensureLocalDatabaseReady();
   const hasSupprimeLe = await tableHasColumn(db, 'ligne_releves', 'supprime_le');
   const tombstoneFilter = hasSupprimeLe ? ' AND lr.supprime_le IS NULL' : '';
+  const hasSectionId = await tableHasColumn(db, 'ligne_releves', 'section_id');
+  const hasSectionsTable = await db.getFirstAsync(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sections';"
+  );
+  const hasSectionRelevesTable = await db.getFirstAsync(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'section_releves';"
+  );
+  const hasOrdre = await tableHasColumn(db, 'ligne_releves', 'ordre');
+  const sectionSelect = hasSectionId && hasSectionsTable ? ', lr.section_id, s.nom AS section_nom' : '';
+  const sectionOrdreSelect =
+    hasSectionId && hasSectionsTable && hasSectionRelevesTable ? ', sr.ordre AS section_ordre' : '';
+  const ordreSelect = hasOrdre ? ', lr.ordre' : '';
+  const sectionJoin =
+    hasSectionId && hasSectionsTable ? ' LEFT JOIN sections s ON s.id = lr.section_id' : '';
+  const sectionReleveJoin =
+    hasSectionId && hasSectionsTable && hasSectionRelevesTable
+      ? ' LEFT JOIN section_releves sr ON sr.section_id = lr.section_id AND sr.releve_id = lr.releve_id AND sr.supprime_le IS NULL'
+      : '';
 
   const query = `
     SELECT
@@ -1657,14 +1902,20 @@ export const getLignesByReleveIdLocal = async (releveId) => {
       u.nom_unite,
       u.formule,
       u.ind_dimension
+      ${sectionSelect}${sectionOrdreSelect}${ordreSelect}
     FROM ligne_releves lr
     JOIN releves r ON r.id = lr.releve_id
     JOIN ouvrage_unites ou ON ou.id = lr.ouvrage_unite_id
     JOIN ouvrages o ON o.id = ou.ouvrage_id
     JOIN metiers m ON m.id = o.metier_id
     JOIN unites u ON u.id = ou.unite_id
+    ${sectionJoin}${sectionReleveJoin}
     WHERE lr.releve_id = ?${tombstoneFilter}
-    ORDER BY lr.cree_le ASC, lr.id ASC;
+    ORDER BY ${
+      hasSectionId && hasSectionsTable && hasSectionRelevesTable
+        ? 'COALESCE(sr.ordre, 999) ASC,'
+        : ''
+    }${hasOrdre ? ' COALESCE(lr.ordre, 999) ASC,' : ''} lr.cree_le ASC, lr.id ASC;
   `;
   return db.getAllAsync(query, [releveId]);
 };
@@ -1677,6 +1928,8 @@ export const getLignesByChantierLocal = async (chantierId) => {
     (await tableHasColumn(db, 'ligne_releves', 'supprime_le')) &&
     (await tableHasColumn(db, 'releves', 'supprime_le'));
   const tombstoneFilter = hasSupprimeLe ? ' AND lr.supprime_le IS NULL AND r.supprime_le IS NULL' : '';
+  const hasOrdre = await tableHasColumn(db, 'ligne_releves', 'ordre');
+  const ordreSelect = hasOrdre ? ', lr.ordre' : '';
 
   const query = `
     SELECT
@@ -1701,6 +1954,7 @@ export const getLignesByChantierLocal = async (chantierId) => {
       u.nom_unite,
       u.formule,
       u.ind_dimension
+      ${ordreSelect}
     FROM ligne_releves lr
     JOIN releves r ON r.id = lr.releve_id
     JOIN ouvrage_unites ou ON ou.id = lr.ouvrage_unite_id
@@ -1708,7 +1962,7 @@ export const getLignesByChantierLocal = async (chantierId) => {
     JOIN metiers m ON m.id = o.metier_id
     JOIN unites u ON u.id = ou.unite_id
     WHERE r.chantier_id = ?${tombstoneFilter}
-    ORDER BY r.cree_le ASC, lr.cree_le ASC, lr.id ASC;
+    ORDER BY r.cree_le ASC, ${hasOrdre ? 'lr.ordre ASC,' : ''} lr.cree_le ASC, lr.id ASC;
   `;
   return db.getAllAsync(query, [chantierId]);
 };
@@ -1720,8 +1974,9 @@ export const getRelevesByChantierLocal = async (chantierId) => {
   const hasSupprimeLe = await tableHasColumn(db, 'releves', 'supprime_le');
   const tombstoneFilter = hasSupprimeLe ? ' AND r.supprime_le IS NULL' : '';
 
-  return db.getAllAsync(
-    `
+  return withReleveNumbers(
+    await db.getAllAsync(
+      `
     SELECT
       r.*,
       TRIM(COALESCE(p.prenom, '') || ' ' || COALESCE(p.nom, '')) AS prise_par_nom
@@ -1730,7 +1985,8 @@ export const getRelevesByChantierLocal = async (chantierId) => {
     WHERE r.chantier_id = ?${tombstoneFilter}
     ORDER BY r.cree_le DESC, r.id DESC;
     `,
-    [chantierId]
+      [chantierId]
+    )
   );
 };
 
@@ -2498,6 +2754,7 @@ export const finalizeDimensionDraftLocal = async ({
   remise = undefined,
   indTva = undefined,
   lignes = [],
+  sectionOrder = null,
 }) => {
   const resolvedEntrepriseId = entrepriseId || (await ensureEntrepriseLocale());
 
@@ -2532,7 +2789,7 @@ export const finalizeDimensionDraftLocal = async ({
         chantierStatus,
         chantierNotes?.trim() || null
       );
-      await replaceLignesReleveLocal(releveId, lignes);
+      await replaceLignesReleveLocal(releveId, lignes, sectionOrder);
       await updateRelevePriseParLocal(releveId, priseParId);
       if (remise !== undefined) {
         await updateReleveRemiseLocal(releveId, remise);
@@ -2577,6 +2834,7 @@ export const finalizeDimensionDraftLocal = async ({
       );
 
       await insertLignesForReleveLocal(newReleveId, lignes);
+      await replaceSectionRelevesForReleveLocal(newReleveId, lignes, sectionOrder);
       await refreshReleveTotaux(newReleveId);
       if (chantierPhotoUris) {
         await applyChantierPendingPhotosLocal(chantierId, chantierPhotoUris);
@@ -2603,6 +2861,7 @@ export const finalizeDimensionDraftLocal = async ({
     );
 
     await insertLignesForReleveLocal(newReleveId, lignes);
+    await replaceSectionRelevesForReleveLocal(newReleveId, lignes, sectionOrder);
     await refreshReleveTotaux(newReleveId);
     if (chantierPhotoUris) {
       await applyChantierPendingPhotosLocal(newChantierId, chantierPhotoUris);

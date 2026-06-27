@@ -30,7 +30,11 @@ export function middleware(request) {
   }
 
   if (pathname === '/login' && isAuthenticated && canAccessAdminWeb(session)) {
-    return NextResponse.redirect(new URL('/accueil', request.url));
+    return NextResponse.redirect(new URL('/tableau-de-bord', request.url));
+  }
+
+  if (pathname === '/accueil') {
+    return NextResponse.redirect(new URL('/tableau-de-bord', request.url));
   }
 
   return NextResponse.next();
@@ -39,13 +43,12 @@ export function middleware(request) {
 export const config = {
   matcher: [
     '/login',
-    '/accueil',
     '/tableau-de-bord',
+    '/accueil',
     '/chantiers',
     '/clients',
     '/ouvrages/:path*',
     '/articles/:path*',
-    '/parametres',
     '/profil',
   ],
 };

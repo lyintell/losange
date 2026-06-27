@@ -57,11 +57,29 @@ export default function DevisDocument({ chantier, lignes = [], releve, entrepris
           </thead>
           <tbody>
             {tableRows.length ? (
-              tableRows.map((row, index) => (
+              tableRows.map((row, index) => {
+                if (row.isSectionSeparator) {
+                  return (
+                    <tr key={`section-sep-${index}`} className="row-section-divider">
+                      <td colSpan={4} />
+                    </tr>
+                  );
+                }
+
+                if (row.isSectionHeader) {
+                  return (
+                    <tr key={`section-header-${index}`} className="row-section-header">
+                      <td colSpan={4}>
+                        <p className="devis-section">{row.sectionNom}</p>
+                      </td>
+                    </tr>
+                  );
+                }
+
+                return (
                 <tr
                   key={`${row.metierId}-${row.ouvrageNom}-${index}`}
                   className={[
-                    row.metierDivider ? 'row-metier-divider' : '',
                     row.ouvrageLigneSuite ? 'row-ouvrage-suite' : '',
                     row.ouvrageLigneBeforeSuite ? 'row-ouvrage-before-suite' : '',
                   ]
@@ -83,7 +101,8 @@ export default function DevisDocument({ chantier, lignes = [], releve, entrepris
                   <td className="num">{formatMontantFcfa(row.prixUnitaire)}</td>
                   <td className="num">{formatMontantFcfa(row.montant)}</td>
                 </tr>
-              ))
+                );
+              })
             ) : (
               <tr>
                 <td colSpan={4}>Aucune ligne</td>

@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import FacturationSummary from '@/components/chantiers/FacturationSummary';
 import TvaToggle from '@/components/chantiers/TvaToggle';
 import { formatRemiseDisplay, parseRemiseInput } from '@/lib/chantiers/remise';
+import { formatDevisDimension } from '@/lib/format/devisGrouping';
 import { formatMontantFcfa } from '@/lib/format/formatLigneMesures';
 import { computeMontantLigneReleve } from '@/lib/format/ligneReleveCalcul';
 import { computeReleveFacturation } from '@/lib/format/releveFacturation';
@@ -24,6 +25,8 @@ export default function DevisEditClient({ chantier, releve, lignes = [], canEdit
   const [releveIndTva, setReleveIndTva] = useState(Number(releve?.ind_tva) === 1 ? 1 : 0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  const ligneById = useMemo(() => new Map(lignes.map((ligne) => [ligne.id, ligne])), [lignes]);
 
   const updateRow = (id, value) => {
     setRows((prev) =>
@@ -113,6 +116,8 @@ export default function DevisEditClient({ chantier, releve, lignes = [], canEdit
           </thead>
           <tbody>
             {rows.map((row) => {
+              const ligne = ligneById.get(row.id);
+              const dimension = ligne ? formatDevisDimension(ligne) : null;
               const pu = Number(String(row.prix_unitaire_applique).replace(',', '.')) || 0;
               const montant = computeMontantLigneReleve({
                 prixUnitaireApplique: pu,
@@ -122,7 +127,12 @@ export default function DevisEditClient({ chantier, releve, lignes = [], canEdit
               return (
                 <tr key={row.id}>
                   <td>{row.metier_nom}</td>
-                  <td>{row.ouvrage_nom}</td>
+                  <td>
+                    <div className="devis-edit-designation">
+                      <p className="devis-ouvrage">{row.ouvrage_nom}</p>
+                      {dimension ? <p className="devis-dimension">{dimension}</p> : null}
+                    </div>
+                  </td>
                   <td className="num">{row.nombre ?? 0}</td>
                   <td className="num">
                     <input

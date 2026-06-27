@@ -9,7 +9,6 @@ import { computeReleveFacturation } from './releveFacturation';
 import {
   EXPORT_LOGO_STYLES,
   renderExportLogoHeaderHtml,
-  renderExportLogoWatermarkHtml,
   resolveExportLogoDataUri,
 } from './exportLogo';
 import { saveFileToAndroidDownloads } from './androidSafExport';
@@ -64,9 +63,16 @@ const renderDesignationCell = (row) => {
 export function buildDevisHtml({ entreprise, chantier, lignes = [], releve = null, logoDataUri = null }) {
   const tableRows = buildDevisTableRows(lignes);
   const rows = tableRows
-    .map((row) => {
+    .map((row, index) => {
+      if (row.isSectionSeparator) {
+        return `<tr class="section-divider"><td colspan="4"></td></tr>`;
+      }
+
+      if (row.isSectionHeader) {
+        return `<tr class="section-header"><td colspan="4"><div class="section">${escapeHtml(row.sectionNom)}</div></td></tr>`;
+      }
+
       const rowClass = [
-        row.metierDivider ? 'metier-divider' : '',
         row.ouvrageLigneSuite ? 'ouvrage-ligne-suite' : '',
         row.ouvrageLigneBeforeSuite ? 'ouvrage-ligne-before-suite' : '',
       ]
@@ -150,11 +156,13 @@ export function buildDevisHtml({ entreprise, chantier, lignes = [], releve = nul
           th { background: #f8f9fa; font-weight: 700; }
           th.designation, td.designation-cell { width: 52%; }
           td.num, th.num { text-align: right; white-space: nowrap; width: 16%; vertical-align: bottom; }
-          tr.metier-divider td { border-top: 2px solid #212529; }
+          tr.section-divider td { border-top: 2px solid #212529; border-bottom: none; padding: 0; height: 0; line-height: 0; }
+          tr.section-header td { border-top: none; border-bottom: none; padding: 8px 8px 4px; }
+          .designation .section, tr.section-header .section { font-weight: 700; font-size: 14px; text-align: center; }
           tr.ouvrage-ligne-suite td { border-top: none; }
           tr.ouvrage-ligne-before-suite td { border-bottom: none; }
-          .designation .metier { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
-          .designation .ouvrage { font-weight: 700; font-size: 12px; margin-bottom: 4px; }
+          .designation .metier { font-weight: 700; font-size: 13px; margin-bottom: 6px; text-align: left; }
+          .designation .ouvrage { font-weight: 700; font-size: 12px; margin-bottom: 4px; text-align: center; }
           .designation .dimension-line { text-align: center; font-size: 13px; font-weight: 600; line-height: 1.6; min-height: 1.6em; }
           .totals { margin-top: 16px; width: 100%; }
           .totals td { border: none; padding: 4px 0; }
@@ -170,7 +178,6 @@ export function buildDevisHtml({ entreprise, chantier, lignes = [], releve = nul
         </style>
       </head>
       <body>
-        ${renderExportLogoWatermarkHtml(logoDataUri)}
         <div class="page-content">
         <div class="header">
           <div class="header-top">
@@ -265,7 +272,15 @@ const renderDimensionLigneHtml = (row) => {
   return '';
 };
 
-const renderDimensionsDesignationBlock = (row) => {
+const renderDimensionsRowHtml = (row) => {
+  if (row.isSectionSeparator) {
+    return `<div class="dim-section-divider"></div>`;
+  }
+
+  if (row.isSectionHeader) {
+    return `<div class="dim-section">${escapeHtml(row.sectionNom)}</div>`;
+  }
+
   const metierHtml = row.showMetier
     ? `<div class="dim-metier" style="color:${row.metierColor}">${escapeHtml(row.metierNom)}</div>`
     : '';
@@ -283,15 +298,15 @@ const renderDimensionsDesignationBlock = (row) => {
   `;
 };
 
-export function buildDimensionsPdfHtml({ chantier, lignes = [], logoDataUri = null }) {
-  const tableRows = buildRelevesTableRows(lignes);
+export function buildDimensionsPdfHtml({ chantier, lignes = [], sectionOrder = null, logoDataUri = null }) {
+  const tableRows = buildRelevesTableRows(lignes, sectionOrder);
   const clientNom = chantier?.client_nom?.trim() || 'Client';
   const chantierNom = chantier?.nom?.trim() || 'Chantier';
   const chantierNotes = chantier?.notes?.trim() || '';
   const releveDateRaw = lignes.find((ligne) => ligne.releve_date_facture)?.releve_date_facture;
   const releveDateLabel = formatReleveDate(releveDateRaw);
 
-  const blocks = tableRows.map((row) => renderDimensionsDesignationBlock(row)).join('');
+  const blocks = tableRows.map((row) => renderDimensionsRowHtml(row)).join('');
 
   return `
     <!DOCTYPE html>
@@ -328,6 +343,15 @@ export function buildDimensionsPdfHtml({ chantier, lignes = [], logoDataUri = nu
             display: flex;
             flex-direction: column;
             gap: 18px;
+          }
+          .dim-section-divider {
+            border-top: 3px solid #212529;
+            margin-top: 8px;
+          }
+          .dim-section {
+            font-weight: 800;
+            font-size: 22px;
+            text-align: center;
           }
           .dim-block {
             text-align: left;
@@ -388,7 +412,6 @@ export function buildDimensionsPdfHtml({ chantier, lignes = [], logoDataUri = nu
         </style>
       </head>
       <body>
-        ${renderExportLogoWatermarkHtml(logoDataUri)}
         <div class="page-content">
         <div class="dimensions-header">
           ${renderExportLogoHeaderHtml(logoDataUri)}
@@ -412,9 +435,9 @@ export async function generateDevisPdfFile({ entreprise, chantier, lignes, relev
   return uri;
 }
 
-export async function generateDimensionsPdfFile({ entreprise, chantier, lignes }) {
+export async function generateDimensionsPdfFile({ entreprise, chantier, lignes, sectionOrder = null }) {
   const logoDataUri = await resolveExportLogoDataUri(entreprise);
-  const html = buildDimensionsPdfHtml({ chantier, lignes, logoDataUri });
+  const html = buildDimensionsPdfHtml({ chantier, lignes, sectionOrder, logoDataUri });
   const { uri } = await Print.printToFileAsync({ html });
   return uri;
 }

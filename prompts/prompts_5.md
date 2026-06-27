@@ -1,0 +1,1 @@
+1. met a jours l ecran Master en tenant compte des nouveaux champs partout, mais aussi des tables supprimer (ex. metier_entreprise). Puis redeploy losange-master.expo.app

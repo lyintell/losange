@@ -5,6 +5,7 @@ const TABLE_UPSERT_ORDER = [
   'entreprises',
   'profils',
   'metiers',
+  'sections',
   'unites',
   'fournisseurs',
   'ouvrages',
@@ -12,17 +13,20 @@ const TABLE_UPSERT_ORDER = [
   'clients',
   'chantiers',
   'releves',
+  'section_releves',
   'ligne_releves',
 ];
 
 const CLEAR_TABLES_ORDER = [
   'ligne_releves',
+  'section_releves',
   'releves',
   'chantiers',
   'clients',
   'ouvrage_unites',
   'ouvrages',
   'fournisseurs',
+  'sections',
   'profils',
   'entreprises',
   'terrain_session',
@@ -42,6 +46,8 @@ const TABLE_COLUMNS = {
     'ind_pro',
     'ind_active',
     'ind_tva',
+    'ind_admin_connecte_mobile',
+    'ind_metiers_preselectionnes',
     'date_actif_jusqua',
     'pro_activated_le',
     'pro_downgraded_le',
@@ -69,17 +75,19 @@ const TABLE_COLUMNS = {
     'abbrev',
     'icon',
     'entreprise_id',
+    'ordre',
+    'ind_actif',
+    'ind_default',
     'supprime_le',
     'cree_le',
     'mis_a_jour_le',
     '_synced',
   ],
-  metiers_entreprise: [
+  sections: [
+    'id',
+    'nom',
     'entreprise_id',
-    'metier_id',
-    'ordre',
     'supprime_le',
-    'ind_actif',
     'cree_le',
     'mis_a_jour_le',
     '_synced',
@@ -175,6 +183,16 @@ const TABLE_COLUMNS = {
     'mis_a_jour_le',
     '_synced',
   ],
+  section_releves: [
+    'id',
+    'section_id',
+    'releve_id',
+    'ordre',
+    'supprime_le',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
   ligne_releves: [
     'id',
     'releve_id',
@@ -188,6 +206,8 @@ const TABLE_COLUMNS = {
     'montant',
     'note',
     'photo',
+    'section_id',
+    'ordre',
     'ind_complete',
     'supprime_le',
     'cree_le',
@@ -205,6 +225,9 @@ const FLAG_COLUMNS = new Set([
   'ind_complete',
   'ind_article',
   'ind_actif',
+  'ind_default',
+  'ind_admin_connecte_mobile',
+  'ind_metiers_preselectionnes',
 ]);
 
 const coerceFlag = (value) => {
@@ -264,12 +287,8 @@ export const upsertRows = async (db, tableName, rows = []) => {
 
   const columns = TABLE_COLUMNS[tableName];
   const placeholders = columns.map(() => '?').join(', ');
-  const conflictTarget =
-    tableName === 'metiers_entreprise' ? '(entreprise_id, metier_id)' : '(id)';
-  const updateColumns =
-    tableName === 'metiers_entreprise'
-      ? columns.filter((column) => column !== 'entreprise_id' && column !== 'metier_id')
-      : columns.filter((column) => column !== 'id');
+  const conflictTarget = '(id)';
+  const updateColumns = columns.filter((column) => column !== 'id');
   const updateClause = updateColumns
     .map((column) => `${column} = excluded.${column}`)
     .join(', ');
@@ -298,7 +317,6 @@ export const syncTerrainBootstrapLocal = async (payload) => {
         profil: payload?.profil,
         profils: payload?.profils,
         metiers: payload?.metiers,
-        metiers_entreprise: payload?.metiers_entreprise,
         unites: payload?.unites,
         ouvrages: payload?.ouvrages,
         ouvrage_unites: payload?.ouvrage_unites,

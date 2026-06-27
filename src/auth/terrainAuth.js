@@ -22,6 +22,8 @@ import {
 } from '../db/terrainSync';
 import { ensureLocalDatabaseReady } from '../db/localDb';
 import { runTerrainSyncOnLogin, runTerrainSyncPullOnly, runTerrainSyncPushOnly, runTerrainSyncPushPull } from '../db/terrainSyncPro';
+import { repairMetiersRemote } from '../db/metiersPreselection';
+import { getMetierPreselectionRequiredLocal } from '../db/querries';
 import { applyTerrainPullPayload, countLocalClientsForEntreprise } from '../db/terrainSyncMerge';
 import {
   reconcileEntrepriseTierLocal,
@@ -128,7 +130,7 @@ export const loginTerrain = async (identifiant, motDePasse, { wipeLocal = false 
   assertSupabaseConfigured();
 
   const { data, error } = await supabase.functions.invoke('terrain-login', {
-    body: { identifiant, motDePasse },
+    body: { identifiant, motDePasse, source: 'mobile' },
   });
 
   if (error) {
@@ -176,6 +178,14 @@ export const loginTerrain = async (identifiant, motDePasse, { wipeLocal = false 
       console.warn('Catalogue incomplet apres synchronisation Supabase:', catalogue);
     }
 
+    const remoteMetiersCount = (data.payload.metiers || []).length;
+    if (remoteMetiersCount === 0) {
+      const repairResult = await repairMetiersRemote({ entrepriseId });
+      if (!repairResult.ok) {
+        console.warn('Reparation metiers cloud:', repairResult.error);
+      }
+    }
+
     if (isProAccount && remoteClientCount > 0 && localClientCount === 0) {
       throw new Error(
         "Les clients Supabase n'ont pas pu être enregistrés localement. Vérifiez les migrations SQLite (supprime_le, notes)."
@@ -204,10 +214,13 @@ export const loginTerrain = async (identifiant, motDePasse, { wipeLocal = false 
     );
   }
 
+  const needsMetierPreselection = await getMetierPreselectionRequiredLocal();
+
   return {
     ok: true,
     entrepriseId: data.payload.entreprise.id,
     profilId: data.payload.profil.id,
+    needsMetierPreselection,
   };
 };
 
@@ -257,7 +270,7 @@ export const ensureTerrainSessionAllowed = async ({ verifyRemote = false } = {})
 
   try {
     const { data, error } = await supabase.functions.invoke('terrain-login', {
-      body: { identifiant: device.identifiant, motDePasse: device.mot_de_passe },
+      body: { identifiant: device.identifiant, motDePasse: device.mot_de_passe, source: 'mobile' },
     });
 
     if (error) {

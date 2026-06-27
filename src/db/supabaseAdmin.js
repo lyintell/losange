@@ -7,12 +7,13 @@ export const ADMIN_TABLE_KEYS = [
   'clients',
   'chantiers',
   'metiers',
-  'metiers_entreprise',
+  'sections',
   'fournisseurs',
   'ouvrages',
   'unites',
   'ouvrage_unites',
   'releves',
+  'section_releves',
   'ligne_releves',
 ];
 
