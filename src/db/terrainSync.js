@@ -295,6 +295,19 @@ export const upsertRows = async (db, tableName, rows = []) => {
 
   for (const rawRow of rows) {
     const row = normalizeRow(tableName, rawRow);
+
+    if (tableName === 'section_releves' && row.section_id) {
+      const section = await db.getFirstAsync('SELECT id FROM sections WHERE id = ?;', [row.section_id]);
+      if (!section) continue;
+    }
+
+    if (tableName === 'ligne_releves' && row.section_id) {
+      const section = await db.getFirstAsync('SELECT id FROM sections WHERE id = ?;', [row.section_id]);
+      if (!section) {
+        row.section_id = null;
+      }
+    }
+
     const values = columns.map((column) => {
       if (row[column] !== undefined) return row[column];
       if (tableName === 'releves' && column === 'ind_tva') return 0;
@@ -324,6 +337,8 @@ export const syncTerrainBootstrapLocal = async (payload) => {
         clients: payload?.clients,
         chantiers: payload?.chantiers,
         releves: payload?.releves,
+        sections: payload?.sections,
+        section_releves: payload?.section_releves,
         ligne_releves: payload?.ligne_releves,
       },
       { forceAll: true }
