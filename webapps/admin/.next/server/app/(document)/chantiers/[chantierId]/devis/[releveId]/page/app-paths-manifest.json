@@ -1,0 +1,3 @@
+{
+  "/(document)/chantiers/[chantierId]/devis/[releveId]/page": "app/(document)/chantiers/[chantierId]/devis/[releveId]/page.js"
+}
