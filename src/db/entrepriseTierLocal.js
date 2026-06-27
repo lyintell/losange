@@ -348,5 +348,8 @@ export const syncTerrainBootstrapAccountLocal = async (payload) => {
     profils: payload?.profils,
   });
   await mergeCatalogueFromPull({ unites: payload?.unites });
-  await mergeTransactionalFromPull({ metiers: payload?.metiers }, { forceAll: true });
+  await mergeTransactionalFromPull(
+    { metiers: payload?.metiers, sections: payload?.sections },
+    { forceAll: true }
+  );
 };

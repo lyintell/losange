@@ -145,6 +145,43 @@ const fetchMetiersPullData = async (
   return metiers ?? [];
 };
 
+const DEFAULT_SECTION_NOM = 'Pas de section';
+
+const sortSectionsForPull = (sections: Record<string, unknown>[]) =>
+  [...sections].sort((left, right) => {
+    const leftDefault =
+      String(left.nom ?? '')
+        .trim()
+        .toLowerCase() === DEFAULT_SECTION_NOM.toLowerCase();
+    const rightDefault =
+      String(right.nom ?? '')
+        .trim()
+        .toLowerCase() === DEFAULT_SECTION_NOM.toLowerCase();
+    if (leftDefault && !rightDefault) return -1;
+    if (!leftDefault && rightDefault) return 1;
+    return String(left.nom ?? '').localeCompare(String(right.nom ?? ''), 'fr', {
+      sensitivity: 'base',
+    });
+  });
+
+const fetchSectionsPullData = async (
+  supabase: ReturnType<typeof createClient>,
+  entrepriseId: string
+) => {
+  const { data: sections, error } = await supabase
+    .from('sections')
+    .select('*')
+    .eq('entreprise_id', entrepriseId)
+    .is('supprime_le', null)
+    .order('nom', { ascending: true });
+
+  if (error) {
+    throw new Error(error.message || 'Erreur chargement sections.');
+  }
+
+  return sortSectionsForPull(sections ?? []);
+};
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -213,8 +250,9 @@ Deno.serve(async (req) => {
     const entrepriseId = String(entreprise.id);
     const isProAccount = Number(entreprise.ind_pro) === 1;
 
-    const [metiersPull, unitesResult, profilsResult] = await Promise.all([
+    const [metiersPull, sectionsPull, unitesResult, profilsResult] = await Promise.all([
       fetchMetiersPullData(supabase, entrepriseId),
+      fetchSectionsPullData(supabase, entrepriseId),
       supabase.from('unites').select('*'),
       supabase
         .from('profils')
@@ -236,6 +274,7 @@ Deno.serve(async (req) => {
           profil: stripProfil(profilRow as Record<string, unknown>),
           profils: profilsResult.data ?? [],
           metiers: metiersPull,
+          sections: sectionsPull,
           unites: unitesResult.data ?? [],
           ouvrages: [],
           ouvrage_unites: [],
@@ -243,6 +282,7 @@ Deno.serve(async (req) => {
           clients: [],
           chantiers: [],
           releves: [],
+          section_releves: [],
           ligne_releves: [],
         },
       });
@@ -325,6 +365,18 @@ Deno.serve(async (req) => {
       ligneReleves = filterTransactionalRowsForProPull(data ?? [], proActivatedLe);
     }
 
+    let sectionReleves: Record<string, unknown>[] = [];
+    if (releveIds.length > 0) {
+      const { data, error } = await supabase
+        .from('section_releves')
+        .select('*')
+        .in('releve_id', releveIds);
+      if (error) {
+        return jsonResponse({ ok: false, error: error.message || 'Erreur chargement section_releves.' }, 500);
+      }
+      sectionReleves = filterTransactionalRowsForProPull(data ?? [], proActivatedLe);
+    }
+
     return jsonResponse({
       ok: true,
       payload: {
@@ -332,6 +384,7 @@ Deno.serve(async (req) => {
         profil: stripProfil(profilRow as Record<string, unknown>),
         profils: profilsResult.data ?? [],
         metiers: metiersPull,
+        sections: sectionsPull,
         unites: unitesResult.data ?? [],
         fournisseurs,
         ouvrages,
@@ -339,6 +392,7 @@ Deno.serve(async (req) => {
         clients,
         chantiers,
         releves,
+        section_releves: sectionReleves,
         ligne_releves: ligneReleves,
       },
     });
