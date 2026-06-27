@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Chip, Text } from 'react-native-paper';
+import ChoixUniteModal from '../components/terrain/ChoixUniteModal';
 import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
 import MobileButton from '../components/terrain/MobileButton';
 import { getMetiersForSelectionLocal, getOuvragesByMetierAndEntreprise, getUnitesEtPrixParOuvrage } from '../db/querries';
+import { formatUniteChoiceLabel } from '../utils/formatUniteChoiceLabel';
 import { chantierColors } from '../styles/theme';
 
 export default function SelecteurMetierOuvrage({
@@ -15,11 +17,15 @@ export default function SelecteurMetierOuvrage({
   const [metierActif, setMetierActif] = useState(null);
   const [step, setStep] = useState('metier');
   const [ouvrages, setOuvrages] = useState([]);
-  const [unitesPrix, setUnitesPrix] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadingMetiers, setLoadingMetiers] = useState(true);
   const [ouvrageActif, setOuvrageActif] = useState(null);
   const [uniteActive, setUniteActive] = useState(null);
+  const [choixUniteModal, setChoixUniteModal] = useState({
+    visible: false,
+    ouvrage: null,
+    unites: [],
+  });
 
   const hasMetier = useMemo(() => Boolean(metierActif), [metierActif]);
 
@@ -49,7 +55,6 @@ export default function SelecteurMetierOuvrage({
     setStep('ouvrage-unite');
     setOuvrageActif(null);
     setUniteActive(null);
-    setUnitesPrix([]);
     setLoading(true);
     try {
       const data = await getOuvragesByMetierAndEntreprise(metier.id, entrepriseId);
@@ -67,14 +72,30 @@ export default function SelecteurMetierOuvrage({
     setUniteActive(null);
     try {
       const data = await getUnitesEtPrixParOuvrage(ouvrage.id);
-      setUnitesPrix(data || []);
-      if (data?.length) {
-        setUniteActive(data[0]);
+      const unites = data || [];
+
+      if (unites.length === 1) {
+        setUniteActive(unites[0]);
+        return;
+      }
+
+      if (unites.length > 1) {
+        setChoixUniteModal({ visible: true, ouvrage, unites });
       }
     } catch (error) {
       console.error('Erreur chargement unites/prix:', error);
-      setUnitesPrix([]);
     }
+  };
+
+  const handleChooseUniteFromModal = (unite) => {
+    setChoixUniteModal({ visible: false, ouvrage: null, unites: [] });
+    setUniteActive(unite);
+  };
+
+  const handleDismissChoixUniteModal = () => {
+    setChoixUniteModal({ visible: false, ouvrage: null, unites: [] });
+    setOuvrageActif(null);
+    setUniteActive(null);
   };
 
   const confirmSelection = () => {
@@ -152,24 +173,12 @@ export default function SelecteurMetierOuvrage({
               </View>
             )}
 
-            {unitesPrix.length > 0 && (
+            {uniteActive ? (
               <View style={styles.prixPanel}>
-                <Text style={styles.prixTitle}>3) Choisissez l'unité</Text>
-                <View style={styles.chipWrap}>
-                  {unitesPrix.map((item) => (
-                    <Chip
-                      key={item.ouvrage_unite_id}
-                      selected={uniteActive?.ouvrage_unite_id === item.ouvrage_unite_id}
-                      onPress={() => setUniteActive(item)}
-                      style={styles.chip}
-                      selectedColor={chantierColors.success}
-                    >
-                      {item.nom} ({item.formule})
-                    </Chip>
-                  ))}
-                </View>
+                <Text style={styles.prixTitle}>Unité sélectionnée</Text>
+                <Text style={styles.uniteSelectedLabel}>{formatUniteChoiceLabel(uniteActive)}</Text>
               </View>
-            )}
+            ) : null}
 
             <MobileButton
               mode="contained"
@@ -185,6 +194,14 @@ export default function SelecteurMetierOuvrage({
           </View>
         )}
       </ScrollView>
+
+      <ChoixUniteModal
+        visible={choixUniteModal.visible}
+        ouvrageNom={choixUniteModal.ouvrage?.nom || ''}
+        unites={choixUniteModal.unites}
+        onDismiss={handleDismissChoixUniteModal}
+        onSelect={handleChooseUniteFromModal}
+      />
     </View>
   );
 }
@@ -261,5 +278,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: chantierColors.text,
     marginBottom: 6,
+  },
+  uniteSelectedLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: chantierColors.success,
   },
 });

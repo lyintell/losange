@@ -2,6 +2,7 @@ import * as SQLite from 'expo-sqlite';
 
 let dbInstance = null;
 let dbInitPromise = null;
+let dbQueue = Promise.resolve();
 
 export const getLocalDB = async () => {
   if (dbInstance) return dbInstance;
@@ -109,6 +110,87 @@ const migrateUnitesDropIndUnitaire = async (db) => {
   await migrateUnitesToCurrentSchema(db);
 };
 
+const migrateArticlesIntoOuvrages = async (db) => {
+  const ouvragesExists = await db.getFirstAsync(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ouvrages';`
+  );
+  if (!ouvragesExists) return;
+
+  if (!(await tableHasColumn(db, 'ouvrages', 'ind_article'))) {
+    await db.execAsync(
+      'ALTER TABLE ouvrages ADD COLUMN ind_article INTEGER NOT NULL DEFAULT 0 CHECK (ind_article IN (0, 1));'
+    );
+  }
+  if (!(await tableHasColumn(db, 'ouvrages', 'fournisseur_id'))) {
+    await db.execAsync('ALTER TABLE ouvrages ADD COLUMN fournisseur_id TEXT;');
+  }
+  if (!(await tableHasColumn(db, 'ouvrages', 'photo'))) {
+    await db.execAsync('ALTER TABLE ouvrages ADD COLUMN photo TEXT;');
+  }
+
+  const articlesExists = await db.getFirstAsync(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'articles';`
+  );
+  if (!articlesExists) return;
+
+  const fournisseursExists = await db.getFirstAsync(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'fournisseurs';`
+  );
+  if (!fournisseursExists) return;
+
+  await db.execAsync('PRAGMA foreign_keys = OFF;');
+  try {
+    await db.execAsync(`
+      INSERT INTO ouvrages (
+        id, metier_id, entreprise_id, nom, ind_article, fournisseur_id, photo,
+        supprime_le, cree_le, mis_a_jour_le, _synced
+      )
+      SELECT
+        a.id,
+        a.metier_id,
+        f.entreprise_id,
+        a.nom,
+        1,
+        a.fournisseur_id,
+        a.photo,
+        a.supprime_le,
+        a.cree_le,
+        a.mis_a_jour_le,
+        a._synced
+      FROM articles a
+      JOIN fournisseurs f ON f.id = a.fournisseur_id
+      WHERE NOT EXISTS (SELECT 1 FROM ouvrages o WHERE o.id = a.id);
+    `);
+
+    const articleUnitesExists = await db.getFirstAsync(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'article_unites';`
+    );
+    if (articleUnitesExists) {
+      await db.execAsync(`
+        INSERT INTO ouvrage_unites (
+          id, ouvrage_id, unite_id, prix_unitaire, supprime_le, cree_le, mis_a_jour_le, _synced
+        )
+        SELECT
+          au.id,
+          au.article_id,
+          au.unite_id,
+          au.prix_unitaire,
+          au.supprime_le,
+          au.cree_le,
+          au.mis_a_jour_le,
+          au._synced
+        FROM article_unites au
+        WHERE NOT EXISTS (SELECT 1 FROM ouvrage_unites ou WHERE ou.id = au.id);
+      `);
+      await db.execAsync('DROP TABLE IF EXISTS article_unites;');
+    }
+
+    await db.execAsync('DROP TABLE IF EXISTS articles;');
+  } finally {
+    await db.execAsync('PRAGMA foreign_keys = ON;');
+  }
+};
+
 export const initLocalDatabase = async () => {
   if (dbInitPromise) return dbInitPromise;
 
@@ -117,6 +199,8 @@ export const initLocalDatabase = async () => {
 
   // Forcer la vérification des contraintes d'intégrité
   await db.execAsync('PRAGMA foreign_keys = ON;');
+  await db.execAsync('PRAGMA journal_mode = WAL;');
+  await db.execAsync('PRAGMA busy_timeout = 5000;');
 
   // Exécution du schéma épuré et normalisé
   await db.execAsync(`
@@ -197,16 +281,37 @@ export const initLocalDatabase = async () => {
       nom TEXT NOT NULL,
       abbrev TEXT,
       icon TEXT,
+      entreprise_id TEXT,
+      ordre INTEGER NOT NULL DEFAULT 0,
+      ind_actif INTEGER NOT NULL DEFAULT 1 CHECK (ind_actif IN (0, 1)),
+      ind_default INTEGER NOT NULL DEFAULT 0 CHECK (ind_default IN (0, 1)),
+      supprime_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
-      mis_a_jour_le TEXT DEFAULT (datetime('now'))
+      mis_a_jour_le TEXT DEFAULT (datetime('now')),
+      _synced INTEGER NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1)),
+      FOREIGN KEY (entreprise_id) REFERENCES entreprises (id) ON DELETE CASCADE
     );
 
-    -- 6. TABLE OUVRAGE
-    CREATE TABLE IF NOT EXISTS ouvrages (
+    -- 5b. TABLE SECTION (dimensions par zone : RDC, salon, étage, etc.)
+    CREATE TABLE IF NOT EXISTS sections (
+      id TEXT PRIMARY KEY NOT NULL,
+      nom TEXT NOT NULL,
+      entreprise_id TEXT NOT NULL,
+      supprime_le TEXT,
+      cree_le TEXT DEFAULT (datetime('now')),
+      mis_a_jour_le TEXT DEFAULT (datetime('now')),
+      _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1)),
+      FOREIGN KEY (entreprise_id) REFERENCES entreprises (id) ON DELETE CASCADE
+    );
+
+    -- 6. TABLE FOURNISSEUR
+    CREATE TABLE IF NOT EXISTS fournisseurs (
       id TEXT PRIMARY KEY NOT NULL,
       metier_id TEXT NOT NULL,
       entreprise_id TEXT NOT NULL,
       nom TEXT NOT NULL,
+      telephone_1 TEXT,
+      telephone_2 TEXT,
       supprime_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
@@ -215,7 +320,27 @@ export const initLocalDatabase = async () => {
       FOREIGN KEY (entreprise_id) REFERENCES entreprises (id) ON DELETE CASCADE
     );
 
-    -- 7. TABLE UNITE
+    -- 7. TABLE OUVRAGE
+    CREATE TABLE IF NOT EXISTS ouvrages (
+      id TEXT PRIMARY KEY NOT NULL,
+      metier_id TEXT NOT NULL,
+      entreprise_id TEXT NOT NULL,
+      nom TEXT NOT NULL,
+      ind_article INTEGER NOT NULL DEFAULT 0 CHECK (ind_article IN (0, 1)),
+      fournisseur_id TEXT,
+      photo TEXT,
+      supprime_le TEXT,
+      ind_actif INTEGER NOT NULL DEFAULT 1 CHECK (ind_actif IN (0, 1)),
+      ordre INTEGER NOT NULL DEFAULT 0,
+      cree_le TEXT DEFAULT (datetime('now')),
+      mis_a_jour_le TEXT DEFAULT (datetime('now')),
+      _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1)),
+      FOREIGN KEY (metier_id) REFERENCES metiers (id) ON DELETE CASCADE,
+      FOREIGN KEY (entreprise_id) REFERENCES entreprises (id) ON DELETE CASCADE,
+      FOREIGN KEY (fournisseur_id) REFERENCES fournisseurs (id) ON DELETE SET NULL
+    );
+
+    -- 8. TABLE UNITE
     CREATE TABLE IF NOT EXISTS unites (
       id TEXT PRIMARY KEY NOT NULL,
       formule TEXT NOT NULL,
@@ -226,7 +351,7 @@ export const initLocalDatabase = async () => {
       mis_a_jour_le TEXT DEFAULT (datetime('now'))
     );
 
-    -- 8. TABLE OUVRAGEUNITE (Épurée : entreprise_id retirée)
+    -- 9. TABLE OUVRAGEUNITE (Épurée : entreprise_id retirée)
     CREATE TABLE IF NOT EXISTS ouvrage_unites (
       id TEXT PRIMARY KEY NOT NULL,
       ouvrage_id TEXT NOT NULL,
@@ -240,7 +365,7 @@ export const initLocalDatabase = async () => {
       FOREIGN KEY (unite_id) REFERENCES unites (id) ON DELETE CASCADE
     );
 
-    -- 9. TABLE RELEVE
+    -- 10. TABLE RELEVE
     CREATE TABLE IF NOT EXISTS releves (
       id TEXT PRIMARY KEY NOT NULL,
       chantier_id TEXT NOT NULL,
@@ -249,6 +374,9 @@ export const initLocalDatabase = async () => {
       total_ht_facture REAL DEFAULT 0.0,
       tva_facture REAL DEFAULT 18.0,
       total_ttc_facture REAL DEFAULT 0.0,
+      remise REAL NOT NULL DEFAULT 0.0,
+      ind_tva INTEGER NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1)),
+      status TEXT NOT NULL DEFAULT 'E' CHECK (status IN ('E', 'V', 'N')),
       note TEXT,
       supprime_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
@@ -258,7 +386,29 @@ export const initLocalDatabase = async () => {
       FOREIGN KEY (prise_par_id) REFERENCES profils (id) ON DELETE SET NULL
     );
 
-    -- 10. TABLE LIGNERELEVE
+    -- 10b. TABLE SECTION_RELEVE (liaison section ↔ relevé)
+    CREATE TABLE IF NOT EXISTS section_releves (
+      id TEXT PRIMARY KEY NOT NULL,
+      section_id TEXT NOT NULL,
+      releve_id TEXT NOT NULL,
+      ordre INTEGER NOT NULL DEFAULT 0,
+      supprime_le TEXT,
+      cree_le TEXT DEFAULT (datetime('now')),
+      mis_a_jour_le TEXT DEFAULT (datetime('now')),
+      _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1)),
+      FOREIGN KEY (section_id) REFERENCES sections (id) ON DELETE CASCADE,
+      FOREIGN KEY (releve_id) REFERENCES releves (id) ON DELETE CASCADE
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_section_releves_pair
+      ON section_releves (section_id, releve_id)
+      WHERE supprime_le IS NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_section_releves_releve_ordre
+      ON section_releves (releve_id, ordre)
+      WHERE supprime_le IS NULL;
+
+    -- 11. TABLE LIGNERELEVE
     CREATE TABLE IF NOT EXISTS ligne_releves (
       id TEXT PRIMARY KEY NOT NULL,
       releve_id TEXT NOT NULL,
@@ -272,14 +422,21 @@ export const initLocalDatabase = async () => {
       montant REAL NOT NULL,
       note TEXT,
       photo TEXT,
+      section_id TEXT,
+      ordre INTEGER NOT NULL DEFAULT 0,
       ind_complete INTEGER NOT NULL DEFAULT 0 CHECK (ind_complete IN (0, 1)),
       supprime_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
       _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1)),
       FOREIGN KEY (releve_id) REFERENCES releves (id) ON DELETE CASCADE,
-      FOREIGN KEY (ouvrage_unite_id) REFERENCES ouvrage_unites (id) ON DELETE RESTRICT
+      FOREIGN KEY (ouvrage_unite_id) REFERENCES ouvrage_unites (id) ON DELETE RESTRICT,
+      FOREIGN KEY (section_id) REFERENCES sections (id) ON DELETE SET NULL
     );
+
+    CREATE INDEX IF NOT EXISTS idx_ligne_releves_releve_ordre
+      ON ligne_releves (releve_id, ordre)
+      WHERE supprime_le IS NULL;
 
     CREATE TABLE IF NOT EXISTS terrain_session (
       id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -407,6 +564,28 @@ export const initLocalDatabase = async () => {
     // Colonne deja presente.
   }
 
+  try {
+    await db.execAsync('ALTER TABLE releves ADD COLUMN remise REAL NOT NULL DEFAULT 0.0;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync(
+      'ALTER TABLE releves ADD COLUMN ind_tva INTEGER NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1));'
+    );
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync(
+      "ALTER TABLE releves ADD COLUMN status TEXT NOT NULL DEFAULT 'E' CHECK (status IN ('E', 'V', 'N'));"
+    );
+  } catch {
+    // Colonne deja presente.
+  }
+
   await migrateUnitesDropIndUnitaire(db);
 
   for (const tableName of [
@@ -416,6 +595,7 @@ export const initLocalDatabase = async () => {
     'ligne_releves',
     'ouvrages',
     'ouvrage_unites',
+    'fournisseurs',
   ]) {
     try {
       await db.execAsync(`ALTER TABLE ${tableName} ADD COLUMN supprime_le TEXT;`);
@@ -423,12 +603,40 @@ export const initLocalDatabase = async () => {
       // Colonne deja presente.
     }
   }
+
+  await migrateArticlesIntoOuvrages(db);
+  await ensureSchemaMigrations(db);
   })();
 
   return dbInitPromise;
 };
 
+const ensureRelevesColumns = async (db) => {
+  const tableExists = await db.getFirstAsync(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'releves';`
+  );
+  if (!tableExists) return;
+
+  if (!(await tableHasColumn(db, 'releves', 'remise'))) {
+    await db.execAsync('ALTER TABLE releves ADD COLUMN remise REAL NOT NULL DEFAULT 0.0;');
+  }
+
+  if (!(await tableHasColumn(db, 'releves', 'ind_tva'))) {
+    await db.execAsync(
+      'ALTER TABLE releves ADD COLUMN ind_tva INTEGER NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1));'
+    );
+  }
+
+  if (!(await tableHasColumn(db, 'releves', 'status'))) {
+    await db.execAsync(
+      "ALTER TABLE releves ADD COLUMN status TEXT NOT NULL DEFAULT 'E' CHECK (status IN ('E', 'V', 'N'));"
+    );
+  }
+};
+
 const ensureSchemaMigrations = async (db) => {
+  await ensureRelevesColumns(db);
+
   try {
     await db.execAsync('ALTER TABLE chantiers ADD COLUMN notes TEXT;');
   } catch {
@@ -462,6 +670,7 @@ const ensureSchemaMigrations = async (db) => {
     'ligne_releves',
     'ouvrages',
     'ouvrage_unites',
+    'fournisseurs',
   ]) {
     try {
       await db.execAsync(`ALTER TABLE ${tableName} ADD COLUMN supprime_le TEXT;`);
@@ -482,6 +691,77 @@ const ensureSchemaMigrations = async (db) => {
     await db.execAsync('ALTER TABLE ligne_releves ADD COLUMN photo TEXT;');
   } catch {
     // Colonne deja presente.
+  }
+
+  for (const columnName of ['entreprise_id', 'supprime_le']) {
+    try {
+      await db.execAsync(`ALTER TABLE metiers ADD COLUMN ${columnName} TEXT;`);
+    } catch {
+      // Colonne deja presente.
+    }
+  }
+
+  try {
+    await db.execAsync(
+      'ALTER TABLE metiers ADD COLUMN _synced INTEGER NOT NULL DEFAULT 1 CHECK (_synced IN (0, 1));'
+    );
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync(
+      'ALTER TABLE metiers ADD COLUMN ind_actif INTEGER NOT NULL DEFAULT 1 CHECK (ind_actif IN (0, 1));'
+    );
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync('DROP TABLE IF EXISTS metiers_entreprise;');
+  } catch {
+    // Table absente ou deja supprimee.
+  }
+
+  try {
+    await db.execAsync(
+      'ALTER TABLE ouvrages ADD COLUMN ind_actif INTEGER NOT NULL DEFAULT 1 CHECK (ind_actif IN (0, 1));'
+    );
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync('ALTER TABLE ouvrages ADD COLUMN ordre INTEGER NOT NULL DEFAULT 0;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    const ordreSeededRow = await db.getFirstAsync(
+      'SELECT COUNT(*) AS count FROM ouvrages WHERE ordre > 0;'
+    );
+    if (Number(ordreSeededRow?.count) === 0) {
+      await db.execAsync(`
+        WITH ranked AS (
+          SELECT
+            id,
+            ROW_NUMBER() OVER (
+              PARTITION BY metier_id, entreprise_id
+              ORDER BY nom ASC, id ASC
+            ) - 1 AS new_ordre
+          FROM ouvrages
+          WHERE supprime_le IS NULL OR supprime_le = ''
+        )
+        UPDATE ouvrages
+        SET ordre = (
+          SELECT new_ordre FROM ranked WHERE ranked.id = ouvrages.id
+        )
+        WHERE id IN (SELECT id FROM ranked);
+      `);
+    }
+  } catch {
+    // Backfill ordre ignore si indisponible.
   }
 
   try {
@@ -521,12 +801,158 @@ const ensureSchemaMigrations = async (db) => {
     // Colonne deja presente.
   }
 
+  try {
+    await db.execAsync(
+      'ALTER TABLE entreprises ADD COLUMN ind_admin_connecte_mobile INTEGER NOT NULL DEFAULT 0 CHECK (ind_admin_connecte_mobile IN (0, 1));'
+    );
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync(
+      'ALTER TABLE entreprises ADD COLUMN ind_metiers_preselectionnes INTEGER NOT NULL DEFAULT 0 CHECK (ind_metiers_preselectionnes IN (0, 1));'
+    );
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync('ALTER TABLE metiers ADD COLUMN ordre INTEGER NOT NULL DEFAULT 0;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync(
+      'ALTER TABLE metiers ADD COLUMN ind_default INTEGER NOT NULL DEFAULT 0 CHECK (ind_default IN (0, 1));'
+    );
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS sections (
+        id TEXT PRIMARY KEY NOT NULL,
+        nom TEXT NOT NULL,
+        entreprise_id TEXT NOT NULL,
+        supprime_le TEXT,
+        cree_le TEXT DEFAULT (datetime('now')),
+        mis_a_jour_le TEXT DEFAULT (datetime('now')),
+        _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1)),
+        FOREIGN KEY (entreprise_id) REFERENCES entreprises (id) ON DELETE CASCADE
+      );
+    `);
+  } catch {
+    // Table deja presente.
+  }
+
+  try {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS section_releves (
+        id TEXT PRIMARY KEY NOT NULL,
+        section_id TEXT NOT NULL,
+        releve_id TEXT NOT NULL,
+        supprime_le TEXT,
+        cree_le TEXT DEFAULT (datetime('now')),
+        mis_a_jour_le TEXT DEFAULT (datetime('now')),
+        _synced INTEGER NOT NULL DEFAULT 0 CHECK (_synced IN (0, 1)),
+        FOREIGN KEY (section_id) REFERENCES sections (id) ON DELETE CASCADE,
+        FOREIGN KEY (releve_id) REFERENCES releves (id) ON DELETE CASCADE
+      );
+    `);
+    await db.execAsync(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_section_releves_pair
+        ON section_releves (section_id, releve_id)
+        WHERE supprime_le IS NULL;
+    `);
+  } catch {
+    // Table deja presente.
+  }
+
+  if (!(await tableHasColumn(db, 'section_releves', 'ordre'))) {
+    try {
+      await db.execAsync('ALTER TABLE section_releves ADD COLUMN ordre INTEGER NOT NULL DEFAULT 0;');
+    } catch {
+      // Colonne deja presente.
+    }
+  }
+
+  try {
+    await db.execAsync(`
+      CREATE INDEX IF NOT EXISTS idx_section_releves_releve_ordre
+        ON section_releves (releve_id, ordre)
+        WHERE supprime_le IS NULL;
+    `);
+  } catch {
+    // Index deja present ou colonne indisponible.
+  }
+
+  if (!(await tableHasColumn(db, 'ligne_releves', 'section_id'))) {
+    try {
+      await db.execAsync(
+        'ALTER TABLE ligne_releves ADD COLUMN section_id TEXT REFERENCES sections (id) ON DELETE SET NULL;'
+      );
+    } catch {
+      // Colonne deja presente.
+    }
+  }
+
+  if (!(await tableHasColumn(db, 'ligne_releves', 'ordre'))) {
+    try {
+      await db.execAsync('ALTER TABLE ligne_releves ADD COLUMN ordre INTEGER NOT NULL DEFAULT 0;');
+      await db.execAsync(`
+        UPDATE ligne_releves
+        SET ordre = (
+          SELECT COUNT(*)
+          FROM ligne_releves lr2
+          WHERE lr2.releve_id = ligne_releves.releve_id
+            AND (lr2.supprime_le IS NULL OR lr2.supprime_le = '')
+            AND (
+              lr2.cree_le < ligne_releves.cree_le
+              OR (lr2.cree_le = ligne_releves.cree_le AND lr2.id < ligne_releves.id)
+            )
+        )
+        WHERE supprime_le IS NULL OR supprime_le = '';
+      `);
+    } catch {
+      // Colonne deja presente.
+    }
+  }
+
+  try {
+    await db.execAsync(`
+      CREATE INDEX IF NOT EXISTS idx_ligne_releves_releve_ordre
+        ON ligne_releves (releve_id, ordre)
+        WHERE supprime_le IS NULL;
+    `);
+  } catch {
+    // Index deja present.
+  }
+
+  await ensureRelevesColumns(db);
   await migrateUnitesToCurrentSchema(db);
+  await migrateArticlesIntoOuvrages(db);
 };
 
 export const ensureLocalDatabaseReady = async () => {
   await initLocalDatabase();
-  const db = await getLocalDB();
-  await ensureSchemaMigrations(db);
-  return db;
+  return getLocalDB();
+};
+
+/** Sérialise les écritures / transactions pour éviter "database is locked". */
+export const runWithLocalDatabase = async (work) => {
+  const operation = async () => {
+    await initLocalDatabase();
+    const db = await getLocalDB();
+    return work(db);
+  };
+
+  const result = dbQueue.then(operation, operation);
+  dbQueue = result.then(
+    () => {},
+    () => {}
+  );
+  return result;
 };

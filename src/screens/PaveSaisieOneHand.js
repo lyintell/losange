@@ -32,6 +32,7 @@ import { formatMontant, formatQuantite, roundQuantite } from '../utils/formatLig
 const FIELD_LABEL = {
   largeur: 'Largeur',
   hauteur: 'Hauteur',
+  profondeur: 'Épaisseur',
   nombre: 'Nombre',
 };
 
@@ -70,6 +71,7 @@ export default forwardRef(function PaveSaisieOneHand(
     const fields = [];
     if (requiredCotes.needsLargeur) fields.push('largeur');
     if (requiredCotes.needsHauteur) fields.push('hauteur');
+    if (requiredCotes.needsProfondeur) fields.push('profondeur');
     fields.push('nombre');
     return fields;
   }, [isDimensionMode, requiredCotes]);
@@ -83,6 +85,10 @@ export default forwardRef(function PaveSaisieOneHand(
       hauteur:
         initialValues?.hauteur != null && initialValues.hauteur !== ''
           ? String(initialValues.hauteur)
+          : '',
+      profondeur:
+        initialValues?.profondeur != null && initialValues.profondeur !== ''
+          ? String(initialValues.profondeur)
           : '',
       nombre:
         initialValues?.nombre != null && initialValues.nombre !== ''
@@ -147,7 +153,8 @@ export default forwardRef(function PaveSaisieOneHand(
   }, [hidePriceUi]);
 
   const isCoteFieldLocked = useCallback(
-    (field) => lockDimensionCotes && (field === 'largeur' || field === 'hauteur'),
+    (field) =>
+      lockDimensionCotes && (field === 'largeur' || field === 'hauteur' || field === 'profondeur'),
     [lockDimensionCotes]
   );
 
@@ -159,12 +166,12 @@ export default forwardRef(function PaveSaisieOneHand(
         formule: uniteFormule,
         largeur: form.largeur,
         hauteur: form.hauteur,
-        profondeur: null,
+        profondeur: form.profondeur,
       });
     } catch {
       return isDimensionMode ? 0 : cataloguePu;
     }
-  }, [cataloguePu, form.hauteur, form.largeur, isDimensionMode, uniteFormule]);
+  }, [cataloguePu, form.hauteur, form.largeur, form.profondeur, isDimensionMode, uniteFormule]);
 
   useEffect(() => {
     if (initialValues?.prix_unitaire_applique != null) {
@@ -213,10 +220,12 @@ export default forwardRef(function PaveSaisieOneHand(
 
     const largeur = resolveLockedCote('largeur', form.largeur);
     const hauteur = resolveLockedCote('hauteur', form.hauteur);
+    const profondeur = resolveLockedCote('profondeur', form.profondeur);
     const nombre = parseInt(form.nombre?.trim() || '0', 10);
 
     if (requiredCotes.needsLargeur && (!form.largeur?.trim() || !largeur)) return null;
     if (requiredCotes.needsHauteur && (!form.hauteur?.trim() || !hauteur)) return null;
+    if (requiredCotes.needsProfondeur && (!form.profondeur?.trim() || !profondeur)) return null;
     if (!nombre) return null;
 
     let quantite = 0;
@@ -226,7 +235,7 @@ export default forwardRef(function PaveSaisieOneHand(
         formule: uniteFormule,
         largeur,
         hauteur,
-        profondeur: null,
+        profondeur,
         nombre,
       });
     } catch {
@@ -238,7 +247,7 @@ export default forwardRef(function PaveSaisieOneHand(
     return {
       largeur: requiredCotes.needsLargeur ? largeur : null,
       hauteur: requiredCotes.needsHauteur ? hauteur : null,
-      profondeur: null,
+      profondeur: requiredCotes.needsProfondeur ? profondeur : null,
       nombre,
       quantite,
       prixUnitaireApplique: prixUnitaireAppliqueState,
@@ -280,13 +289,13 @@ export default forwardRef(function PaveSaisieOneHand(
         formule: uniteFormule,
         largeur: form.largeur,
         hauteur: form.hauteur,
-        profondeur: null,
+        profondeur: form.profondeur,
         nombre: form.nombre?.trim() || '0',
       });
     } catch {
       return 0;
     }
-  }, [form.hauteur, form.largeur, form.nombre, isDimension, uniteFormule]);
+  }, [form.hauteur, form.largeur, form.profondeur, form.nombre, isDimension, uniteFormule]);
 
   const montantPreview = useMemo(() => {
     const nombre = parseInt(form.nombre?.trim() || '0', 10) || 0;
@@ -338,7 +347,7 @@ export default forwardRef(function PaveSaisieOneHand(
         onSaved?.();
       }
 
-      setForm({ largeur: '', hauteur: '', nombre: '' });
+      setForm({ largeur: '', hauteur: '', profondeur: '', nombre: '' });
       setNote('');
       setPhotoPendingUri(null);
       setPhotoMimeType(null);
@@ -367,16 +376,6 @@ export default forwardRef(function PaveSaisieOneHand(
     if (field === 'nombre') return focusIndex === index ? '' : '0';
     return '0';
   };
-
-  const mesuresFormatees = useMemo(() => {
-    if (!isDimensionMode) return chipDisplayValue('nombre', 0) || '0';
-
-    const parts = [];
-    if (requiredCotes.needsLargeur) parts.push(chipDisplayValue('largeur', champs.indexOf('largeur')));
-    if (requiredCotes.needsHauteur) parts.push(chipDisplayValue('hauteur', champs.indexOf('hauteur')));
-    parts.push(chipDisplayValue('nombre', champs.indexOf('nombre')));
-    return parts.join(' x ');
-  }, [form, focusIndex, champs, isDimensionMode, requiredCotes]);
 
   const quantiteAffichage = isDimensionMode
     ? parseInt(form.nombre?.trim() || '0', 10) || 0
@@ -420,7 +419,7 @@ export default forwardRef(function PaveSaisieOneHand(
     }
   };
 
-  const renderPaveKey = (field, index) => {
+  const renderPaveKey = (field, index, inline = false) => {
     const isLocked = isCoteFieldLocked(field);
     const isActive = !isLocked && focusIndex === index;
     const value = chipDisplayValue(field, index);
@@ -432,6 +431,7 @@ export default forwardRef(function PaveSaisieOneHand(
         disabled={isLocked}
         style={[
           styles.paveKey,
+          inline && styles.paveKeyInline,
           isLocked && styles.paveKeyLocked,
           isActive && styles.paveKeyActive,
         ]}
@@ -448,6 +448,17 @@ export default forwardRef(function PaveSaisieOneHand(
       </Pressable>
     );
   };
+
+  const renderCotesRow = () => (
+    <View style={styles.cotesRow}>
+      {champs.map((field, index) => (
+        <React.Fragment key={field}>
+          {index > 0 ? <Text style={styles.cotesSeparator}>x</Text> : null}
+          {renderPaveKey(field, index, true)}
+        </React.Fragment>
+      ))}
+    </View>
+  );
 
   const renderNotesModal = () => (
     <Portal>
@@ -516,25 +527,35 @@ export default forwardRef(function PaveSaisieOneHand(
 
   const renderBottomPanel = () => (
     <View style={styles.bottomPanel}>
-      <View style={styles.paveGrid}>{champs.map((field, index) => renderPaveKey(field, index))}</View>
       <View style={styles.metaGrid}>
         <PaveMetaButton
           icon="note-text-outline"
           onPress={openNotesModal}
           active={Boolean(note)}
-          iconOnly
-          style={styles.metaButtonIcon}
-        />
+          tile
+          style={styles.metaButtonTile}
+        >
+          Note
+        </PaveMetaButton>
         {canEditPuApplique && !resolvedHidePriceUi ? (
-          <PaveMetaButton icon="currency-usd" onPress={openPrixModal} iconOnly style={styles.metaButtonIcon} />
+          <PaveMetaButton
+            icon="currency-usd"
+            onPress={openPrixModal}
+            tile
+            style={styles.metaButtonTile}
+          >
+            Prix
+          </PaveMetaButton>
         ) : null}
         <PaveMetaButton
           icon="camera"
           onPress={handlePickPhoto}
           active={Boolean(photoPendingUri || existingPhotoKey)}
-          iconOnly
-          style={styles.metaButtonIcon}
-        />
+          tile
+          style={styles.metaButtonTile}
+        >
+          Photo
+        </PaveMetaButton>
       </View>
       <View style={styles.summaryRow}>
         <Text style={styles.quantiteLine}>{quantiteLabel}</Text>
@@ -563,7 +584,7 @@ export default forwardRef(function PaveSaisieOneHand(
             <PaveNumerique
               onKeyPress={handleKeyPress}
               disabled={saving}
-              measuresLine={mesuresFormatees}
+              header={renderCotesRow()}
               placement="top"
             />
           </View>
@@ -586,7 +607,7 @@ export default forwardRef(function PaveSaisieOneHand(
         <PaveNumerique
           onKeyPress={handleKeyPress}
           disabled={saving}
-          measuresLine={mesuresFormatees}
+          header={renderCotesRow()}
           placement="top"
         />
         {renderBottomPanel()}
@@ -616,13 +637,30 @@ const styles = StyleSheet.create({
     marginHorizontal: -12,
   },
   bottomPanel: {
-    paddingTop: 4,
+    paddingTop: 8,
     paddingBottom: 2,
   },
-  paveGrid: {
+  cotesRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+    gap: 6,
     flexWrap: 'wrap',
-    gap: 8,
+  },
+  cotesSeparator: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: chantierColors.text,
+    lineHeight: COTE_KEY_HEIGHT,
+    paddingHorizontal: 2,
+  },
+  paveKeyInline: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 80,
+    maxWidth: 140,
   },
   paveKey: {
     flexGrow: 1,
@@ -671,13 +709,15 @@ const styles = StyleSheet.create({
   },
   metaGrid: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    marginTop: 30,
-    gap: 10,
+    alignItems: 'stretch',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginTop: 8,
+    gap: 8,
   },
-  metaButtonIcon: {
-    flex: 0,
+  metaButtonTile: {
+    flex: 1,
+    minWidth: 0,
   },
   summaryRow: {
     flexDirection: 'row',

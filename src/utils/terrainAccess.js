@@ -19,13 +19,27 @@ export const canAccessRapports = (profil) =>
 
 export const canAccessDatabaseMetiers = (profil) => isAdminRole(profil?.role);
 
+export const canAccessDatabaseSections = (profil) => isAdminRole(profil?.role);
+
 export const canAccessDatabaseOuvrages = (profil) =>
   ROLES_DATABASE_OUVRAGES.has(profil?.role);
 
 export const canManageDatabaseOuvrages = (profil) =>
   ROLES_DATABASE_OUVRAGES.has(profil?.role);
 
+export const canToggleOuvrageActif = (profil) => isAdminRole(profil?.role);
+
+export const canReorderOuvrages = (profil) => isAdminRole(profil?.role);
+
+export const canDeleteOuvrage = (profil) => isAdminRole(profil?.role);
+
+export const canEditOuvrageNomAndUnite = (profil) => isAdminRole(profil?.role);
+
 export const canManageClients = (profil) => isAdminRole(profil?.role);
+
+export const canSeeClientPhone = (profil) => !ROLES_HIDING_PRICE_UI.has(profil?.role);
+
+export const canChangeReleveStatus = (profil) => !ROLES_HIDING_PRICE_UI.has(profil?.role);
 
 export const canCreateReleveOrLigne = (profil) => profil?.role !== ROLE_COMMERCIAL_S;
 
@@ -35,6 +49,8 @@ export const canSeeAllChantiers = (profil) => ROLES_MODIFY_ANY_CHANTIER.has(prof
 
 export const canCreateOuvrageInReleveFlow = (profil) =>
   ROLES_CREATING_OUVRAGE_IN_RELEVE.has(profil?.role);
+
+export const canEditReleveRemise = (profil) => ROLES_MODIFY_ANY_CHANTIER.has(profil?.role);
 
 export const canModifyReleveForProfil = (profil, releve) => {
   if (!profil) return false;

@@ -1,0 +1,42 @@
+export const CLIENTS_SECTION_LABEL = 'Clients, chantiers, devis';
+export const CATALOGUE_SECTION_LABEL = 'Métiers, ouvrages, articles';
+
+export const DASHBOARD_NAV_SLUG = 'tableau-de-bord';
+
+export function getDashboardNavLabel(prenom) {
+  const name = String(prenom || '').trim();
+  return name ? `Bonjour ${name}` : 'Bonjour';
+}
+
+export const ADMIN_NAV_ITEMS = [
+  {
+    slug: DASHBOARD_NAV_SLUG,
+    href: '/tableau-de-bord',
+    label: 'Tableau de bord',
+    icon: 'view-dashboard',
+    greetingNav: true,
+  },
+  { slug: 'clients', href: '/clients', label: CLIENTS_SECTION_LABEL, icon: 'account-group' },
+  { slug: 'ouvrages', href: '/ouvrages', label: CATALOGUE_SECTION_LABEL, icon: 'hammer-wrench' },
+];
+
+export const ADMIN_FOOTER_NAV_ITEMS = [
+  { slug: 'profil', href: '/profil', label: 'Profil', icon: 'account' },
+];
+
+export const ADMIN_PROTECTED_PATHS = [
+  ...ADMIN_NAV_ITEMS.map((item) => item.href),
+  ...ADMIN_FOOTER_NAV_ITEMS.map((item) => item.href),
+  '/articles',
+];
+
+export function getAdminNavItem(slug) {
+  const allItems = [...ADMIN_NAV_ITEMS, ...ADMIN_FOOTER_NAV_ITEMS];
+  return allItems.find((item) => item.slug === slug) || null;
+}
+
+export function isAdminProtectedPath(pathname) {
+  return ADMIN_PROTECTED_PATHS.some(
+    (href) => pathname === href || pathname.startsWith(`${href}/`)
+  );
+}

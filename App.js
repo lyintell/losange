@@ -6,8 +6,9 @@ import { PaperProvider } from 'react-native-paper';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import BottomNavButton from './src/components/terrain/BottomNavButton';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import AdminScreen from './src/screens/web/AdminScreen';
+import MasterScreen from './src/screens/web/MasterScreen';
 import ChantierDetails from './src/screens/ChantierDetails';
+import ChantierRelevesListScreen from './src/screens/ChantierRelevesListScreen';
 import ListeChantiers from './src/screens/ListeChantiers';
 import LoginScreen from './src/screens/LoginScreen';
 import ClientChantierFormScreen from './src/screens/ClientChantierFormScreen';
@@ -18,11 +19,13 @@ import ProfilScreen from './src/screens/ProfilScreen';
 import DatabaseScreen from './src/screens/DatabaseScreen';
 import ListeClientsScreen from './src/screens/ListeClientsScreen';
 import ListeMetiersScreen from './src/screens/ListeMetiersScreen';
+import ListeSectionsScreen from './src/screens/ListeSectionsScreen';
 import RapportsScreen from './src/screens/RapportsScreen';
 import ClientDetailsScreen from './src/screens/ClientDetailsScreen';
 import ListeOuvragesScreen from './src/screens/ListeOuvragesScreen';
 import OuvrageDetailsScreen from './src/screens/OuvrageDetailsScreen';
 import SelecteurMetierOuvrage from './src/screens/SelecteurMetierOuvrage';
+import PreselectionMetiersModal from './src/components/terrain/PreselectionMetiersModal';
 import { loginMasterAdmin, logoutMasterAdmin, verifyMasterSession } from './src/auth/masterAdminAuth';
 import {
   assessTerrainLogin,
@@ -41,9 +44,14 @@ import {
   ensureCatalogueLocal,
   finalizeDimensionDraftLocal,
   getLignesByChantierLocal,
+  getLignesByReleveIdLocal,
+  getSectionOrderByReleveIdLocal,
   getLoggedInProfilViewLocal,
+  getReleveByIdLocal,
+  getRelevesByChantierLocal,
   getReleveIdByChantierLocal,
   isLoggedInAdminLocal,
+  getMetierPreselectionRequiredLocal,
 } from './src/db/querries';
 import { ensureTerrainDeviceFromSession } from './src/db/terrainSync';
 import LosangeLogoLoader from './src/components/terrain/LosangeLogoLoader';
@@ -59,6 +67,7 @@ export default function App() {
   const [screen, setScreen] = useState('chantiers');
   const [selection, setSelection] = useState(null);
   const [selectedChantier, setSelectedChantier] = useState(null);
+  const [selectedReleveId, setSelectedReleveId] = useState(null);
   const [chantierListRefreshToken, setChantierListRefreshToken] = useState(0);
   const [entrepriseId, setEntrepriseId] = useState(null);
   const [authReady, setAuthReady] = useState(false);
@@ -82,6 +91,7 @@ export default function App() {
   const [ouvragesListRefreshToken, setOuvragesListRefreshToken] = useState(0);
   const [clientEditRequestId, setClientEditRequestId] = useState(0);
   const [ouvrageEditRequestId, setOuvrageEditRequestId] = useState(0);
+  const [metierPreselectionVisible, setMetierPreselectionVisible] = useState(false);
   const bottomNavHeight = 84;
 
   const handleDimensionNavHandlersChange = useCallback((handlers) => {
@@ -121,13 +131,15 @@ export default function App() {
   const handleClientChantierSave = useCallback(
     async (payload) => {
       const draft = getDraftDimensionFlow();
+      const isEditMode = Boolean(draft?.editMode);
       await finalizeDimensionDraftLocal({
         entrepriseId,
         ...payload,
         clientId: payload.clientId ?? draft?.clientId ?? null,
-        chantierId: draft?.chantierId ?? null,
-        releveId: draft?.releveId ?? null,
+        chantierId: payload.chantierId ?? draft?.chantierId ?? null,
+        releveId: isEditMode ? payload.releveId ?? draft?.releveId ?? null : payload.releveId ?? null,
         lignes: draft?.lignes || [],
+        sectionOrder: draft?.sectionOrder || [],
       });
       clearDraftDimensionFlow();
       setSelection(null);
@@ -147,6 +159,7 @@ export default function App() {
 
   const isChantiersNavActive =
     screen === 'chantiers' ||
+    screen === 'chantierReleves' ||
     screen === 'chantierDetails' ||
     screen === 'nouvelleDimension' ||
     screen === 'clientChantier' ||
@@ -159,6 +172,7 @@ export default function App() {
     screen === 'database' ||
     screen === 'listeClients' ||
     screen === 'listeMetiers' ||
+    screen === 'listeSections' ||
     screen === 'rapports' ||
     screen === 'clientDetails' ||
     screen === 'listeOuvrages' ||
@@ -166,10 +180,12 @@ export default function App() {
   const isPlusHomeScreen = screen === 'plus';
   const isPlusSubScreen = isPlusNavActive && !isPlusHomeScreen;
   const isChantierDetailsScreen = screen === 'chantierDetails';
+  const isChantierRelevesScreen = screen === 'chantierReleves';
   const isProfilScreen = screen === 'profil';
   const isDatabaseScreen = screen === 'database';
   const isListeClientsScreen = screen === 'listeClients';
   const isListeMetiersScreen = screen === 'listeMetiers';
+  const isListeSectionsScreen = screen === 'listeSections';
   const isRapportsScreen = screen === 'rapports';
   const isClientDetailsScreen = screen === 'clientDetails';
   const isListeOuvragesScreen = screen === 'listeOuvrages';
@@ -177,7 +193,7 @@ export default function App() {
   const canModifyPlusDetail =
     (isClientDetailsScreen && isLoggedInAdmin) ||
     (isOuvrageDetailsScreen && (isLoggedInAdmin || canManageOuvrages));
-  const leftNavIsRetour = isPlusSubScreen || isChantierDetailsScreen;
+  const leftNavIsRetour = isPlusSubScreen || isChantierRelevesScreen || isChantierDetailsScreen;
 
   useEffect(() => {
     if (!isProfilScreen) {
@@ -223,7 +239,7 @@ export default function App() {
   useEffect(() => {
     if (!isLoggedIn) return;
 
-    if (!isLoggedInAdmin && screen === 'listeMetiers') {
+    if (!isLoggedInAdmin && (screen === 'listeMetiers' || screen === 'listeSections')) {
       setScreen('database');
       return;
     }
@@ -346,7 +362,12 @@ export default function App() {
           }
           setIsLoggedIn(true);
           setEntrepriseId(session.entrepriseId);
-          setScreen('chantiers');
+          const needsPreselection = await getMetierPreselectionRequiredLocal();
+          if (needsPreselection) {
+            setMetierPreselectionVisible(true);
+          } else {
+            setScreen('chantiers');
+          }
         }
       } catch (error) {
         console.error('Erreur initialisation SQLite:', error);
@@ -376,6 +397,10 @@ export default function App() {
 
       setIsLoggedIn(true);
       setEntrepriseId(authResult.entrepriseId);
+      if (authResult.needsMetierPreselection) {
+        setMetierPreselectionVisible(true);
+        return { ok: true };
+      }
       setScreen('chantiers');
       return { ok: true };
     };
@@ -449,6 +474,7 @@ export default function App() {
     }
     setIsLoggedIn(false);
     setEntrepriseId(null);
+    setMetierPreselectionVisible(false);
     setSelectedChantier(null);
   };
 
@@ -464,7 +490,7 @@ export default function App() {
     return result;
   }, [handleForcedInactiveLogout]);
 
-  const handleEditChantier = useCallback(async (chantier, lignes = []) => {
+  const handleEditChantier = useCallback(async (chantier) => {
     if (!chantier?.id) return;
 
     try {
@@ -476,17 +502,53 @@ export default function App() {
         return;
       }
 
-      const resolvedLignes =
-        lignes.length > 0 ? lignes : (await getLignesByChantierLocal(chantier.id)) || [];
-      const releveId =
-        resolvedLignes[0]?.releve_id || (await getReleveIdByChantierLocal(chantier.id));
-      const draft = startDraftFromChantierEdit({ chantier, lignes: resolvedLignes, releveId });
+      let releveId = selectedReleveId;
+      let targetReleve = releveId ? await getReleveByIdLocal(releveId) : null;
+
+      if (!releveId) {
+        const releves = await getRelevesByChantierLocal(chantier.id);
+        targetReleve = releves.length ? releves[0] : null;
+        releveId = targetReleve?.id || (await getReleveIdByChantierLocal(chantier.id));
+      }
+
+      const resolvedLignes = releveId ? (await getLignesByReleveIdLocal(releveId)) || [] : [];
+      const sectionOrder = releveId ? await getSectionOrderByReleveIdLocal(releveId) : [];
+      const draft = startDraftFromChantierEdit({
+        chantier,
+        lignes: resolvedLignes,
+        releveId,
+        releveRemise: targetReleve?.remise ?? 0,
+        releveIndTva: targetReleve?.ind_tva ?? 0,
+        sectionOrder,
+      });
       setSelection(draft);
       setScreen('nouvelleDimension');
     } catch (error) {
       console.error('Erreur ouverture modification chantier:', error);
       Alert.alert('Erreur', error.message || "Impossible d'ouvrir la modification.");
     }
+  }, [selectedReleveId]);
+
+  const openChantierFromList = useCallback(async (chantier) => {
+    if (!chantier?.id) return;
+
+    setSelectedChantier(chantier);
+    const releveCount = Number(chantier.releve_count) || 0;
+
+    if (releveCount > 1) {
+      setSelectedReleveId(null);
+      setScreen('chantierReleves');
+      return;
+    }
+
+    if (releveCount === 1) {
+      const releves = await getRelevesByChantierLocal(chantier.id);
+      setSelectedReleveId(releves[0]?.id || null);
+    } else {
+      setSelectedReleveId(null);
+    }
+
+    setScreen('chantierDetails');
   }, []);
 
   const handleDeleteChantier = useCallback(async (chantier) => {
@@ -510,6 +572,8 @@ export default function App() {
     }
   }, []);
 
+  const showMobileMain = isLoggedIn && Platform.OS !== 'web' && !metierPreselectionVisible;
+
   return (
     <SafeAreaProvider>
       <PaperProvider theme={appTheme}>
@@ -530,7 +594,7 @@ export default function App() {
                 />
               )}
               {authReady && isLoggedIn && Platform.OS === 'web' && (
-                <AdminScreen
+                <MasterScreen
                   onLogout={() => {
                     logoutMasterAdmin();
                     setIsLoggedIn(false);
@@ -539,19 +603,43 @@ export default function App() {
                   }}
                 />
               )}
-              {isLoggedIn && Platform.OS !== 'web' && screen === 'chantiers' && (
+              {authReady && isLoggedIn && metierPreselectionVisible && Platform.OS !== 'web' && (
+                <View style={styles.webAuthLoading}>
+                  <LosangeLogoLoader size="large" />
+                  <Text style={styles.webAuthLoadingText}>Choisissez vos métiers pour continuer</Text>
+                </View>
+              )}
+              {showMobileMain && screen === 'chantiers' && (
                 <ListeChantiers
                   entrepriseId={entrepriseId}
                   bottomOffset={bottomNavHeight}
                   refreshToken={chantierListRefreshToken}
+                  onSyncFromSupabase={handleSyncFromSupabase}
                   onCreatePress={handleCreatePress}
-                  onChantierPress={(chantier) => {
-                    setSelectedChantier(chantier);
+                  onChantierPress={openChantierFromList}
+                  onDeleteChantier={handleDeleteChantier}
+                />
+              )}
+              {showMobileMain && screen === 'chantierReleves' && (
+                <ChantierRelevesListScreen
+                  chantier={selectedChantier}
+                  onRelevePress={(releve) => {
+                    setSelectedReleveId(releve.id);
                     setScreen('chantierDetails');
+                  }}
+                  onRelevesChanged={(count) => {
+                    setSelectedChantier((prev) =>
+                      prev ? { ...prev, releve_count: count } : prev
+                    );
+                    setChantierListRefreshToken((value) => value + 1);
+                    if (count <= 1) {
+                      setSelectedReleveId(null);
+                      setScreen('chantiers');
+                    }
                   }}
                 />
               )}
-              {isLoggedIn && Platform.OS !== 'web' && screen === 'nouvelleDimension' && (
+              {showMobileMain && screen === 'nouvelleDimension' && (
                 <NouvelleDimensionScreen
                   entrepriseId={entrepriseId}
                   bottomOffset={bottomNavHeight}
@@ -562,7 +650,7 @@ export default function App() {
                   onNavHandlersChange={handleDimensionNavHandlersChange}
                 />
               )}
-              {isLoggedIn && Platform.OS !== 'web' && screen === 'clientChantier' && (
+              {showMobileMain && screen === 'clientChantier' && (
                 <ClientChantierFormScreen
                   entrepriseId={entrepriseId}
                   onBack={() => {
@@ -573,7 +661,7 @@ export default function App() {
                   onNavHandlersChange={handleDimensionNavHandlersChange}
                 />
               )}
-              {isLoggedIn && Platform.OS !== 'web' && screen === 'plus' && (
+              {showMobileMain && screen === 'plus' && (
                 <PlusScreen
                   bottomOffset={bottomNavHeight}
                   onProfilPress={() => setScreen('profil')}
@@ -583,33 +671,44 @@ export default function App() {
                   onSyncFromSupabase={handleSyncFromSupabase}
                 />
               )}
-              {isLoggedIn && Platform.OS !== 'web' && screen === 'rapports' && (
+              {showMobileMain && screen === 'rapports' && (
                 <RapportsScreen
                   entrepriseId={entrepriseId}
                   refreshToken={chantierListRefreshToken}
                 />
               )}
-              {isLoggedIn && Platform.OS !== 'web' && screen === 'database' && (
+              {showMobileMain && screen === 'database' && (
                 <DatabaseScreen
                   onListeClientsPress={() => setScreen('listeClients')}
                   onListeMetiersPress={() => setScreen('listeMetiers')}
+                  onListeSectionsPress={() => setScreen('listeSections')}
                   onListeOuvragesPress={() => setScreen('listeOuvrages')}
                 />
               )}
-              {isLoggedIn && Platform.OS !== 'web' && screen === 'listeClients' && (
+              {showMobileMain && screen === 'listeClients' && (
                 <ListeClientsScreen
                   entrepriseId={entrepriseId}
                   refreshToken={clientsListRefreshToken}
+                  onSyncFromSupabase={handleSyncFromSupabase}
                   onClientPress={(client) => {
                     setSelectedClient(client);
                     setScreen('clientDetails');
                   }}
                 />
               )}
-              {isLoggedIn && Platform.OS !== 'web' && screen === 'listeMetiers' && (
-                <ListeMetiersScreen entrepriseId={entrepriseId} />
+              {showMobileMain && screen === 'listeMetiers' && (
+                <ListeMetiersScreen
+                  entrepriseId={entrepriseId}
+                  onSyncFromSupabase={handleSyncFromSupabase}
+                />
               )}
-              {isLoggedIn && Platform.OS !== 'web' && screen === 'clientDetails' && (
+              {showMobileMain && screen === 'listeSections' && (
+                <ListeSectionsScreen
+                  entrepriseId={entrepriseId}
+                  onSyncFromSupabase={handleSyncFromSupabase}
+                />
+              )}
+              {showMobileMain && screen === 'clientDetails' && (
                 <ClientDetailsScreen
                   clientId={selectedClient?.id}
                   editRequestId={clientEditRequestId}
@@ -624,17 +723,18 @@ export default function App() {
                   }}
                 />
               )}
-              {isLoggedIn && Platform.OS !== 'web' && screen === 'listeOuvrages' && (
+              {showMobileMain && screen === 'listeOuvrages' && (
                 <ListeOuvragesScreen
                   entrepriseId={entrepriseId}
                   refreshToken={ouvragesListRefreshToken}
+                  onSyncFromSupabase={handleSyncFromSupabase}
                   onOuvragePress={(ouvrage) => {
                     setSelectedOuvrage(ouvrage);
                     setScreen('ouvrageDetails');
                   }}
                 />
               )}
-              {isLoggedIn && Platform.OS !== 'web' && screen === 'ouvrageDetails' && (
+              {showMobileMain && screen === 'ouvrageDetails' && (
                 <OuvrageDetailsScreen
                   ouvrageId={selectedOuvrage?.id}
                   editRequestId={ouvrageEditRequestId}
@@ -649,7 +749,7 @@ export default function App() {
                   }}
                 />
               )}
-              {isLoggedIn && Platform.OS !== 'web' && screen === 'profil' && (
+              {showMobileMain && screen === 'profil' && (
                 <ProfilScreen
                   entrepriseId={entrepriseId}
                   editing={profilEditing}
@@ -660,15 +760,16 @@ export default function App() {
                   onSaveComplete={() => setProfilSaveRequestId(0)}
                 />
               )}
-              {isLoggedIn && Platform.OS !== 'web' && screen === 'chantierDetails' && (
+              {showMobileMain && screen === 'chantierDetails' && (
                 <ChantierDetails
                   chantier={selectedChantier}
+                  releveId={selectedReleveId}
                   entrepriseId={entrepriseId}
                   bottomOffset={bottomNavHeight}
                   onChantierUpdated={handleChantierUpdated}
                 />
               )}
-              {isLoggedIn && Platform.OS !== 'web' && screen === 'selecteurOuvrage' && (
+              {showMobileMain && screen === 'selecteurOuvrage' && (
                 <SelecteurMetierOuvrage
                   entrepriseId={entrepriseId}
                   bottomOffset={bottomNavHeight}
@@ -678,7 +779,7 @@ export default function App() {
                   }}
                 />
               )}
-              {isLoggedIn && Platform.OS !== 'web' && screen === 'saisieDimensions' && (
+              {showMobileMain && screen === 'saisieDimensions' && (
                 <PaveSaisieOneHand
                   bottomOffset={bottomNavHeight}
                   releveId={selection?.releveId || ''}
@@ -691,7 +792,7 @@ export default function App() {
               )}
             </View>
 
-            {isLoggedIn && Platform.OS !== 'web' && (
+            {showMobileMain && (
               <View style={styles.navBottom}>
                 <BottomNavButton
                   mode={
@@ -735,7 +836,7 @@ export default function App() {
                       setScreen('database');
                       return;
                     }
-                    if (isListeMetiersScreen) {
+                    if (isListeMetiersScreen || isListeSectionsScreen) {
                       setScreen('database');
                       return;
                     }
@@ -753,6 +854,17 @@ export default function App() {
                       return;
                     }
                     if (isChantierDetailsScreen) {
+                      if ((Number(selectedChantier?.releve_count) || 0) > 1) {
+                        setSelectedReleveId(null);
+                        setScreen('chantierReleves');
+                        return;
+                      }
+                      setSelectedReleveId(null);
+                      setScreen('chantiers');
+                      return;
+                    }
+                    if (isChantierRelevesScreen) {
+                      setSelectedReleveId(null);
                       setScreen('chantiers');
                       return;
                     }
@@ -764,7 +876,11 @@ export default function App() {
                     : isPlusSubScreen
                       ? 'Retour'
                       : isChantierDetailsScreen
-                        ? 'Retour aux chantiers'
+                        ? (Number(selectedChantier?.releve_count) || 0) > 1
+                          ? 'Retour aux relevés'
+                          : 'Retour aux chantiers'
+                        : isChantierRelevesScreen
+                          ? 'Retour aux chantiers'
                         : 'Chantiers'}
                 </BottomNavButton>
                 <BottomNavButton
@@ -849,6 +965,16 @@ export default function App() {
           </View>
         </SafeAreaView>
         </GestureHandlerRootView>
+        {Platform.OS !== 'web' ? (
+          <PreselectionMetiersModal
+            visible={metierPreselectionVisible}
+            entrepriseId={entrepriseId}
+            onCompleted={() => {
+              setMetierPreselectionVisible(false);
+              setScreen('chantiers');
+            }}
+          />
+        ) : null}
       </PaperProvider>
     </SafeAreaProvider>
   );

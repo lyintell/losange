@@ -1,15 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Dimensions, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { ActivityIndicator, Menu, Modal, Portal, Text, TextInput } from 'react-native-paper';
 import MobileButton from './MobileButton';
-import { getAllUnitesLocal, insertOuvrageWithUniteLocal } from '../../db/querries';
+import {
+  getAllUnitesLocal,
+  getUnitesEtPrixParOuvrage,
+  insertOuvrageWithUniteLocal,
+  insertUniteForOuvrageLocal,
+} from '../../db/querries';
 import { chantierColors } from '../../styles/theme';
-
-const formatUniteLabel = (unite) => unite.nom || 'Unité';
+import { formatUniteChoiceLabel } from '../../utils/formatUniteChoiceLabel';
 
 const normalizeOuvrageNom = (value) => String(value || '').trim().toLowerCase();
 
 const DEFAULT_CT_PRIX_UNITAIRE = '1';
+const MODAL_BODY_MAX_HEIGHT = Math.round(Dimensions.get('window').height * 0.85);
 
 export default function AjouterOuvrageModal({
   visible,
@@ -28,18 +33,29 @@ export default function AjouterOuvrageModal({
   const [prixUnitaire, setPrixUnitaire] = useState('');
   const [uniteId, setUniteId] = useState(null);
   const [uniteMenuOpen, setUniteMenuOpen] = useState(false);
+  const [selectedOuvrage, setSelectedOuvrage] = useState(null);
+  const [showOuvrageDropdown, setShowOuvrageDropdown] = useState(false);
+  const [existingOuvrageUnites, setExistingOuvrageUnites] = useState([]);
+  const [loadingExistingUnites, setLoadingExistingUnites] = useState(false);
 
   const selectedUnite = unites.find((item) => item.id === uniteId) || null;
 
-  const isDuplicateNom = useMemo(() => {
-    const normalized = normalizeOuvrageNom(nom);
-    if (!normalized) return false;
-    return existingOuvrages.some(
-      (ouvrage) => normalizeOuvrageNom(ouvrage.nom) === normalized
+  const ouvrageSearchResults = useMemo(() => {
+    const term = nom.trim().toLowerCase();
+    if (!term) return [];
+    return existingOuvrages.filter((ouvrage) =>
+      String(ouvrage.nom || '')
+        .toLowerCase()
+        .includes(term)
     );
   }, [nom, existingOuvrages]);
 
-  const canSubmit = Boolean(nom.trim() && uniteId && !isDuplicateNom);
+  const isDuplicateCombo = useMemo(() => {
+    if (!selectedOuvrage?.id || !uniteId) return false;
+    return existingOuvrageUnites.some((row) => row.unite_id === uniteId);
+  }, [selectedOuvrage, uniteId, existingOuvrageUnites]);
+
+  const canSubmit = Boolean(nom.trim() && uniteId && !isDuplicateCombo);
 
   useEffect(() => {
     if (!visible) return undefined;
@@ -49,6 +65,9 @@ export default function AjouterOuvrageModal({
     setUniteId(null);
     setError('');
     setUniteMenuOpen(false);
+    setSelectedOuvrage(null);
+    setShowOuvrageDropdown(false);
+    setExistingOuvrageUnites([]);
 
     const load = async () => {
       setLoadingUnites(true);
@@ -67,6 +86,56 @@ export default function AjouterOuvrageModal({
     load();
   }, [visible, entrepriseId, lockPrixUnitaireToOne]);
 
+  useEffect(() => {
+    if (!selectedOuvrage?.id) {
+      setExistingOuvrageUnites([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadExistingUnites = async () => {
+      setLoadingExistingUnites(true);
+      try {
+        const data = await getUnitesEtPrixParOuvrage(selectedOuvrage.id);
+        if (!cancelled) {
+          setExistingOuvrageUnites(data || []);
+        }
+      } catch (loadError) {
+        console.error('Erreur chargement unites ouvrage:', loadError);
+        if (!cancelled) {
+          setExistingOuvrageUnites([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingExistingUnites(false);
+        }
+      }
+    };
+
+    loadExistingUnites();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedOuvrage?.id]);
+
+  const handleNomChange = (value) => {
+    setNom(value);
+    if (
+      selectedOuvrage &&
+      normalizeOuvrageNom(value) !== normalizeOuvrageNom(selectedOuvrage.nom)
+    ) {
+      setSelectedOuvrage(null);
+    }
+    setShowOuvrageDropdown(true);
+  };
+
+  const handleSelectOuvrage = (ouvrage) => {
+    setSelectedOuvrage(ouvrage);
+    setNom(ouvrage.nom || '');
+    setShowOuvrageDropdown(false);
+  };
+
   const handleSave = async () => {
     setError('');
     if (!metier?.id || !entrepriseId) {
@@ -77,8 +146,8 @@ export default function AjouterOuvrageModal({
       setError("Saisissez le nom de l'ouvrage.");
       return;
     }
-    if (isDuplicateNom) {
-      setError('Un ouvrage avec ce nom existe déjà pour ce métier.');
+    if (isDuplicateCombo) {
+      setError('Cette combinaison ouvrage / unité existe déjà.');
       return;
     }
     if (!uniteId) {
@@ -88,13 +157,20 @@ export default function AjouterOuvrageModal({
 
     setSaving(true);
     try {
-      const result = await insertOuvrageWithUniteLocal({
-        metierId: metier.id,
-        entrepriseId,
-        nom: nom.trim(),
-        uniteId,
-        prixUnitaire: lockPrixUnitaireToOne ? DEFAULT_CT_PRIX_UNITAIRE : prixUnitaire,
-      });
+      const prix = lockPrixUnitaireToOne ? DEFAULT_CT_PRIX_UNITAIRE : prixUnitaire;
+      const result = selectedOuvrage?.id
+        ? await insertUniteForOuvrageLocal({
+            ouvrageId: selectedOuvrage.id,
+            uniteId,
+            prixUnitaire: prix,
+          })
+        : await insertOuvrageWithUniteLocal({
+            metierId: metier.id,
+            entrepriseId,
+            nom: nom.trim(),
+            uniteId,
+            prixUnitaire: prix,
+          });
       onCreated?.(result);
       onDismiss?.();
     } catch (saveError) {
@@ -107,102 +183,141 @@ export default function AjouterOuvrageModal({
   return (
     <Portal>
       <Modal visible={visible} onDismiss={onDismiss} contentContainerStyle={styles.modal}>
-        <Text variant="titleLarge" style={styles.title}>
-          Nouvel ouvrage
-        </Text>
+        <ScrollView
+          style={styles.modalBody}
+          contentContainerStyle={styles.modalScroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator
+          nestedScrollEnabled
+        >
+          <Text variant="titleLarge" style={styles.title}>
+            Nouvel ouvrage
+          </Text>
 
-        <View style={styles.contextBlock}>
-          <Text style={styles.contextLabel}>Métier</Text>
-          <Text style={styles.contextValue}>{metier?.nom || '—'}</Text>
-        </View>
-
-        <TextInput
-          mode="outlined"
-          label="Nom de l'ouvrage"
-          value={nom}
-          onChangeText={setNom}
-          style={styles.input}
-        />
-
-        {loadingUnites ? (
-          <ActivityIndicator size="small" color={chantierColors.primary} style={styles.loader} />
-        ) : unites.length === 0 ? (
-          <Text style={styles.errorText}>Aucune unité dans le catalogue. Synchronisez depuis Supabase.</Text>
-        ) : (
-          <Menu
-            visible={uniteMenuOpen}
-            onDismiss={() => setUniteMenuOpen(false)}
-            anchor={
-              <MobileButton
-                mode="outlined"
-                onPress={() => setUniteMenuOpen(true)}
-                style={styles.uniteButton}
-                contentStyle={styles.uniteButtonContent}
-                labelStyle={styles.uniteButtonLabel}
-              >
-                {selectedUnite ? formatUniteLabel(selectedUnite) : "Choisir l'unité"}
-              </MobileButton>
-            }
-          >
-            <ScrollView
-              style={styles.uniteMenuScroll}
-              contentContainerStyle={styles.uniteMenuScrollContent}
-              nestedScrollEnabled
-              showsVerticalScrollIndicator
-              keyboardShouldPersistTaps="handled"
-            >
-              {unites.map((unite) => (
-                <Menu.Item
-                  key={unite.id}
-                  onPress={() => {
-                    setUniteId(unite.id);
-                    setUniteMenuOpen(false);
-                  }}
-                  title={formatUniteLabel(unite)}
-                  titleStyle={styles.uniteMenuItemTitle}
-                  style={styles.uniteMenuItem}
-                />
-              ))}
-            </ScrollView>
-          </Menu>
-        )}
-
-        {lockPrixUnitaireToOne ? (
           <View style={styles.contextBlock}>
-            <Text style={styles.contextLabel}>Prix unitaire</Text>
-            <Text style={styles.contextValue}>{DEFAULT_CT_PRIX_UNITAIRE} F</Text>
+            <Text style={styles.contextLabel}>Métier</Text>
+            <Text style={styles.contextValue}>{metier?.nom || '—'}</Text>
           </View>
-        ) : (
+
           <TextInput
             mode="outlined"
-            label="Prix unitaire"
-            value={prixUnitaire}
-            onChangeText={setPrixUnitaire}
-            keyboardType="decimal-pad"
+            label="Nom de l'ouvrage"
+            value={nom}
+            onChangeText={handleNomChange}
+            onFocus={() => setShowOuvrageDropdown(true)}
             style={styles.input}
-            right={<TextInput.Affix text="F" />}
           />
-        )}
 
-        {isDuplicateNom ? (
-          <Text style={styles.errorText}>Un ouvrage avec ce nom existe déjà pour ce métier.</Text>
-        ) : null}
+          {showOuvrageDropdown && ouvrageSearchResults.length > 0 ? (
+            <View style={styles.searchResults}>
+              {ouvrageSearchResults.map((ouvrage) => (
+                <Pressable
+                  key={ouvrage.id}
+                  onPress={() => handleSelectOuvrage(ouvrage)}
+                  style={({ pressed }) => [
+                    styles.searchResultRow,
+                    selectedOuvrage?.id === ouvrage.id && styles.searchResultRowSelected,
+                    pressed && styles.searchResultPressed,
+                  ]}
+                >
+                  <Text style={styles.searchResultName}>{ouvrage.nom}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
 
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          {selectedOuvrage ? (
+            <View style={styles.selectedHint}>
+              <Text style={styles.selectedHintText}>
+                Ouvrage existant — une nouvelle unité sera ajoutée.
+              </Text>
+            </View>
+          ) : null}
 
-        <View style={styles.actions}>
-          <MobileButton mode="outlined" onPress={onDismiss} disabled={saving}>
-            Annuler
-          </MobileButton>
-          <MobileButton
-            mode="contained"
-            onPress={handleSave}
-            loading={saving}
-            disabled={saving || !canSubmit}
-          >
-            Créer
-          </MobileButton>
-        </View>
+          {loadingUnites ? (
+            <ActivityIndicator size="small" color={chantierColors.primary} style={styles.loader} />
+          ) : unites.length === 0 ? (
+            <Text style={styles.errorText}>Aucune unité dans le catalogue. Synchronisez depuis Supabase.</Text>
+          ) : (
+            <Menu
+              visible={uniteMenuOpen}
+              onDismiss={() => setUniteMenuOpen(false)}
+              anchor={
+                <MobileButton
+                  mode="outlined"
+                  onPress={() => setUniteMenuOpen(true)}
+                  style={styles.uniteButton}
+                  contentStyle={styles.uniteButtonContent}
+                  labelStyle={styles.uniteButtonLabel}
+                >
+                  {selectedUnite ? formatUniteChoiceLabel(selectedUnite) : "Choisir l'unité"}
+                </MobileButton>
+              }
+            >
+              <ScrollView
+                style={styles.uniteMenuScroll}
+                contentContainerStyle={styles.uniteMenuScrollContent}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator
+                keyboardShouldPersistTaps="handled"
+              >
+                {unites.map((unite) => (
+                  <Menu.Item
+                    key={unite.id}
+                    onPress={() => {
+                      setUniteId(unite.id);
+                      setUniteMenuOpen(false);
+                    }}
+                    title={formatUniteChoiceLabel(unite)}
+                    titleStyle={styles.uniteMenuItemTitle}
+                    style={styles.uniteMenuItem}
+                  />
+                ))}
+              </ScrollView>
+            </Menu>
+          )}
+
+          {lockPrixUnitaireToOne ? (
+            <View style={styles.contextBlock}>
+              <Text style={styles.contextLabel}>Prix unitaire</Text>
+              <Text style={styles.contextValue}>{DEFAULT_CT_PRIX_UNITAIRE} F</Text>
+            </View>
+          ) : (
+            <TextInput
+              mode="outlined"
+              label="Prix unitaire"
+              value={prixUnitaire}
+              onChangeText={setPrixUnitaire}
+              keyboardType="decimal-pad"
+              style={styles.input}
+              right={<TextInput.Affix text="F" />}
+            />
+          )}
+
+          {loadingExistingUnites ? (
+            <ActivityIndicator size="small" color={chantierColors.primary} style={styles.loader} />
+          ) : null}
+
+          {isDuplicateCombo ? (
+            <Text style={styles.errorText}>Cette combinaison ouvrage / unité existe déjà.</Text>
+          ) : null}
+
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+          <View style={styles.actions}>
+            <MobileButton mode="outlined" onPress={onDismiss} disabled={saving}>
+              Annuler
+            </MobileButton>
+            <MobileButton
+              mode="contained"
+              onPress={handleSave}
+              loading={saving}
+              disabled={saving || !canSubmit}
+            >
+              Créer
+            </MobileButton>
+          </View>
+        </ScrollView>
       </Modal>
     </Portal>
   );
@@ -213,9 +328,16 @@ const styles = StyleSheet.create({
     backgroundColor: chantierColors.surface,
     marginHorizontal: 16,
     borderRadius: 12,
-    padding: 20,
-    gap: 12,
     maxHeight: '90%',
+    overflow: 'hidden',
+  },
+  modalBody: {
+    maxHeight: MODAL_BODY_MAX_HEIGHT,
+  },
+  modalScroll: {
+    gap: 12,
+    padding: 20,
+    paddingBottom: 48,
   },
   title: {
     color: chantierColors.text,
@@ -237,6 +359,41 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 4,
+  },
+  searchResults: {
+    borderWidth: 1,
+    borderColor: chantierColors.border,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  searchResultRow: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: chantierColors.border,
+    backgroundColor: chantierColors.surface,
+  },
+  searchResultRowSelected: {
+    backgroundColor: '#FFF5F1',
+  },
+  searchResultPressed: {
+    opacity: 0.85,
+  },
+  searchResultName: {
+    color: chantierColors.text,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  selectedHint: {
+    backgroundColor: chantierColors.background,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  selectedHintText: {
+    color: chantierColors.muted,
+    fontSize: 14,
+    fontWeight: '600',
   },
   input: {
     backgroundColor: chantierColors.surface,

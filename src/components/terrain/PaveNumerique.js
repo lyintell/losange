@@ -10,17 +10,18 @@ const TOUCHES = ['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', 'Effacer
 export default function PaveNumerique({
   onKeyPress,
   disabled = false,
+  header = null,
   measuresLine = '',
   hintText = '',
   placement = 'bottom',
 }) {
   const wrapperStyle = placement === 'top' ? styles.wrapperTop : styles.wrapperBottom;
+  const legacyHeader =
+    !header && measuresLine ? <Text style={styles.measuresLine}>{measuresLine}</Text> : null;
 
   return (
     <View style={wrapperStyle}>
-      {measuresLine ? (
-        <Text style={styles.measuresLine}>{measuresLine}</Text>
-      ) : null}
+      {header || legacyHeader}
       {hintText ? <Text style={styles.hint}>{hintText}</Text> : null}
       <View style={styles.grid}>
         {TOUCHES.map((keyValue) => {

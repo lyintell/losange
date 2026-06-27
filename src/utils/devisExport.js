@@ -5,10 +5,10 @@ import { Platform } from 'react-native';
 import { buildDevisTableRows, buildRelevesTableRows } from './devisGrouping';
 import { formatMontantFcfa } from './formatLigneMesures';
 import { montantEnLettresFcfa } from './montantEnLettres';
+import { computeReleveFacturation } from './releveFacturation';
 import {
   EXPORT_LOGO_STYLES,
   renderExportLogoHeaderHtml,
-  renderExportLogoWatermarkHtml,
   resolveExportLogoDataUri,
 } from './exportLogo';
 import { saveFileToAndroidDownloads } from './androidSafExport';
@@ -60,12 +60,19 @@ const renderDesignationCell = (row) => {
   `;
 };
 
-export function buildDevisHtml({ entreprise, chantier, lignes = [], logoDataUri = null }) {
+export function buildDevisHtml({ entreprise, chantier, lignes = [], releve = null, logoDataUri = null }) {
   const tableRows = buildDevisTableRows(lignes);
   const rows = tableRows
-    .map((row) => {
+    .map((row, index) => {
+      if (row.isSectionSeparator) {
+        return `<tr class="section-divider"><td colspan="4"></td></tr>`;
+      }
+
+      if (row.isSectionHeader) {
+        return `<tr class="section-header"><td colspan="4"><div class="section">${escapeHtml(row.sectionNom)}</div></td></tr>`;
+      }
+
       const rowClass = [
-        row.metierDivider ? 'metier-divider' : '',
         row.ouvrageLigneSuite ? 'ouvrage-ligne-suite' : '',
         row.ouvrageLigneBeforeSuite ? 'ouvrage-ligne-before-suite' : '',
       ]
@@ -82,22 +89,31 @@ export function buildDevisHtml({ entreprise, chantier, lignes = [], logoDataUri 
     })
     .join('');
 
-  const totalHt = lignes.reduce((sum, ligne) => sum + (Number(ligne.montant) || 0), 0);
-  const afficheTva = Number(entreprise?.ind_pro) === 1 && Number(entreprise?.ind_tva) === 1;
-  const tva = totalHt * 0.18;
-  const totalTtc = totalHt + tva;
+  const brutHt = lignes.reduce((sum, ligne) => sum + (Number(ligne.montant) || 0), 0);
+  const facturation = computeReleveFacturation({
+    lignesMontantTotal: brutHt,
+    remise: releve?.remise ?? 0,
+    indTva: releve?.ind_tva ?? 0,
+    tvaTaux: releve?.tva_facture,
+  });
+  const afficheTva = Number(entreprise?.ind_pro) === 1 && facturation.applyTva;
+  const { montantRemise, totalHt, montantTva, totalTtc } = facturation;
   const montantArrete = afficheTva ? totalTtc : totalHt;
   const montantArreteLettres = montantEnLettresFcfa(montantArrete, { includeTtcLabel: afficheTva });
 
   const totalsRows = afficheTva
     ? `
           <tr>
+            <td class="label">Remise</td>
+            <td class="value">${escapeHtml(formatMontantFcfa(montantRemise))}</td>
+          </tr>
+          <tr>
             <td class="label">Total HT</td>
             <td class="value">${escapeHtml(formatMontantFcfa(totalHt))}</td>
           </tr>
           <tr>
             <td class="label">TVA 18%</td>
-            <td class="value">${escapeHtml(formatMontantFcfa(tva))}</td>
+            <td class="value">${escapeHtml(formatMontantFcfa(montantTva))}</td>
           </tr>
           <tr>
             <td class="label">Total TTC</td>
@@ -105,6 +121,10 @@ export function buildDevisHtml({ entreprise, chantier, lignes = [], logoDataUri 
           </tr>
         `
     : `
+          <tr>
+            <td class="label">Remise</td>
+            <td class="value">${escapeHtml(formatMontantFcfa(montantRemise))}</td>
+          </tr>
           <tr>
             <td class="label">Total HT</td>
             <td class="value">${escapeHtml(formatMontantFcfa(totalHt))}</td>
@@ -136,11 +156,13 @@ export function buildDevisHtml({ entreprise, chantier, lignes = [], logoDataUri 
           th { background: #f8f9fa; font-weight: 700; }
           th.designation, td.designation-cell { width: 52%; }
           td.num, th.num { text-align: right; white-space: nowrap; width: 16%; vertical-align: bottom; }
-          tr.metier-divider td { border-top: 2px solid #212529; }
+          tr.section-divider td { border-top: 2px solid #212529; border-bottom: none; padding: 0; height: 0; line-height: 0; }
+          tr.section-header td { border-top: none; border-bottom: none; padding: 8px 8px 4px; }
+          .designation .section, tr.section-header .section { font-weight: 700; font-size: 14px; text-align: center; }
           tr.ouvrage-ligne-suite td { border-top: none; }
           tr.ouvrage-ligne-before-suite td { border-bottom: none; }
-          .designation .metier { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
-          .designation .ouvrage { font-weight: 700; font-size: 12px; margin-bottom: 4px; }
+          .designation .metier { font-weight: 700; font-size: 13px; margin-bottom: 6px; text-align: left; }
+          .designation .ouvrage { font-weight: 700; font-size: 12px; margin-bottom: 4px; text-align: center; }
           .designation .dimension-line { text-align: center; font-size: 13px; font-weight: 600; line-height: 1.6; min-height: 1.6em; }
           .totals { margin-top: 16px; width: 100%; }
           .totals td { border: none; padding: 4px 0; }
@@ -156,7 +178,6 @@ export function buildDevisHtml({ entreprise, chantier, lignes = [], logoDataUri 
         </style>
       </head>
       <body>
-        ${renderExportLogoWatermarkHtml(logoDataUri)}
         <div class="page-content">
         <div class="header">
           <div class="header-top">
@@ -232,16 +253,18 @@ const renderDimensionLigneHtml = (row) => {
   const measure = row.isDimensionLine
     ? row.dimensionLxhN || row.dimension || ''
     : row.nombrePdf ?? '';
+  const equivalence = row.isDimensionLine ? row.dimensionEquivalence || '' : '';
   const note = row.note || '';
-  const measureClass = measure ? 'dim-measure' : 'dim-measure-secondary';
+  const measureClass = measure || equivalence ? 'dim-measure' : 'dim-measure-secondary';
+  const measureLine = [measure, equivalence].filter(Boolean).join(' ');
 
-  if (measure && note) {
+  if (measureLine && note) {
     return `<div class="dim-ligne">
-      <span class="${measureClass}">${escapeHtml(measure)}</span><span class="dim-ligne-note">${renderDimensionNoteArrowHtml()}${escapeHtml(note)}</span>
+      <span class="${measureClass}">${escapeHtml(measureLine)}</span><span class="dim-ligne-note">${renderDimensionNoteArrowHtml()}${escapeHtml(note)}</span>
     </div>`;
   }
-  if (measure) {
-    return `<div class="dim-ligne"><span class="${measureClass}">${escapeHtml(measure)}</span></div>`;
+  if (measureLine) {
+    return `<div class="dim-ligne"><span class="${measureClass}">${escapeHtml(measureLine)}</span></div>`;
   }
   if (note) {
     return `<div class="dim-ligne"><span class="dim-ligne-note">${renderDimensionNoteArrowHtml()}${escapeHtml(note)}</span></div>`;
@@ -249,7 +272,15 @@ const renderDimensionLigneHtml = (row) => {
   return '';
 };
 
-const renderDimensionsDesignationBlock = (row) => {
+const renderDimensionsRowHtml = (row) => {
+  if (row.isSectionSeparator) {
+    return `<div class="dim-section-divider"></div>`;
+  }
+
+  if (row.isSectionHeader) {
+    return `<div class="dim-section">${escapeHtml(row.sectionNom)}</div>`;
+  }
+
   const metierHtml = row.showMetier
     ? `<div class="dim-metier" style="color:${row.metierColor}">${escapeHtml(row.metierNom)}</div>`
     : '';
@@ -267,15 +298,15 @@ const renderDimensionsDesignationBlock = (row) => {
   `;
 };
 
-export function buildDimensionsPdfHtml({ chantier, lignes = [], logoDataUri = null }) {
-  const tableRows = buildRelevesTableRows(lignes);
+export function buildDimensionsPdfHtml({ chantier, lignes = [], sectionOrder = null, logoDataUri = null }) {
+  const tableRows = buildRelevesTableRows(lignes, sectionOrder);
   const clientNom = chantier?.client_nom?.trim() || 'Client';
   const chantierNom = chantier?.nom?.trim() || 'Chantier';
   const chantierNotes = chantier?.notes?.trim() || '';
   const releveDateRaw = lignes.find((ligne) => ligne.releve_date_facture)?.releve_date_facture;
   const releveDateLabel = formatReleveDate(releveDateRaw);
 
-  const blocks = tableRows.map((row) => renderDimensionsDesignationBlock(row)).join('');
+  const blocks = tableRows.map((row) => renderDimensionsRowHtml(row)).join('');
 
   return `
     <!DOCTYPE html>
@@ -312,6 +343,15 @@ export function buildDimensionsPdfHtml({ chantier, lignes = [], logoDataUri = nu
             display: flex;
             flex-direction: column;
             gap: 18px;
+          }
+          .dim-section-divider {
+            border-top: 3px solid #212529;
+            margin-top: 8px;
+          }
+          .dim-section {
+            font-weight: 800;
+            font-size: 22px;
+            text-align: center;
           }
           .dim-block {
             text-align: left;
@@ -372,7 +412,6 @@ export function buildDimensionsPdfHtml({ chantier, lignes = [], logoDataUri = nu
         </style>
       </head>
       <body>
-        ${renderExportLogoWatermarkHtml(logoDataUri)}
         <div class="page-content">
         <div class="dimensions-header">
           ${renderExportLogoHeaderHtml(logoDataUri)}
@@ -389,16 +428,16 @@ export function buildDimensionsPdfHtml({ chantier, lignes = [], logoDataUri = nu
   `;
 }
 
-export async function generateDevisPdfFile({ entreprise, chantier, lignes }) {
+export async function generateDevisPdfFile({ entreprise, chantier, lignes, releve = null }) {
   const logoDataUri = await resolveExportLogoDataUri(entreprise);
-  const html = buildDevisHtml({ entreprise, chantier, lignes, logoDataUri });
+  const html = buildDevisHtml({ entreprise, chantier, lignes, releve, logoDataUri });
   const { uri } = await Print.printToFileAsync({ html });
   return uri;
 }
 
-export async function generateDimensionsPdfFile({ entreprise, chantier, lignes }) {
+export async function generateDimensionsPdfFile({ entreprise, chantier, lignes, sectionOrder = null }) {
   const logoDataUri = await resolveExportLogoDataUri(entreprise);
-  const html = buildDimensionsPdfHtml({ chantier, lignes, logoDataUri });
+  const html = buildDimensionsPdfHtml({ chantier, lignes, sectionOrder, logoDataUri });
   const { uri } = await Print.printToFileAsync({ html });
   return uri;
 }

@@ -72,3 +72,8 @@ A et S peuvent voir tous les chantiers
 12.
 Liste des chantiers: trier par ordre decroissant prise_le
 
+13. profil C et T, dans mobile Menu plus, ne pas montrer le telephone du client
+- profil C et T ne peux pas changer le status du releve
+
+- sur mobile, S ne peut activer ou desactiver, ou changer l ordre des ouvrage. Seul admin peut faire ca
+

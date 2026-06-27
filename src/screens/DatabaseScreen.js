@@ -4,11 +4,21 @@ import { Text } from 'react-native-paper';
 import { LosangeLogoBackground } from '../components/terrain/LosangeLogoLoader';
 import PlusMenuButton from '../components/terrain/PlusMenuButton';
 import { getLoggedInProfilViewLocal } from '../db/querries';
-import { canAccessDatabaseMetiers, canAccessDatabaseOuvrages } from '../utils/terrainAccess';
+import {
+  canAccessDatabaseMetiers,
+  canAccessDatabaseOuvrages,
+  canAccessDatabaseSections,
+} from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
 
-export default function DatabaseScreen({ onListeClientsPress, onListeMetiersPress, onListeOuvragesPress }) {
+export default function DatabaseScreen({
+  onListeClientsPress,
+  onListeMetiersPress,
+  onListeSectionsPress,
+  onListeOuvragesPress,
+}) {
   const [canShowMetiers, setCanShowMetiers] = useState(false);
+  const [canShowSections, setCanShowSections] = useState(false);
   const [canShowOuvrages, setCanShowOuvrages] = useState(false);
 
   useEffect(() => {
@@ -19,12 +29,14 @@ export default function DatabaseScreen({ onListeClientsPress, onListeMetiersPres
         const profil = await getLoggedInProfilViewLocal();
         if (!cancelled) {
           setCanShowMetiers(canAccessDatabaseMetiers(profil));
+          setCanShowSections(canAccessDatabaseSections(profil));
           setCanShowOuvrages(canAccessDatabaseOuvrages(profil));
         }
       } catch (error) {
         console.error('Erreur chargement acces base de donnees:', error);
         if (!cancelled) {
           setCanShowMetiers(false);
+          setCanShowSections(false);
           setCanShowOuvrages(false);
         }
       }
@@ -56,9 +68,15 @@ export default function DatabaseScreen({ onListeClientsPress, onListeMetiersPres
           </PlusMenuButton>
         ) : null}
 
+        {canShowSections ? (
+          <PlusMenuButton icon="view-grid" onPress={onListeSectionsPress}>
+            Sections
+          </PlusMenuButton>
+        ) : null}
+
         {canShowOuvrages ? (
           <PlusMenuButton icon="hammer-wrench" onPress={onListeOuvragesPress}>
-            Ouvrages
+            Ouvrages / Articles
           </PlusMenuButton>
         ) : null}
       </View>

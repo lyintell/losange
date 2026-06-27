@@ -1,6 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { filterTransactionalRowsForProPull } from './entrepriseTier.ts';
 
+const FREE_MAX_METIERS = 3;
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -75,19 +77,72 @@ const deactivateExpiredProEntreprise = async (
 
 const PUSH_ORDER = [
   'entreprises',
+  'metiers',
+  'sections',
+  'fournisseurs',
   'ouvrages',
   'ouvrage_unites',
   'clients',
   'chantiers',
   'releves',
+  'section_releves',
   'ligne_releves',
 ] as const;
 
 const TIMESTAMP_COLUMNS = new Set(['cree_le', 'mis_a_jour_le', 'supprime_le']);
-const FLAG_COLUMNS = new Set(['ind_pro', 'ind_active', 'ind_tva', '_synced', 'ind_dimension', 'ind_complete']);
+const FLAG_COLUMNS = new Set(['ind_pro', 'ind_active', 'ind_tva', '_synced', 'ind_dimension', 'ind_complete', 'ind_article', 'ind_actif', 'ind_default', 'ind_admin_connecte_mobile', 'ind_metiers_preselectionnes']);
 
 const TABLE_COLUMNS: Record<string, string[]> = {
-  ouvrages: ['id', 'metier_id', 'entreprise_id', 'nom', 'supprime_le', 'cree_le', 'mis_a_jour_le', '_synced'],
+  metiers: [
+    'id',
+    'nom',
+    'abbrev',
+    'icon',
+    'entreprise_id',
+    'ordre',
+    'ind_actif',
+    'ind_default',
+    'supprime_le',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
+  sections: [
+    'id',
+    'nom',
+    'entreprise_id',
+    'supprime_le',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
+  fournisseurs: [
+    'id',
+    'metier_id',
+    'entreprise_id',
+    'nom',
+    'telephone_1',
+    'telephone_2',
+    'supprime_le',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
+  ouvrages: [
+    'id',
+    'metier_id',
+    'entreprise_id',
+    'nom',
+    'ind_article',
+    'fournisseur_id',
+    'photo',
+    'supprime_le',
+    'ind_actif',
+    'ordre',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
   ouvrage_unites: [
     'id',
     'ouvrage_id',
@@ -134,7 +189,20 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     'total_ht_facture',
     'tva_facture',
     'total_ttc_facture',
+    'remise',
+    'ind_tva',
+    'status',
     'note',
+    'supprime_le',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
+  section_releves: [
+    'id',
+    'section_id',
+    'releve_id',
+    'ordre',
     'supprime_le',
     'cree_le',
     'mis_a_jour_le',
@@ -153,6 +221,8 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     'montant',
     'note',
     'photo',
+    'section_id',
+    'ordre',
     'ind_complete',
     'supprime_le',
     'cree_le',
@@ -181,7 +251,14 @@ const sanitizePushRow = (tableName: string, rawRow: Record<string, unknown>) => 
 
   const normalized: Record<string, unknown> = {};
   columns.forEach((column) => {
-    if (!Object.prototype.hasOwnProperty.call(rawRow, column)) return;
+    if (!Object.prototype.hasOwnProperty.call(rawRow, column)) {
+      if (tableName === 'releves' && column === 'ind_tva') {
+        normalized[column] = 0;
+      } else if (tableName === 'releves' && column === 'status') {
+        normalized[column] = 'E';
+      }
+      return;
+    }
     const value = rawRow[column];
     if (FLAG_COLUMNS.has(column)) {
       normalized[column] = coerceFlag(value);
@@ -208,14 +285,205 @@ const upsertBatch = async (
   return error;
 };
 
+const fetchMetiersPullData = async (
+  supabase: ReturnType<typeof createClient>,
+  entrepriseId: string
+) => {
+  const { data: metiers, error } = await supabase
+    .from('metiers')
+    .select('*')
+    .eq('entreprise_id', entrepriseId)
+    .is('supprime_le', null)
+    .order('ordre', { ascending: true })
+    .order('nom', { ascending: true });
+
+  if (error) {
+    throw new Error(error.message || 'Erreur chargement métiers.');
+  }
+
+  return metiers ?? [];
+};
+
+const DEFAULT_SECTION_NOM = 'Pas de section';
+
+const sortSectionsForPull = (sections: Record<string, unknown>[]) =>
+  [...sections].sort((left, right) => {
+    const leftDefault =
+      String(left.nom ?? '')
+        .trim()
+        .toLowerCase() === DEFAULT_SECTION_NOM.toLowerCase();
+    const rightDefault =
+      String(right.nom ?? '')
+        .trim()
+        .toLowerCase() === DEFAULT_SECTION_NOM.toLowerCase();
+    if (leftDefault && !rightDefault) return -1;
+    if (!leftDefault && rightDefault) return 1;
+    return String(left.nom ?? '').localeCompare(String(right.nom ?? ''), 'fr', {
+      sensitivity: 'base',
+    });
+  });
+
+const fetchSectionsPullData = async (
+  supabase: ReturnType<typeof createClient>,
+  entrepriseId: string
+) => {
+  const { data: sections, error } = await supabase
+    .from('sections')
+    .select('*')
+    .eq('entreprise_id', entrepriseId)
+    .is('supprime_le', null)
+    .order('nom', { ascending: true });
+
+  if (error) {
+    throw new Error(error.message || 'Erreur chargement sections.');
+  }
+
+  return sortSectionsForPull(sections ?? []);
+};
+
+const mapMetierRowsForInsert = (
+  metierRows: Record<string, unknown>[],
+  entrepriseId: string,
+  now: string
+) =>
+  metierRows.map((row, index) => {
+    const nom = String(row.nom ?? '').trim();
+    if (!nom) throw new Error('Nom de metier requis.');
+    return {
+      id: String(row.id),
+      nom,
+      abbrev: String(row.abbrev ?? nom.slice(0, 3)).trim().toUpperCase(),
+      icon: null,
+      entreprise_id: entrepriseId,
+      ordre: Number(row.ordre ?? index),
+      ind_actif: 1,
+      ind_default: Number(row.ind_default ?? 1) === 0 ? 0 : 1,
+      supprime_le: null,
+      cree_le: now,
+      mis_a_jour_le: now,
+      _synced: 1,
+    };
+  });
+
+const commitMetiersPreselection = async (
+  supabase: ReturnType<typeof createClient>,
+  entreprise: Record<string, unknown>,
+  entrepriseId: string,
+  metierRows: Record<string, unknown>[]
+) => {
+  if (Number(entreprise.ind_metiers_preselectionnes) === 1) {
+    throw new Error('Les metiers ont deja ete selectionnes.');
+  }
+
+  const { count, error: countError } = await supabase
+    .from('metiers')
+    .select('id', { count: 'exact', head: true })
+    .eq('entreprise_id', entrepriseId)
+    .is('supprime_le', null);
+
+  if (countError) {
+    throw new Error(countError.message || 'Erreur lecture metiers.');
+  }
+  if ((count ?? 0) > 0) {
+    throw new Error('Des metiers existent deja pour cette entreprise.');
+  }
+
+  const isPro = Number(entreprise.ind_pro) === 1;
+  const maxCount = isPro ? 11 : FREE_MAX_METIERS;
+  if (metierRows.length < 1 || metierRows.length > maxCount) {
+    throw new Error(
+      isPro
+        ? 'Selectionnez entre 1 et 11 metiers.'
+        : `Selectionnez entre 1 et ${FREE_MAX_METIERS} metiers.`
+    );
+  }
+
+  const now = new Date().toISOString();
+  const rows = mapMetierRowsForInsert(metierRows, entrepriseId, now);
+
+  const { error: insertError } = await supabase.from('metiers').insert(rows);
+  if (insertError) {
+    throw new Error(insertError.message || 'Erreur creation metiers.');
+  }
+
+  const { data: updatedEntreprise, error: entrepriseError } = await supabase
+    .from('entreprises')
+    .update({ ind_metiers_preselectionnes: 1, mis_a_jour_le: now })
+    .eq('id', entrepriseId)
+    .select('*')
+    .maybeSingle();
+
+  if (entrepriseError) {
+    throw new Error(entrepriseError.message || 'Erreur validation metiers.');
+  }
+
+  return (updatedEntreprise ?? {
+    ...entreprise,
+    ind_metiers_preselectionnes: 1,
+    mis_a_jour_le: now,
+  }) as Record<string, unknown>;
+};
+
+const commitMetiersRepair = async (
+  supabase: ReturnType<typeof createClient>,
+  entreprise: Record<string, unknown>,
+  entrepriseId: string,
+  metierRows: Record<string, unknown>[]
+) => {
+  const { count, error: countError } = await supabase
+    .from('metiers')
+    .select('id', { count: 'exact', head: true })
+    .eq('entreprise_id', entrepriseId)
+    .is('supprime_le', null);
+
+  if (countError) {
+    throw new Error(countError.message || 'Erreur lecture metiers.');
+  }
+  if ((count ?? 0) > 0) {
+    throw new Error('Des metiers existent deja sur le cloud.');
+  }
+  if (!metierRows.length) {
+    throw new Error('Aucun metier a reparer.');
+  }
+
+  const now = new Date().toISOString();
+  const rows = mapMetierRowsForInsert(metierRows, entrepriseId, now);
+  const { error: insertError } = await supabase.from('metiers').insert(rows);
+  if (insertError) {
+    throw new Error(insertError.message || 'Erreur reparation metiers.');
+  }
+
+  if (Number(entreprise.ind_metiers_preselectionnes) === 1) {
+    return entreprise;
+  }
+
+  const { data: updatedEntreprise, error: entrepriseError } = await supabase
+    .from('entreprises')
+    .update({ ind_metiers_preselectionnes: 1, mis_a_jour_le: now })
+    .eq('id', entrepriseId)
+    .select('*')
+    .maybeSingle();
+
+  if (entrepriseError) {
+    throw new Error(entrepriseError.message || 'Erreur validation metiers.');
+  }
+
+  return (updatedEntreprise ?? {
+    ...entreprise,
+    ind_metiers_preselectionnes: 1,
+    mis_a_jour_le: now,
+  }) as Record<string, unknown>;
+};
+
 const buildAccountPullPayload = async (
   supabase: ReturnType<typeof createClient>,
   entreprise: Record<string, unknown>,
   profilRow: Record<string, unknown>,
   entrepriseId: string
 ) => {
-  const [metiersResult, unitesResult, profilsResult, refreshedEntreprise] = await Promise.all([
-    supabase.from('metiers').select('*'),
+  const [metiersPull, sectionsPull, unitesResult, profilsResult, refreshedEntreprise] = await Promise.all([
+    fetchMetiersPullData(supabase, entrepriseId),
+    fetchSectionsPullData(supabase, entrepriseId),
     supabase.from('unites').select('*'),
     supabase
       .from('profils')
@@ -227,7 +495,7 @@ const buildAccountPullPayload = async (
   ]);
 
   const queryError =
-    metiersResult.error || unitesResult.error || profilsResult.error || refreshedEntreprise.error;
+    unitesResult.error || profilsResult.error || refreshedEntreprise.error;
   if (queryError) {
     throw new Error(queryError.message || 'Erreur chargement des donnees.');
   }
@@ -236,13 +504,16 @@ const buildAccountPullPayload = async (
     entreprise: (refreshedEntreprise.data ?? entreprise) as Record<string, unknown>,
     profil: stripProfil(profilRow),
     profils: profilsResult.data ?? [],
-    metiers: metiersResult.data ?? [],
+    metiers: metiersPull,
+    sections: sectionsPull,
     unites: unitesResult.data ?? [],
     ouvrages: [],
     ouvrage_unites: [],
+    fournisseurs: [],
     clients: [],
     chantiers: [],
     releves: [],
+    section_releves: [],
     ligne_releves: [],
   };
 };
@@ -256,17 +527,21 @@ const buildProPullPayload = async (
   const proActivatedLe = entreprise.pro_activated_le as string | null | undefined;
 
   const [
-    metiersResult,
+    metiersPull,
+    sectionsPull,
     unitesResult,
+    fournisseursResult,
     ouvragesResult,
     clientsResult,
     profilsResult,
     refreshedEntreprise,
   ] = await Promise.all([
-    supabase.from('metiers').select('*'),
+    fetchMetiersPullData(supabase, entrepriseId),
+    fetchSectionsPullData(supabase, entrepriseId),
     supabase.from('unites').select('*'),
-    supabase.from('ouvrages').select('*').eq('entreprise_id', entrepriseId).is('supprime_le', null),
-    supabase.from('clients').select('*').eq('entreprise_id', entrepriseId).is('supprime_le', null),
+    supabase.from('fournisseurs').select('*').eq('entreprise_id', entrepriseId),
+    supabase.from('ouvrages').select('*').eq('entreprise_id', entrepriseId),
+    supabase.from('clients').select('*').eq('entreprise_id', entrepriseId),
     supabase
       .from('profils')
       .select(
@@ -277,8 +552,8 @@ const buildProPullPayload = async (
   ]);
 
   const queryError =
-    metiersResult.error ||
     unitesResult.error ||
+    fournisseursResult.error ||
     ouvragesResult.error ||
     clientsResult.error ||
     profilsResult.error ||
@@ -288,6 +563,7 @@ const buildProPullPayload = async (
     throw new Error(queryError.message || 'Erreur chargement des donnees.');
   }
 
+  let fournisseurs = filterTransactionalRowsForProPull(fournisseursResult.data ?? [], proActivatedLe);
   let ouvrages = filterTransactionalRowsForProPull(ouvragesResult.data ?? [], proActivatedLe);
   let clients = filterTransactionalRowsForProPull(clientsResult.data ?? [], proActivatedLe);
   const ouvrageIds = ouvrages.map((item) => item.id);
@@ -298,8 +574,7 @@ const buildProPullPayload = async (
     const { data, error } = await supabase
       .from('ouvrage_unites')
       .select('*')
-      .in('ouvrage_id', ouvrageIds)
-      .is('supprime_le', null);
+      .in('ouvrage_id', ouvrageIds);
     if (error) {
       throw new Error(error.message || 'Erreur chargement ouvrage_unites.');
     }
@@ -311,8 +586,7 @@ const buildProPullPayload = async (
     const { data, error } = await supabase
       .from('chantiers')
       .select('*')
-      .in('client_id', clientIds)
-      .is('supprime_le', null);
+      .in('client_id', clientIds);
     if (error) {
       throw new Error(error.message || 'Erreur chargement chantiers.');
     }
@@ -325,8 +599,7 @@ const buildProPullPayload = async (
     const { data, error } = await supabase
       .from('releves')
       .select('*')
-      .in('chantier_id', chantierIds)
-      .is('supprime_le', null);
+      .in('chantier_id', chantierIds);
     if (error) {
       throw new Error(error.message || 'Erreur chargement releves.');
     }
@@ -339,25 +612,39 @@ const buildProPullPayload = async (
     const { data, error } = await supabase
       .from('ligne_releves')
       .select('*')
-      .in('releve_id', releveIds)
-      .is('supprime_le', null);
+      .in('releve_id', releveIds);
     if (error) {
       throw new Error(error.message || 'Erreur chargement ligne_releves.');
     }
     ligneReleves = filterTransactionalRowsForProPull(data ?? [], proActivatedLe);
   }
 
+  let sectionReleves: Record<string, unknown>[] = [];
+  if (releveIds.length > 0) {
+    const { data, error } = await supabase
+      .from('section_releves')
+      .select('*')
+      .in('releve_id', releveIds);
+    if (error) {
+      throw new Error(error.message || 'Erreur chargement section_releves.');
+    }
+    sectionReleves = filterTransactionalRowsForProPull(data ?? [], proActivatedLe);
+  }
+
   return {
     entreprise: (refreshedEntreprise.data ?? entreprise) as Record<string, unknown>,
     profil: stripProfil(profilRow),
     profils: profilsResult.data ?? [],
-    metiers: metiersResult.data ?? [],
+    metiers: metiersPull,
+    sections: sectionsPull,
     unites: unitesResult.data ?? [],
+    fournisseurs,
     ouvrages,
     ouvrage_unites: ouvrageUnites,
     clients,
     chantiers,
     releves,
+    section_releves: sectionReleves,
     ligne_releves: ligneReleves,
   };
 };
@@ -471,6 +758,87 @@ Deno.serve(async (req) => {
 
     const entrepriseId = String(entreprise.id);
     const isProAccount = Number(entreprise.ind_pro) === 1;
+    const action = String(body?.action ?? '');
+
+    if (action === 'preselect_metiers') {
+      if (String(profilRow.role) !== 'A') {
+        return jsonResponse({ ok: false, error: 'Acces reserve aux administrateurs.' }, 403);
+      }
+
+      try {
+        const metierRows = Array.isArray(body?.metiers) ? (body.metiers as Record<string, unknown>[]) : [];
+        entreprise = await commitMetiersPreselection(
+          supabase,
+          entreprise as Record<string, unknown>,
+          entrepriseId,
+          metierRows
+        );
+
+        const pull = isProAccount
+          ? await buildProPullPayload(
+              supabase,
+              entreprise,
+              profilRow as Record<string, unknown>,
+              entrepriseId
+            )
+          : await buildAccountPullPayload(
+              supabase,
+              entreprise,
+              profilRow as Record<string, unknown>,
+              entrepriseId
+            );
+
+        return jsonResponse({
+          ok: true,
+          pull,
+          entreprise: pull.entreprise ?? entreprise,
+        });
+      } catch (preselectError) {
+        const message =
+          preselectError instanceof Error ? preselectError.message : 'Erreur selection metiers.';
+        return jsonResponse({ ok: false, error: message }, 500);
+      }
+    }
+
+    if (action === 'repair_metiers') {
+      if (String(profilRow.role) !== 'A') {
+        return jsonResponse({ ok: false, error: 'Acces reserve aux administrateurs.' }, 403);
+      }
+
+      try {
+        const metierRows = Array.isArray(body?.metiers) ? (body.metiers as Record<string, unknown>[]) : [];
+        entreprise = await commitMetiersRepair(
+          supabase,
+          entreprise as Record<string, unknown>,
+          entrepriseId,
+          metierRows
+        );
+
+        const pull = isProAccount
+          ? await buildProPullPayload(
+              supabase,
+              entreprise,
+              profilRow as Record<string, unknown>,
+              entrepriseId
+            )
+          : await buildAccountPullPayload(
+              supabase,
+              entreprise,
+              profilRow as Record<string, unknown>,
+              entrepriseId
+            );
+
+        return jsonResponse({
+          ok: true,
+          pull,
+          entreprise: pull.entreprise ?? entreprise,
+        });
+      } catch (repairError) {
+        const message =
+          repairError instanceof Error ? repairError.message : 'Erreur reparation metiers.';
+        return jsonResponse({ ok: false, error: message }, 500);
+      }
+    }
 
     if (!isProAccount) {
       try {
@@ -497,11 +865,13 @@ Deno.serve(async (req) => {
           mode: 'free_account',
           pushedCounts: {
             entreprises: entrepriseRows.length,
+            fournisseurs: 0,
             ouvrages: 0,
             ouvrage_unites: 0,
             clients: 0,
             chantiers: 0,
             releves: 0,
+            section_releves: 0,
             ligne_releves: 0,
           },
           pull,
@@ -526,6 +896,22 @@ Deno.serve(async (req) => {
 
     const allowedOuvrageIds = new Set(
       (existingOuvrages ?? []).map((row) => String(row.id))
+    );
+
+    const { data: existingFournisseurs, error: existingFournisseursError } = await supabase
+      .from('fournisseurs')
+      .select('id')
+      .eq('entreprise_id', entrepriseId);
+
+    if (existingFournisseursError) {
+      return jsonResponse(
+        { ok: false, error: existingFournisseursError.message || 'Erreur chargement fournisseurs.' },
+        500
+      );
+    }
+
+    const allowedFournisseurIds = new Set(
+      (existingFournisseurs ?? []).map((row) => String(row.id))
     );
 
     const ouvrageDeleteIds = (Array.isArray(deletePayload.ouvrages) ? deletePayload.ouvrages : [])
@@ -577,6 +963,7 @@ Deno.serve(async (req) => {
     const allowedClientIds = new Set<string>();
     const allowedChantierIds = new Set<string>();
     const allowedReleveIds = new Set<string>();
+    const allowedSectionIds = new Set<string>();
 
     const { data: existingClients, error: existingClientsError } = await supabase
       .from('clients')
@@ -591,6 +978,20 @@ Deno.serve(async (req) => {
     }
 
     (existingClients ?? []).forEach((row) => allowedClientIds.add(String(row.id)));
+
+    const { data: existingSections, error: existingSectionsError } = await supabase
+      .from('sections')
+      .select('id')
+      .eq('entreprise_id', entrepriseId);
+
+    if (existingSectionsError) {
+      return jsonResponse(
+        { ok: false, error: existingSectionsError.message || 'Erreur chargement sections.' },
+        500
+      );
+    }
+
+    (existingSections ?? []).forEach((row) => allowedSectionIds.add(String(row.id)));
 
     for (const tableName of PUSH_ORDER) {
       const rows = Array.isArray(push[tableName]) ? push[tableName] : [];
@@ -615,8 +1016,26 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      if (tableName === 'ouvrages') {
+      if (tableName === 'metiers' && String(profilRow.role) !== 'A') {
+        continue;
+      }
+
+      if (tableName === 'fournisseurs') {
         scoped = scoped.filter((row) => String(row.entreprise_id) === entrepriseId);
+        scoped.forEach((row) => allowedFournisseurIds.add(String(row.id)));
+      } else if (tableName === 'metiers') {
+        scoped = scoped.filter((row) => String(row.entreprise_id) === entrepriseId);
+      } else if (tableName === 'sections') {
+        scoped = scoped.filter((row) => String(row.entreprise_id) === entrepriseId);
+        scoped.forEach((row) => allowedSectionIds.add(String(row.id)));
+      } else if (tableName === 'ouvrages') {
+        scoped = scoped.filter((row) => String(row.entreprise_id) === entrepriseId);
+        scoped = scoped.filter((row) => {
+          if (Number(row.ind_article) === 1 && row.fournisseur_id) {
+            return allowedFournisseurIds.has(String(row.fournisseur_id));
+          }
+          return true;
+        });
         scoped.forEach((row) => allowedOuvrageIds.add(String(row.id)));
       } else if (tableName === 'ouvrage_unites') {
         scoped = scoped.filter((row) => allowedOuvrageIds.has(String(row.ouvrage_id)));
@@ -629,8 +1048,18 @@ Deno.serve(async (req) => {
       } else if (tableName === 'releves') {
         scoped = scoped.filter((row) => allowedChantierIds.has(String(row.chantier_id)));
         scoped.forEach((row) => allowedReleveIds.add(String(row.id)));
+      } else if (tableName === 'section_releves') {
+        scoped = scoped.filter(
+          (row) =>
+            allowedReleveIds.has(String(row.releve_id)) &&
+            allowedSectionIds.has(String(row.section_id))
+        );
       } else if (tableName === 'ligne_releves') {
         scoped = scoped.filter((row) => allowedReleveIds.has(String(row.releve_id)));
+        scoped = scoped.filter((row) => {
+          if (!row.section_id) return true;
+          return allowedSectionIds.has(String(row.section_id));
+        });
       }
 
       const error = await upsertBatch(supabase, tableName, scoped);
@@ -687,11 +1116,13 @@ Deno.serve(async (req) => {
 
     const pushedCounts = {
       entreprises: Array.isArray(push.entreprises) ? push.entreprises.length : 0,
+      fournisseurs: Array.isArray(push.fournisseurs) ? push.fournisseurs.length : 0,
       ouvrages: Array.isArray(push.ouvrages) ? push.ouvrages.length : 0,
       ouvrage_unites: Array.isArray(push.ouvrage_unites) ? push.ouvrage_unites.length : 0,
       clients: Array.isArray(push.clients) ? push.clients.length : 0,
       chantiers: Array.isArray(push.chantiers) ? push.chantiers.length : 0,
       releves: Array.isArray(push.releves) ? push.releves.length : 0,
+      section_releves: Array.isArray(push.section_releves) ? push.section_releves.length : 0,
       ligne_releves: Array.isArray(push.ligne_releves) ? push.ligne_releves.length : 0,
     };
 

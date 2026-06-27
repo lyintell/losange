@@ -1,5 +1,5 @@
 import { assertSupabaseConfigured, isSupabaseConfigured, supabase } from './supabaseClient';
-import { ensureLocalDatabaseReady, tableHasColumn } from './localDb';
+import { ensureLocalDatabaseReady, runWithLocalDatabase, tableHasColumn } from './localDb';
 import {
   enforceEntrepriseExpiryLocal,
   forceLogoutInactiveEntreprise,
@@ -10,7 +10,7 @@ import {
   serializeRowsForCloudPush,
   upsertRows,
 } from './terrainSync';
-import { applyTerrainPullPayload, applyTerrainPullPayloadAccountOnly, mergeCatalogueFromPull } from './terrainSyncMerge';
+import { applyTerrainPullPayload, applyTerrainPullPayloadAccountOnly, mergeCatalogueFromPull, mergeTransactionalFromPull } from './terrainSyncMerge';
 import { reconcileEntrepriseTierLocal } from './entrepriseTierLocal';
 import {
   hydrateTerrainImagesFromPull,
@@ -19,8 +19,14 @@ import {
 import { hasInternetConnection } from '../utils/network';
 
 const ENTREPRISE_PUSH_TABLES = ['entreprises'];
-const CATALOGUE_PUSH_TABLES = ['ouvrages', 'ouvrage_unites'];
-const TRANSACTIONAL_TABLES = ['clients', 'chantiers', 'releves', 'ligne_releves'];
+const CATALOGUE_PUSH_TABLES = [
+  'metiers',
+  'sections',
+  'fournisseurs',
+  'ouvrages',
+  'ouvrage_unites',
+];
+const TRANSACTIONAL_TABLES = ['clients', 'chantiers', 'releves', 'section_releves', 'ligne_releves'];
 const PUSH_ORDER = [...ENTREPRISE_PUSH_TABLES, ...CATALOGUE_PUSH_TABLES, ...TRANSACTIONAL_TABLES];
 
 let syncInProgress = false;
@@ -117,6 +123,27 @@ const selectUnsyncedRows = async (db, tableName, entrepriseId) => {
     return db.getAllAsync(`SELECT * FROM entreprises WHERE id = ? AND _synced = 0;`, [entrepriseId]);
   }
 
+  if (tableName === 'metiers') {
+    return db.getAllAsync(
+      `SELECT * FROM metiers WHERE entreprise_id = ? AND _synced = 0;`,
+      [entrepriseId]
+    );
+  }
+
+  if (tableName === 'sections') {
+    return db.getAllAsync(
+      `SELECT * FROM sections WHERE entreprise_id = ? AND _synced = 0;`,
+      [entrepriseId]
+    );
+  }
+
+  if (tableName === 'fournisseurs') {
+    return db.getAllAsync(
+      `SELECT * FROM fournisseurs WHERE entreprise_id = ? AND _synced = 0;`,
+      [entrepriseId]
+    );
+  }
+
   if (tableName === 'ouvrages') {
     return db.getAllAsync(
       `SELECT * FROM ouvrages WHERE entreprise_id = ? AND _synced = 0;`,
@@ -163,6 +190,20 @@ const selectUnsyncedRows = async (db, tableName, entrepriseId) => {
       JOIN chantiers ON chantiers.id = releves.chantier_id
       JOIN clients ON clients.id = chantiers.client_id
       WHERE clients.entreprise_id = ? AND releves._synced = 0;
+      `,
+      [entrepriseId]
+    );
+  }
+
+  if (tableName === 'section_releves') {
+    return db.getAllAsync(
+      `
+      SELECT section_releves.*
+      FROM section_releves
+      JOIN releves ON releves.id = section_releves.releve_id
+      JOIN chantiers ON chantiers.id = releves.chantier_id
+      JOIN clients ON clients.id = chantiers.client_id
+      WHERE clients.entreprise_id = ? AND section_releves._synced = 0;
       `,
       [entrepriseId]
     );
@@ -277,6 +318,7 @@ export const collectPushPayload = async (entrepriseId) => {
 
 const markTableSynced = async (db, tableName, rows = []) => {
   if (!rows.length) return;
+
   const ids = rows.map((row) => row.id).filter(Boolean);
   if (!ids.length) return;
 
@@ -340,11 +382,14 @@ export const runTerrainSyncFreePushPull = async ({ skipPull = false } = {}) => {
 
   const emptyPush = {
     entreprises: [],
+    sections: [],
     ouvrages: [],
     ouvrage_unites: [],
+    fournisseurs: [],
     clients: [],
     chantiers: [],
     releves: [],
+    section_releves: [],
     ligne_releves: [],
   };
 
@@ -377,6 +422,14 @@ export const runTerrainSyncFreePushPull = async ({ skipPull = false } = {}) => {
         await reconcileEntrepriseTierLocal(pullFirst.data.pull.entreprise);
       }
       await applyTerrainPullPayloadAccountOnly(pullFirst.data.pull);
+      await mergeCatalogueFromPull({ unites: pullFirst.data.pull?.unites });
+      await mergeTransactionalFromPull(
+        {
+          metiers: pullFirst.data.pull?.metiers,
+          sections: pullFirst.data.pull?.sections,
+        },
+        { forceAll: true }
+      );
       const activeAfterPull = await assertEntrepriseStillActive(entrepriseId);
       if (activeAfterPull) return activeAfterPull;
     }
@@ -404,11 +457,12 @@ export const runTerrainSyncFreePushPull = async ({ skipPull = false } = {}) => {
       );
     }
 
-    const db = await ensureLocalDatabaseReady();
-    await db.withTransactionAsync(async () => {
-      for (const tableName of FREE_PUSH_ORDER) {
-        await markTableSynced(db, tableName, push[tableName] || []);
-      }
+    await runWithLocalDatabase(async (db) => {
+      await db.withTransactionAsync(async () => {
+        for (const tableName of FREE_PUSH_ORDER) {
+          await markTableSynced(db, tableName, push[tableName] || []);
+        }
+      });
     });
 
     if (!skipPull && data.pull) {
@@ -416,6 +470,11 @@ export const runTerrainSyncFreePushPull = async ({ skipPull = false } = {}) => {
         await reconcileEntrepriseTierLocal(data.pull.entreprise);
       }
       await applyTerrainPullPayloadAccountOnly(data.pull);
+      await mergeCatalogueFromPull({ unites: data.pull?.unites });
+      await mergeTransactionalFromPull(
+        { metiers: data.pull?.metiers, sections: data.pull?.sections },
+        { forceAll: true }
+      );
       const activeAfterPull = await assertEntrepriseStillActive(entrepriseId);
       if (activeAfterPull) return activeAfterPull;
     }
@@ -472,11 +531,14 @@ export const refreshCatalogueFromCloudLocal = async () => {
 
   const emptyPush = {
     entreprises: [],
+    sections: [],
     ouvrages: [],
     ouvrage_unites: [],
+    fournisseurs: [],
     clients: [],
     chantiers: [],
     releves: [],
+    section_releves: [],
     ligne_releves: [],
   };
 
@@ -564,11 +626,14 @@ export const runTerrainSyncPushPull = async ({ skipPull = false } = {}) => {
 
   const emptyPush = {
     entreprises: [],
+    sections: [],
     ouvrages: [],
     ouvrage_unites: [],
+    fournisseurs: [],
     clients: [],
     chantiers: [],
     releves: [],
+    section_releves: [],
     ligne_releves: [],
   };
 
@@ -634,11 +699,12 @@ export const runTerrainSyncPushPull = async ({ skipPull = false } = {}) => {
       );
     }
 
-    const db = await ensureLocalDatabaseReady();
-    await db.withTransactionAsync(async () => {
-      for (const tableName of PUSH_ORDER) {
-        await markTableSynced(db, tableName, push[tableName] || []);
-      }
+    await runWithLocalDatabase(async (db) => {
+      await db.withTransactionAsync(async () => {
+        for (const tableName of PUSH_ORDER) {
+          await markTableSynced(db, tableName, push[tableName] || []);
+        }
+      });
     });
     await clearPendingCloudDeletes(entrepriseId, deletePayload);
 
@@ -723,11 +789,14 @@ export const runTerrainSyncPullOnly = async () => {
         motDePasse: device.mot_de_passe,
         push: {
           entreprises: [],
+          sections: [],
+          fournisseurs: [],
           ouvrages: [],
           ouvrage_unites: [],
           clients: [],
           chantiers: [],
           releves: [],
+          section_releves: [],
           ligne_releves: [],
         },
       },

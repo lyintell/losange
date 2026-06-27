@@ -11,11 +11,13 @@ export default function PaveMetaButton({
   active = false,
   disabled = false,
   iconOnly = false,
+  tile = false,
   style,
 }) {
   const backgroundColor = active ? '#E8F4FD' : chantierColors.surface;
   const contentColor = active ? chantierColors.primary : chantierColors.text;
   const borderColor = active ? chantierColors.primary : chantierColors.border;
+  const showLabel = Boolean(children) && !iconOnly;
 
   return (
     <Pressable
@@ -24,6 +26,8 @@ export default function PaveMetaButton({
       style={({ pressed }) => [
         styles.button,
         iconOnly && styles.buttonIconOnly,
+        tile && styles.buttonTile,
+        showLabel && !tile && styles.buttonWithLabel,
         {
           backgroundColor,
           borderColor,
@@ -32,12 +36,15 @@ export default function PaveMetaButton({
         style,
       ]}
     >
-      <MaterialCommunityIcons name={icon} size={22} color={contentColor} />
-      {iconOnly ? null : (
-        <Text numberOfLines={1} style={[styles.label, { color: contentColor }]}>
+      <MaterialCommunityIcons name={icon} size={tile ? 24 : 22} color={contentColor} />
+      {showLabel ? (
+        <Text
+          numberOfLines={1}
+          style={[tile ? styles.tileLabel : styles.label, { color: contentColor }]}
+        >
           {children}
         </Text>
-      )}
+      ) : null}
     </Pressable>
   );
 }
@@ -56,6 +63,21 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     gap: 8,
   },
+  buttonWithLabel: {
+    maxWidth: 220,
+  },
+  buttonTile: {
+    flex: 1,
+    minWidth: 0,
+    maxWidth: '100%',
+    minHeight: 64,
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+    gap: 4,
+  },
   buttonIconOnly: {
     maxWidth: 58,
     minWidth: 58,
@@ -69,5 +91,12 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '700',
     textAlign: 'left',
+  },
+  tileLabel: {
+    fontSize: 11,
+    lineHeight: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+    letterSpacing: 0.2,
   },
 });

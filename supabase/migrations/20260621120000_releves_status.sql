@@ -1,0 +1,2 @@
+ALTER TABLE releves
+  ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'E' CHECK (status IN ('E', 'V', 'N'));

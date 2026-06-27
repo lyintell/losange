@@ -5,22 +5,28 @@ const TABLE_UPSERT_ORDER = [
   'entreprises',
   'profils',
   'metiers',
+  'sections',
   'unites',
+  'fournisseurs',
   'ouvrages',
   'ouvrage_unites',
   'clients',
   'chantiers',
   'releves',
+  'section_releves',
   'ligne_releves',
 ];
 
 const CLEAR_TABLES_ORDER = [
   'ligne_releves',
+  'section_releves',
   'releves',
   'chantiers',
   'clients',
   'ouvrage_unites',
   'ouvrages',
+  'fournisseurs',
+  'sections',
   'profils',
   'entreprises',
   'terrain_session',
@@ -40,6 +46,8 @@ const TABLE_COLUMNS = {
     'ind_pro',
     'ind_active',
     'ind_tva',
+    'ind_admin_connecte_mobile',
+    'ind_metiers_preselectionnes',
     'date_actif_jusqua',
     'pro_activated_le',
     'pro_downgraded_le',
@@ -61,7 +69,29 @@ const TABLE_COLUMNS = {
     'mis_a_jour_le',
     '_synced',
   ],
-  metiers: ['id', 'nom', 'abbrev', 'icon', 'cree_le', 'mis_a_jour_le'],
+  metiers: [
+    'id',
+    'nom',
+    'abbrev',
+    'icon',
+    'entreprise_id',
+    'ordre',
+    'ind_actif',
+    'ind_default',
+    'supprime_le',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
+  sections: [
+    'id',
+    'nom',
+    'entreprise_id',
+    'supprime_le',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
   unites: [
     'id',
     'formule',
@@ -71,12 +101,38 @@ const TABLE_COLUMNS = {
     'cree_le',
     'mis_a_jour_le',
   ],
-  ouvrages: ['id', 'metier_id', 'entreprise_id', 'nom', 'supprime_le', 'cree_le', 'mis_a_jour_le', '_synced'],
+  ouvrages: [
+    'id',
+    'metier_id',
+    'entreprise_id',
+    'nom',
+    'ind_article',
+    'fournisseur_id',
+    'photo',
+    'supprime_le',
+    'ind_actif',
+    'ordre',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
   ouvrage_unites: [
     'id',
     'ouvrage_id',
     'unite_id',
     'prix_unitaire',
+    'supprime_le',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
+  fournisseurs: [
+    'id',
+    'metier_id',
+    'entreprise_id',
+    'nom',
+    'telephone_1',
+    'telephone_2',
     'supprime_le',
     'cree_le',
     'mis_a_jour_le',
@@ -118,7 +174,20 @@ const TABLE_COLUMNS = {
     'total_ht_facture',
     'tva_facture',
     'total_ttc_facture',
+    'remise',
+    'ind_tva',
+    'status',
     'note',
+    'supprime_le',
+    'cree_le',
+    'mis_a_jour_le',
+    '_synced',
+  ],
+  section_releves: [
+    'id',
+    'section_id',
+    'releve_id',
+    'ordre',
     'supprime_le',
     'cree_le',
     'mis_a_jour_le',
@@ -137,6 +206,8 @@ const TABLE_COLUMNS = {
     'montant',
     'note',
     'photo',
+    'section_id',
+    'ordre',
     'ind_complete',
     'supprime_le',
     'cree_le',
@@ -152,6 +223,11 @@ const FLAG_COLUMNS = new Set([
   '_synced',
   'ind_dimension',
   'ind_complete',
+  'ind_article',
+  'ind_actif',
+  'ind_default',
+  'ind_admin_connecte_mobile',
+  'ind_metiers_preselectionnes',
 ]);
 
 const coerceFlag = (value) => {
@@ -172,7 +248,14 @@ const normalizeRow = (tableName, row) => {
   const columns = TABLE_COLUMNS[tableName];
   const normalized = {};
   columns.forEach((column) => {
-    if (!Object.prototype.hasOwnProperty.call(row, column)) return;
+    if (!Object.prototype.hasOwnProperty.call(row, column)) {
+      if (tableName === 'releves' && column === 'ind_tva') {
+        normalized[column] = 0;
+      } else if (tableName === 'releves' && column === 'status') {
+        normalized[column] = 'E';
+      }
+      return;
+    }
     const value = row[column];
     if (FLAG_COLUMNS.has(column)) {
       normalized[column] = coerceFlag(value);
@@ -204,17 +287,23 @@ export const upsertRows = async (db, tableName, rows = []) => {
 
   const columns = TABLE_COLUMNS[tableName];
   const placeholders = columns.map(() => '?').join(', ');
-  const updateClause = columns
-    .filter((column) => column !== 'id')
+  const conflictTarget = '(id)';
+  const updateColumns = columns.filter((column) => column !== 'id');
+  const updateClause = updateColumns
     .map((column) => `${column} = excluded.${column}`)
     .join(', ');
 
   for (const rawRow of rows) {
     const row = normalizeRow(tableName, rawRow);
-    const values = columns.map((column) => (row[column] === undefined ? null : row[column]));
+    const values = columns.map((column) => {
+      if (row[column] !== undefined) return row[column];
+      if (tableName === 'releves' && column === 'ind_tva') return 0;
+      if (tableName === 'releves' && column === 'status') return 'E';
+      return null;
+    });
     await db.runAsync(
       `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders})
-       ON CONFLICT(id) DO UPDATE SET ${updateClause};`,
+       ON CONFLICT${conflictTarget} DO UPDATE SET ${updateClause};`,
       values
     );
   }
@@ -231,6 +320,7 @@ export const syncTerrainBootstrapLocal = async (payload) => {
         unites: payload?.unites,
         ouvrages: payload?.ouvrages,
         ouvrage_unites: payload?.ouvrage_unites,
+        fournisseurs: payload?.fournisseurs,
         clients: payload?.clients,
         chantiers: payload?.chantiers,
         releves: payload?.releves,

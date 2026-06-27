@@ -1,8 +1,19 @@
 import { ensureLocalDatabaseReady } from './localDb';
 import { upsertRows } from './terrainSync';
 
-const TRANSACTIONAL_TABLES = ['ouvrages', 'ouvrage_unites', 'clients', 'chantiers', 'releves', 'ligne_releves'];
-const CATALOGUE_TABLES = ['metiers', 'unites'];
+const TRANSACTIONAL_TABLES = [
+  'metiers',
+  'sections',
+  'fournisseurs',
+  'ouvrages',
+  'ouvrage_unites',
+  'clients',
+  'chantiers',
+  'releves',
+  'section_releves',
+  'ligne_releves',
+];
+const CATALOGUE_TABLES = ['unites'];
 
 export const parseSyncTimestamp = (value) => {
   if (!value) return 0;
@@ -17,6 +28,10 @@ export const shouldApplyRemoteRow = (localRow, remoteRow) => {
   const localPendingDelete = Boolean(localRow.supprime_le) && Number(localRow._synced) === 0;
   if (localPendingDelete && !remoteRow.supprime_le) {
     return false;
+  }
+
+  if (remoteRow.supprime_le && !localRow.supprime_le) {
+    return parseSyncTimestamp(remoteRow.mis_a_jour_le) >= parseSyncTimestamp(localRow.mis_a_jour_le);
   }
 
   const remoteTs = parseSyncTimestamp(remoteRow.mis_a_jour_le);
@@ -35,9 +50,8 @@ export const mergeCatalogueFromPull = async (pull = {}) => {
     for (const tableName of CATALOGUE_TABLES) {
       const key = tableName === 'ouvrage_unites' ? 'ouvrage_unites' : tableName;
       const rows = Array.isArray(pull[key]) ? pull[key] : [];
-      if (rows.length) {
-        await upsertRows(db, tableName, rows);
-      }
+      if (!rows.length) continue;
+      await upsertRows(db, tableName, rows);
     }
   });
 };
@@ -59,6 +73,7 @@ export const mergeTransactionalFromPull = async (pull = {}, { forceAll = false }
         const localRow = await db.getFirstAsync(`SELECT * FROM ${tableName} WHERE id = ?;`, [
           remoteRow.id,
         ]);
+
         if (shouldApplyRemoteRow(localRow, remoteRow)) {
           toApply.push(remoteRow);
         }

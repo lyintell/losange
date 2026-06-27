@@ -97,6 +97,54 @@ const recordProfilFirstLogin = async (
   return data ?? { ...profil, date_premier_login: now, mis_a_jour_le: now };
 };
 
+const recordAdminMobileLogin = async (
+  supabase: ReturnType<typeof createClient>,
+  entreprise: Record<string, unknown>,
+  profil: Record<string, unknown>,
+  source: string
+) => {
+  if (source !== 'mobile') return entreprise;
+  if (String(profil.role || '').toUpperCase() !== 'A') return entreprise;
+  if (Number(entreprise.ind_admin_connecte_mobile) === 1) return entreprise;
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('entreprises')
+    .update({ ind_admin_connecte_mobile: 1, mis_a_jour_le: now })
+    .eq('id', String(entreprise.id))
+    .eq('ind_admin_connecte_mobile', 0)
+    .select('*')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message || 'Impossible d enregistrer la connexion admin mobile.');
+  }
+
+  return (data ?? { ...entreprise, ind_admin_connecte_mobile: 1, mis_a_jour_le: now }) as Record<
+    string,
+    unknown
+  >;
+};
+
+const fetchMetiersPullData = async (
+  supabase: ReturnType<typeof createClient>,
+  entrepriseId: string
+) => {
+  const { data: metiers, error } = await supabase
+    .from('metiers')
+    .select('*')
+    .eq('entreprise_id', entrepriseId)
+    .is('supprime_le', null)
+    .order('ordre', { ascending: true })
+    .order('nom', { ascending: true });
+
+  if (error) {
+    throw new Error(error.message || 'Erreur chargement métiers.');
+  }
+
+  return metiers ?? [];
+};
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -117,6 +165,7 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const identifiant = normalizeIdentifiant(String(body?.identifiant ?? ''));
     const motDePasse = String(body?.motDePasse ?? '');
+    const source = String(body?.source ?? 'web').toLowerCase();
 
     if (!identifiant || !motDePasse) {
       return jsonResponse({ ok: false, error: 'Identifiant ou mot de passe incorrect.' });
@@ -154,11 +203,18 @@ Deno.serve(async (req) => {
     const profilWithFirstLogin = await recordProfilFirstLogin(supabase, profilRow as Record<string, unknown>);
     profilRow = { ...profilRow, ...profilWithFirstLogin };
 
+    entreprise = await recordAdminMobileLogin(
+      supabase,
+      entreprise as Record<string, unknown>,
+      profilRow as Record<string, unknown>,
+      source
+    );
+
     const entrepriseId = String(entreprise.id);
     const isProAccount = Number(entreprise.ind_pro) === 1;
 
-    const [metiersResult, unitesResult, profilsResult] = await Promise.all([
-      supabase.from('metiers').select('*'),
+    const [metiersPull, unitesResult, profilsResult] = await Promise.all([
+      fetchMetiersPullData(supabase, entrepriseId),
       supabase.from('unites').select('*'),
       supabase
         .from('profils')
@@ -166,7 +222,7 @@ Deno.serve(async (req) => {
         .eq('entreprise_id', entrepriseId),
     ]);
 
-    const queryError = metiersResult.error || unitesResult.error || profilsResult.error;
+    const queryError = unitesResult.error || profilsResult.error;
 
     if (queryError) {
       return jsonResponse({ ok: false, error: queryError.message || 'Erreur chargement des donnees.' }, 500);
@@ -179,10 +235,11 @@ Deno.serve(async (req) => {
           entreprise,
           profil: stripProfil(profilRow as Record<string, unknown>),
           profils: profilsResult.data ?? [],
-          metiers: metiersResult.data ?? [],
+          metiers: metiersPull,
           unites: unitesResult.data ?? [],
           ouvrages: [],
           ouvrage_unites: [],
+          fournisseurs: [],
           clients: [],
           chantiers: [],
           releves: [],
@@ -191,19 +248,28 @@ Deno.serve(async (req) => {
       });
     }
 
-    const [ouvragesResult, clientsResult] = await Promise.all([
-      supabase.from('ouvrages').select('*').eq('entreprise_id', entrepriseId).is('supprime_le', null),
-      supabase.from('clients').select('*').eq('entreprise_id', entrepriseId).is('supprime_le', null),
+    const [fournisseursResult, ouvragesResult, clientsResult] = await Promise.all([
+      supabase.from('fournisseurs').select('*').eq('entreprise_id', entrepriseId),
+      supabase.from('ouvrages').select('*').eq('entreprise_id', entrepriseId),
+      supabase.from('clients').select('*').eq('entreprise_id', entrepriseId),
     ]);
 
-    if (ouvragesResult.error || clientsResult.error) {
+    if (fournisseursResult.error || ouvragesResult.error || clientsResult.error) {
       return jsonResponse(
-        { ok: false, error: ouvragesResult.error?.message || clientsResult.error?.message || 'Erreur chargement.' },
+        {
+          ok: false,
+          error:
+            fournisseursResult.error?.message ||
+            ouvragesResult.error?.message ||
+            clientsResult.error?.message ||
+            'Erreur chargement.',
+        },
         500
       );
     }
 
     const proActivatedLe = entreprise.pro_activated_le as string | null | undefined;
+    let fournisseurs = filterTransactionalRowsForProPull(fournisseursResult.data ?? [], proActivatedLe);
     let ouvrages = filterTransactionalRowsForProPull(ouvragesResult.data ?? [], proActivatedLe);
     let clients = filterTransactionalRowsForProPull(clientsResult.data ?? [], proActivatedLe);
     const ouvrageIds = ouvrages.map((item) => item.id);
@@ -214,8 +280,7 @@ Deno.serve(async (req) => {
       const { data, error } = await supabase
         .from('ouvrage_unites')
         .select('*')
-        .in('ouvrage_id', ouvrageIds)
-        .is('supprime_le', null);
+        .in('ouvrage_id', ouvrageIds);
       if (error) {
         return jsonResponse({ ok: false, error: error.message || 'Erreur chargement ouvrage_unites.' }, 500);
       }
@@ -227,8 +292,7 @@ Deno.serve(async (req) => {
       const { data, error } = await supabase
         .from('chantiers')
         .select('*')
-        .in('client_id', clientIds)
-        .is('supprime_le', null);
+        .in('client_id', clientIds);
       if (error) {
         return jsonResponse({ ok: false, error: error.message || 'Erreur chargement chantiers.' }, 500);
       }
@@ -241,8 +305,7 @@ Deno.serve(async (req) => {
       const { data, error } = await supabase
         .from('releves')
         .select('*')
-        .in('chantier_id', chantierIds)
-        .is('supprime_le', null);
+        .in('chantier_id', chantierIds);
       if (error) {
         return jsonResponse({ ok: false, error: error.message || 'Erreur chargement releves.' }, 500);
       }
@@ -255,8 +318,7 @@ Deno.serve(async (req) => {
       const { data, error } = await supabase
         .from('ligne_releves')
         .select('*')
-        .in('releve_id', releveIds)
-        .is('supprime_le', null);
+        .in('releve_id', releveIds);
       if (error) {
         return jsonResponse({ ok: false, error: error.message || 'Erreur chargement ligne_releves.' }, 500);
       }
@@ -269,8 +331,9 @@ Deno.serve(async (req) => {
         entreprise,
         profil: stripProfil(profilRow as Record<string, unknown>),
         profils: profilsResult.data ?? [],
-        metiers: metiersResult.data ?? [],
+        metiers: metiersPull,
         unites: unitesResult.data ?? [],
+        fournisseurs,
         ouvrages,
         ouvrage_unites: ouvrageUnites,
         clients,

@@ -70,21 +70,57 @@ const ADMIN_TABLE_KEYS = [
   'clients',
   'chantiers',
   'metiers',
+  'sections',
+  'fournisseurs',
   'ouvrages',
   'unites',
   'ouvrage_unites',
   'releves',
+  'section_releves',
   'ligne_releves',
 ] as const;
 
 const SOFT_DELETE_TABLES = new Set([
   'clients',
   'chantiers',
+  'metiers',
+  'sections',
   'releves',
+  'section_releves',
   'ligne_releves',
+  'fournisseurs',
   'ouvrages',
   'ouvrage_unites',
 ]);
+
+const COMPOSITE_KEY_TABLES: Record<string, string[]> = {};
+
+const parseCompositeRecordId = (tableKey: string, recordId: string) => {
+  const parts = COMPOSITE_KEY_TABLES[tableKey];
+  if (!parts) return null;
+  const values = String(recordId).split('::');
+  if (values.length !== parts.length || values.some((value) => !value)) {
+    throw new Error(`Identifiant ${tableKey} invalide.`);
+  }
+  return Object.fromEntries(parts.map((part, index) => [part, values[index]]));
+};
+
+const applyCompositeFilters = (
+  // deno-lint-ignore no-explicit-any
+  query: any,
+  tableKey: string,
+  recordId: string
+) => {
+  const composite = parseCompositeRecordId(tableKey, recordId);
+  if (!composite) {
+    return query.eq('id', recordId);
+  }
+  let scoped = query;
+  for (const [column, value] of Object.entries(composite)) {
+    scoped = scoped.eq(column, value);
+  }
+  return scoped;
+};
 
 const assertTableKey = (tableKey: string) => {
   if (!ADMIN_TABLE_KEYS.includes(tableKey as (typeof ADMIN_TABLE_KEYS)[number])) {
@@ -93,6 +129,25 @@ const assertTableKey = (tableKey: string) => {
 };
 
 const TIER_MARKER_FIELDS = ['pro_activated_le', 'pro_downgraded_le'] as const;
+const DEFAULT_SECTION_NOM = 'Pas de section';
+
+const createDefaultSectionForEntreprise = async (
+  supabase: ReturnType<typeof createClient>,
+  entrepriseId: string
+) => {
+  const now = new Date().toISOString();
+  const { error } = await supabase.from('sections').insert({
+    id: crypto.randomUUID(),
+    nom: DEFAULT_SECTION_NOM,
+    entreprise_id: entrepriseId,
+    cree_le: now,
+    mis_a_jour_le: now,
+    _synced: 1,
+  });
+  if (error) {
+    throw new Error(error.message || 'Erreur creation section par defaut.');
+  }
+};
 
 const normalizeRecordPayload = (record: Record<string, unknown>) => {
   const payload = { ...record };
@@ -160,6 +215,17 @@ Deno.serve(async (req) => {
       if (error) {
         return jsonResponse({ ok: false, error: error.message || 'Erreur insertion.' }, 500);
       }
+
+      if (tableKey === 'entreprises' && data?.id) {
+        try {
+          await createDefaultSectionForEntreprise(supabase, String(data.id));
+        } catch (sectionError) {
+          const message =
+            sectionError instanceof Error ? sectionError.message : 'Erreur section par defaut.';
+          return jsonResponse({ ok: false, error: message }, 500);
+        }
+      }
+
       return jsonResponse({ ok: true, record: data });
     }
 
@@ -200,10 +266,11 @@ Deno.serve(async (req) => {
         }
       }
 
-      const { data, error } = await supabase
-        .from(tableKey)
-        .update(record)
-        .eq('id', recordId)
+      const { data, error } = await applyCompositeFilters(
+        supabase.from(tableKey).update(record),
+        tableKey,
+        recordId
+      )
         .select('*')
         .single();
       if (error) {
@@ -332,17 +399,48 @@ Deno.serve(async (req) => {
           }
         }
 
-        const { error } = await supabase
-          .from(tableKey)
-          .update({ supprime_le: now, mis_a_jour_le: now, _synced: 1 })
-          .eq('id', recordId);
+        if (tableKey === 'fournisseurs') {
+          const { data: articleOuvrages, error: articleOuvragesError } = await supabase
+            .from('ouvrages')
+            .select('id')
+            .eq('fournisseur_id', recordId)
+            .eq('ind_article', 1);
+          if (articleOuvragesError) {
+            return jsonResponse({ ok: false, error: articleOuvragesError.message || 'Erreur suppression.' }, 500);
+          }
+
+          const articleOuvrageIds = (articleOuvrages ?? []).map((row) => String(row.id));
+          if (articleOuvrageIds.length > 0) {
+            const { error: ouvrageUniteError } = await supabase
+              .from('ouvrage_unites')
+              .update({ supprime_le: now, mis_a_jour_le: now, _synced: 1 })
+              .in('ouvrage_id', articleOuvrageIds);
+            if (ouvrageUniteError) {
+              return jsonResponse({ ok: false, error: ouvrageUniteError.message || 'Erreur suppression.' }, 500);
+            }
+
+            const { error: ouvrageError } = await supabase
+              .from('ouvrages')
+              .update({ supprime_le: now, mis_a_jour_le: now, _synced: 1 })
+              .in('id', articleOuvrageIds);
+            if (ouvrageError) {
+              return jsonResponse({ ok: false, error: ouvrageError.message || 'Erreur suppression.' }, 500);
+            }
+          }
+        }
+
+        const { error } = await applyCompositeFilters(
+          supabase.from(tableKey).update({ supprime_le: now, mis_a_jour_le: now, _synced: 1 }),
+          tableKey,
+          recordId
+        );
         if (error) {
           return jsonResponse({ ok: false, error: error.message || 'Erreur suppression.' }, 500);
         }
         return jsonResponse({ ok: true, softDeleted: true });
       }
 
-      const { error } = await supabase.from(tableKey).delete().eq('id', recordId);
+      const { error } = await applyCompositeFilters(supabase.from(tableKey).delete(), tableKey, recordId);
       if (error) {
         return jsonResponse({ ok: false, error: error.message || 'Erreur suppression.' }, 500);
       }

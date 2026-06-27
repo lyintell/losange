@@ -5,6 +5,7 @@ import AdminImageFileField, {
   AdminImagePreview,
   uploadChantierPhotoAdmin,
   uploadEntrepriseLogoAdmin,
+  uploadOuvragePhotoAdmin,
   uploadLignePhotoAdmin,
 } from '../../components/terrain/AdminImageFileField';
 import { CHANTIER_PHOTO_SLOTS } from '../../db/terrainImageStorage';
@@ -35,6 +36,13 @@ const FIELD_LABELS = {
   pro_downgraded_le: 'Pro désactivé le',
   ind_active: 'Compte actif',
   ind_tva: 'Afficher TVA et TTC sur le devis',
+  ind_actif: 'Actif (prise de cotes)',
+  ind_default: 'Métier catalogue par défaut',
+  ind_admin_connecte_mobile: 'Admin connecté sur mobile',
+  ind_metiers_preselectionnes: 'Métiers présélectionnés (onboarding)',
+  ordre: "Ordre d'affichage",
+  status: 'Statut relevé',
+  ind_complete: 'Ligne complète',
   date_actif_jusqua: "Actif jusqu'au (AAAA-MM-JJ)",
   date_premier_login: 'Premier login terrain',
   date_facture: 'Date facture (AAAA-MM-JJ)',
@@ -59,10 +67,13 @@ const TABLE_GROUPS = [
       { key: 'clients', label: 'Clients' },
       { key: 'chantiers', label: 'Chantiers' },
       { key: 'metiers', label: 'Métiers' },
-      { key: 'ouvrages', label: 'Ouvrages' },
+      { key: 'sections', label: 'Sections' },
+      { key: 'fournisseurs', label: 'Fournisseurs' },
+      { key: 'ouvrages', label: 'Ouvrages / Articles' },
       { key: 'unites', label: 'Unités' },
       { key: 'ouvrage_unites', label: 'Ouvrage unités' },
       { key: 'releves', label: 'Relevés' },
+      { key: 'section_releves', label: 'Section relevés' },
       { key: 'ligne_releves', label: 'Ligne relevés' },
     ],
   },
@@ -93,6 +104,20 @@ const TABLE_SCHEMAS = {
       type: 'TEXT',
       section: 'Devis et validité',
       placeholder: 'AAAA-MM-JJ',
+    },
+    {
+      name: 'ind_admin_connecte_mobile',
+      type: 'INTEGER',
+      isBinaryToggle: true,
+      defaultValue: 0,
+      section: 'Onboarding',
+    },
+    {
+      name: 'ind_metiers_preselectionnes',
+      type: 'INTEGER',
+      isBinaryToggle: true,
+      defaultValue: 0,
+      section: 'Onboarding',
     },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
@@ -163,14 +188,53 @@ const TABLE_SCHEMAS = {
     { name: 'nom', type: 'TEXT', required: true },
     { name: 'abbrev', type: 'TEXT' },
     { name: 'icon', type: 'TEXT' },
+    { name: 'entreprise_id', type: 'TEXT', required: true, fkTable: 'entreprises' },
+    { name: 'ordre', type: 'INTEGER', defaultValue: 0 },
+    { name: 'ind_actif', type: 'INTEGER', isBinaryToggle: true, defaultValue: 1 },
+    { name: 'ind_default', type: 'INTEGER', isBinaryToggle: true, defaultValue: 0 },
+    { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
+    { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
+  ],
+  sections: [
+    { name: 'id', type: 'TEXT', required: true, isId: true },
+    { name: 'nom', type: 'TEXT', required: true },
+    { name: 'entreprise_id', type: 'TEXT', required: true, fkTable: 'entreprises' },
+    { name: 'supprime_le', type: 'TEXT' },
+    { name: 'cree_le', type: 'TEXT' },
+    { name: 'mis_a_jour_le', type: 'TEXT' },
+    { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
   ],
   ouvrages: [
     { name: 'id', type: 'TEXT', required: true, isId: true },
     { name: 'metier_id', type: 'TEXT', required: true, fkTable: 'metiers' },
     { name: 'entreprise_id', type: 'TEXT', required: true, fkTable: 'entreprises' },
     { name: 'nom', type: 'TEXT', required: true },
+    {
+      name: 'ind_article',
+      type: 'INTEGER',
+      required: true,
+      isBinaryToggle: true,
+      defaultValue: 0,
+      section: 'Type catalogue',
+    },
+    { name: 'fournisseur_id', type: 'TEXT', fkTable: 'fournisseurs', section: 'Type catalogue' },
+    { name: 'photo', type: 'TEXT', isImageFile: true, section: 'Type catalogue' },
+    { name: 'ind_actif', type: 'INTEGER', isBinaryToggle: true, defaultValue: 1, section: 'Catalogue' },
+    { name: 'ordre', type: 'INTEGER', defaultValue: 0, section: 'Catalogue' },
+    { name: 'supprime_le', type: 'TEXT' },
+    { name: 'cree_le', type: 'TEXT' },
+    { name: 'mis_a_jour_le', type: 'TEXT' },
+    { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
+  ],
+  fournisseurs: [
+    { name: 'id', type: 'TEXT', required: true, isId: true },
+    { name: 'metier_id', type: 'TEXT', required: true, fkTable: 'metiers' },
+    { name: 'entreprise_id', type: 'TEXT', required: true, fkTable: 'entreprises' },
+    { name: 'nom', type: 'TEXT', required: true },
+    { name: 'telephone_1', type: 'TEXT' },
+    { name: 'telephone_2', type: 'TEXT' },
     { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
@@ -203,7 +267,30 @@ const TABLE_SCHEMAS = {
     { name: 'total_ht_facture', type: 'REAL' },
     { name: 'tva_facture', type: 'REAL' },
     { name: 'total_ttc_facture', type: 'REAL' },
+    { name: 'remise', type: 'REAL', defaultValue: 0 },
+    { name: 'ind_tva', type: 'INTEGER', isBinaryToggle: true, defaultValue: 0 },
+    {
+      name: 'status',
+      type: 'TEXT',
+      required: true,
+      enumOptions: [
+        { value: 'E', label: 'E - en attente' },
+        { value: 'V', label: 'V - validé' },
+        { value: 'N', label: 'N - non validé' },
+      ],
+      defaultValue: 'E',
+    },
     { name: 'note', type: 'TEXT', isMultiline: true },
+    { name: 'supprime_le', type: 'TEXT' },
+    { name: 'cree_le', type: 'TEXT' },
+    { name: 'mis_a_jour_le', type: 'TEXT' },
+    { name: '_synced', type: 'INTEGER', isSynced: true, defaultValue: 0 },
+  ],
+  section_releves: [
+    { name: 'id', type: 'TEXT', required: true, isId: true },
+    { name: 'section_id', type: 'TEXT', required: true, fkTable: 'sections' },
+    { name: 'releve_id', type: 'TEXT', required: true, fkTable: 'releves' },
+    { name: 'ordre', type: 'INTEGER', required: true, defaultValue: 0 },
     { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
@@ -222,7 +309,9 @@ const TABLE_SCHEMAS = {
     { name: 'montant', type: 'REAL', required: true, isAutoComputed: true },
     { name: 'note', type: 'TEXT', isMultiline: true },
     { name: 'photo', type: 'TEXT', isImageFile: true },
-    { name: 'ind_complete', type: 'INTEGER', defaultValue: 0 },
+    { name: 'section_id', type: 'TEXT', fkTable: 'sections' },
+    { name: 'ordre', type: 'INTEGER', required: true, defaultValue: 0 },
+    { name: 'ind_complete', type: 'INTEGER', isBinaryToggle: true, defaultValue: 0 },
     { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
@@ -231,6 +320,16 @@ const TABLE_SCHEMAS = {
 };
 
 const ALL_TABLES = TABLE_GROUPS.flatMap((group) => group.tables);
+
+const COMPOSITE_KEY_TABLES = {};
+
+const getRecordId = (tableKey, record) => {
+  const keyParts = COMPOSITE_KEY_TABLES[tableKey];
+  if (keyParts) {
+    return keyParts.map((part) => String(record?.[part] ?? '')).join('::');
+  }
+  return String(record?.id ?? '');
+};
 
 const buildInitialRecords = () => {
   const records = {};
@@ -288,6 +387,32 @@ const getListLabel = (tableKey, record, recordsByTable) => {
     return `${ouvrageNom} / ${uniteNom}`;
   }
 
+  if (tableKey === 'metiers') {
+    const entreprise = getById(recordsByTable.entreprises, record.entreprise_id);
+    const entrepriseNom = entreprise?.nom || 'Sans entreprise';
+    const metierNom = record.nom || 'Sans titre';
+    return `${metierNom} (${entrepriseNom})`;
+  }
+
+  if (tableKey === 'sections') {
+    const entreprise = getById(recordsByTable.entreprises, record.entreprise_id);
+    const entrepriseNom = entreprise?.nom || 'Sans entreprise';
+    const sectionNom = record.nom || 'Sans titre';
+    return `${sectionNom} (${entrepriseNom})`;
+  }
+
+  if (tableKey === 'section_releves') {
+    const section = getById(recordsByTable.sections, record.section_id);
+    const releve = getById(recordsByTable.releves, record.releve_id);
+    const chantier = releve ? getById(recordsByTable.chantiers, releve.chantier_id) : null;
+    const client = chantier ? getById(recordsByTable.clients, chantier.client_id) : null;
+    const sectionNom = section?.nom || 'Section inconnue';
+    const clientNom = client?.nom_complet || 'Client inconnu';
+    const chantierNom = chantier?.nom || 'Chantier inconnu';
+    const ordreLabel = Number.isFinite(Number(record.ordre)) ? `#${Number(record.ordre) + 1} ` : '';
+    return `${ordreLabel}${sectionNom} / ${clientNom} / ${chantierNom}`;
+  }
+
   if (tableKey === 'releves') {
     const chantier = getById(recordsByTable.chantiers, record.chantier_id);
     const client = chantier ? getById(recordsByTable.clients, chantier.client_id) : null;
@@ -310,7 +435,12 @@ const getListLabel = (tableKey, record, recordsByTable) => {
     const chantierNom = chantier?.nom || 'Chantier inconnu';
     const ouvrageNom = ouvrage?.nom || 'Ouvrage inconnu';
     const uniteNom = unite?.nom_unite || 'Unité inconnue';
-    return `${clientNom} / ${chantierNom} / ${ouvrageNom} / ${uniteNom}`;
+    const section = record.section_id
+      ? getById(recordsByTable.sections, record.section_id)
+      : null;
+    const sectionNom = section?.nom || null;
+    const base = `${clientNom} / ${chantierNom} / ${ouvrageNom} / ${uniteNom}`;
+    return sectionNom ? `${sectionNom} · ${base}` : base;
   }
 
   return getPrimaryText(record);
@@ -367,7 +497,7 @@ const formatDetailValue = (field, value, recordsByTable) => {
   return String(value);
 };
 
-export default function AdminScreen({ onLogout }) {
+export default function MasterScreen({ onLogout }) {
   const [recordsByTable, setRecordsByTable] = useState(() => buildInitialRecords());
   const [selectedTable, setSelectedTable] = useState(ALL_TABLES[0].key);
   const [selectedItemId, setSelectedItemId] = useState(null);
@@ -385,7 +515,10 @@ export default function AdminScreen({ onLogout }) {
     selectedTable === 'entreprises' &&
     String(formValues.ind_pro ?? selectedItem?.ind_pro ?? '0') !== '1';
 
-  const items = useMemo(() => recordsByTable[selectedTable] || [], [recordsByTable, selectedTable]);
+  const items = useMemo(
+    () => (recordsByTable[selectedTable] || []).map((row) => ({ ...row, id: getRecordId(selectedTable, row) })),
+    [recordsByTable, selectedTable]
+  );
   const selectedItem = useMemo(() => items.find((item) => item.id === selectedItemId) || items[0] || null, [items, selectedItemId]);
 
   const resolveChantierEntrepriseId = (clientId) => {
@@ -402,6 +535,10 @@ export default function AdminScreen({ onLogout }) {
       entrepriseId: client?.entreprise_id || null,
     };
   };
+
+  const resolveOuvragePhotoContext = (entrepriseId) => ({
+    entrepriseId: entrepriseId || null,
+  });
 
   const renderImageFormField = (field) => {
     const fieldLabel = getFieldLabel(field);
@@ -480,6 +617,30 @@ export default function AdminScreen({ onLogout }) {
       );
     }
 
+    if (selectedTable === 'ouvrages' && field.name === 'photo') {
+      const ouvrageId = formValues.id || selectedItem?.id;
+      const { entrepriseId } = resolveOuvragePhotoContext(formValues.entreprise_id);
+      const missingContext = !ouvrageId || !entrepriseId;
+      return (
+        <AdminImageFileField
+          label={fieldLabel}
+          storageKey={storageKey || null}
+          disabled={missingContext}
+          hint={
+            missingContext
+              ? "Sélectionnez une entreprise et conservez l'identifiant ouvrage."
+              : imageHint
+          }
+          onUploaded={async (file) => {
+            const uploadedKey = await uploadOuvragePhotoAdmin(entrepriseId, ouvrageId, file);
+            setFormValues((prev) => ({ ...prev, photo: uploadedKey }));
+            return uploadedKey;
+          }}
+          onClear={() => setFormValues((prev) => ({ ...prev, photo: '' }))}
+        />
+      );
+    }
+
     return (
       <View style={styles.fieldWrapper}>
         <Text style={styles.fieldHint}>
@@ -525,7 +686,8 @@ export default function AdminScreen({ onLogout }) {
 
   const handleTableSelect = (tableKey) => {
     setSelectedTable(tableKey);
-    setSelectedItemId(recordsByTable[tableKey]?.[0]?.id || null);
+    const firstRow = recordsByTable[tableKey]?.[0];
+    setSelectedItemId(firstRow ? getRecordId(tableKey, firstRow) : null);
     setFormMode(null);
     setFormError('');
   };
@@ -638,7 +800,7 @@ export default function AdminScreen({ onLogout }) {
         if (hasCreatedAt) nextRecord.cree_le = currentTs;
         if (hasUpdatedAt) nextRecord.mis_a_jour_le = currentTs;
         const created = await insertAdminRecord(selectedTable, nextRecord);
-        setSelectedItemId(String(created.id));
+        setSelectedItemId(getRecordId(selectedTable, created));
       } else if (formMode === 'edit' && selectedItem) {
         if (hasCreatedAt) {
           nextRecord.cree_le = selectedItem.cree_le || currentTs;
@@ -651,7 +813,7 @@ export default function AdminScreen({ onLogout }) {
           selectedItem.id,
           nextRecord
         );
-        setSelectedItemId(String(updated.id));
+        setSelectedItemId(getRecordId(selectedTable, updated));
         if (tierChange?.tierChange === 'upgrade') {
           globalThis.alert?.(
             `Compte passé en Pro.\nPro activé le : ${formatTierTimestamp(tierChange.pro_activated_le) || tierChange.pro_activated_le}`
@@ -740,7 +902,7 @@ export default function AdminScreen({ onLogout }) {
     <View style={styles.container}>
       <View style={styles.sidebar}>
         <Text variant="headlineSmall" style={styles.sidebarTitle}>
-          Admin
+          Master
         </Text>
         <Text variant="bodyMedium" style={styles.sidebarSubtitle}>
           Données Supabase
@@ -819,7 +981,11 @@ export default function AdminScreen({ onLogout }) {
                   <Text variant="bodyMedium" style={styles.rowSubtitle}>
                     {selectedTable === 'releves' && item.note
                       ? `Note: ${truncateText(item.note, 120)}`
-                      : String(item.id || '')}
+                      : selectedTable === 'metiers' || selectedTable === 'ouvrages'
+                        ? `Ordre ${item.ordre ?? 0} · Actif ${Number(item.ind_actif) === 1 ? 'oui' : 'non'}`
+                        : selectedTable === 'releves'
+                          ? `Statut ${item.status || 'E'}`
+                          : String(item.id || '')}
                   </Text>
                 </View>
               </Pressable>
@@ -845,6 +1011,7 @@ export default function AdminScreen({ onLogout }) {
                     const isDisabled =
                       field.isReadOnly ||
                       field.isId ||
+                      (field.isCompositeKeyPart && formMode === 'edit') ||
                       field.name === 'cree_le' ||
                       field.name === 'mis_a_jour_le' ||
                       field.isAutoComputed ||

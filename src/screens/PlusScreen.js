@@ -1,47 +1,35 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
 import { LosangeLogoBackground } from '../components/terrain/LosangeLogoLoader';
+import TerrainSyncOverlay from '../components/terrain/TerrainSyncOverlay';
 import PlusMenuButton from '../components/terrain/PlusMenuButton';
 import { FlowActionFab, FlowSmallFab, flowFabColors } from '../components/terrain/TerrainFlowFabs';
-import { getLoggedInProfilViewLocal, isLoggedInAdminLocal } from '../db/querries';
+import { useTerrainSyncRefresh } from '../hooks/useTerrainSyncRefresh';
+import { getLoggedInProfilViewLocal } from '../db/querries';
 import { canAccessRapports } from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
 
-const buildSyncSuccessMessage = (result) => {
-  const pending = Number(result?.pendingAfter || 0);
-  if (pending > 0) {
-    return `${pending} modification${pending > 1 ? 's' : ''} en attente. Réessayez avec internet.`;
-  }
-  return 'Données à jour.';
-};
-
 export default function PlusScreen({ onProfilPress, onDatabasePress, onRapportsPress, onLogout, onSyncFromSupabase }) {
-  const [syncing, setSyncing] = useState(false);
   const [isPro, setIsPro] = useState(false);
   const [canShowRapports, setCanShowRapports] = useState(false);
-  const [canSync, setCanSync] = useState(false);
+  const { syncing, canSync, runSync } = useTerrainSyncRefresh({ onSyncFromSupabase });
 
   useEffect(() => {
     let cancelled = false;
 
     const loadAccountType = async () => {
       try {
-        const [profil, isAdmin] = await Promise.all([
-          getLoggedInProfilViewLocal(),
-          isLoggedInAdminLocal(),
-        ]);
+        const profil = await getLoggedInProfilViewLocal();
         if (!cancelled) {
           setIsPro(Boolean(profil?.is_pro));
           setCanShowRapports(canAccessRapports(profil));
-          setCanSync(Boolean(profil?.is_pro) || isAdmin);
         }
       } catch (error) {
         console.error('Erreur chargement type de compte:', error);
         if (!cancelled) {
           setIsPro(false);
           setCanShowRapports(false);
-          setCanSync(false);
         }
       }
     };
@@ -52,29 +40,13 @@ export default function PlusScreen({ onProfilPress, onDatabasePress, onRapportsP
     };
   }, []);
 
-  const runSync = useCallback(async () => {
-    if (!onSyncFromSupabase || syncing) return;
-
-    setSyncing(true);
-    try {
-      const result = await onSyncFromSupabase();
-      if (result?.forcedLogout) {
-        return;
-      }
-      if (result?.ok) {
-        Alert.alert('Synchronisation', buildSyncSuccessMessage(result));
-      } else if (result?.error) {
-        Alert.alert('Erreur', result.error);
-      }
-    } catch (error) {
-      Alert.alert('Erreur', error.message || 'Synchronisation impossible.');
-    } finally {
-      setSyncing(false);
-    }
-  }, [onSyncFromSupabase, syncing]);
+  const handleSyncPress = useCallback(() => {
+    runSync({ showAlert: true });
+  }, [runSync]);
 
   return (
     <View style={styles.container}>
+      <TerrainSyncOverlay visible={syncing} />
       <LosangeLogoBackground opacity={0.1} />
       <View style={styles.content}>
       <View style={styles.header}>
@@ -106,7 +78,7 @@ export default function PlusScreen({ onProfilPress, onDatabasePress, onRapportsP
           tierFromBottom={0}
           color="#6B7280"
           disabled={syncing}
-          onPress={runSync}
+          onPress={handleSyncPress}
         />
       ) : null}
 

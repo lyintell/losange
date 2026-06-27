@@ -4,9 +4,10 @@ import { Surface, Text } from 'react-native-paper';
 import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
 import OuvrageFormModal from '../components/terrain/OuvrageFormModal';
 import { FlowSmallFab, flowFabColors, getFabColumnPadding } from '../components/terrain/TerrainFlowFabs';
-import { deleteOuvrageLocal, getOuvrageByIdLocal, getUnitesEtPrixParOuvrage } from '../db/querries';
-import { formatMontant } from '../utils/formatLigneMesures';
+import { deleteOuvrageLocal, getLoggedInProfilViewLocal, getOuvrageByIdLocal, getUnitesEtPrixParOuvrage } from '../db/querries';
+import { formatArticleNomAvecFournisseur, formatMontant, formatUniteTypeLabel } from '../utils/formatLigneMesures';
 import { getMetierColor } from '../utils/metierColors';
+import { canDeleteOuvrage, canEditOuvrageNomAndUnite } from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
 
 function InfoRow({ label, value, valueColor }) {
@@ -22,9 +23,6 @@ function InfoRow({ label, value, valueColor }) {
   );
 }
 
-const formatUniteTypeLabel = (indDimension) =>
-  Number(indDimension) === 1 ? 'Dimension (L x H x N)' : 'Unitaire (n)';
-
 export default function OuvrageDetailsScreen({
   ouvrageId,
   editRequestId = 0,
@@ -36,7 +34,34 @@ export default function OuvrageDetailsScreen({
   const [unites, setUnites] = useState([]);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [canDelete, setCanDelete] = useState(false);
+  const [canEditNomAndUnite, setCanEditNomAndUnite] = useState(false);
   const lastEditRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAccess = async () => {
+      try {
+        const profil = await getLoggedInProfilViewLocal();
+        if (!cancelled) {
+          setCanDelete(canDeleteOuvrage(profil));
+          setCanEditNomAndUnite(canEditOuvrageNomAndUnite(profil));
+        }
+      } catch (error) {
+        console.error('Erreur chargement acces ouvrage:', error);
+        if (!cancelled) {
+          setCanDelete(false);
+          setCanEditNomAndUnite(false);
+        }
+      }
+    };
+
+    loadAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadOuvrage = useCallback(async () => {
     if (!ouvrageId) {
@@ -79,11 +104,13 @@ export default function OuvrageDetailsScreen({
   };
 
   const handleDeletePress = () => {
-    if (!ouvrage?.id || deleting) return;
+    if (!canDelete || !ouvrage?.id || deleting) return;
+    const isArticle = Number(ouvrage.ind_article) === 1;
+    const kindLabel = isArticle ? 'article' : 'ouvrage';
 
     Alert.alert(
       'Supprimer',
-      `Voulez-vous supprimer l'ouvrage "${ouvrage.nom || ''}" ?`,
+      `Voulez-vous supprimer l'${kindLabel} "${ouvrage.nom || ''}" ?`,
       [
         { text: 'Non', style: 'cancel' },
         {
@@ -96,7 +123,7 @@ export default function OuvrageDetailsScreen({
               onOuvrageDeleted?.(ouvrage);
             } catch (error) {
               console.error('Erreur suppression ouvrage:', error);
-              Alert.alert('Erreur', error.message || 'Impossible de supprimer cet ouvrage.');
+              Alert.alert('Erreur', error.message || `Impossible de supprimer cet ${kindLabel}.`);
             } finally {
               setDeleting(false);
             }
@@ -106,11 +133,18 @@ export default function OuvrageDetailsScreen({
     );
   };
 
+  const isArticle = Number(ouvrage?.ind_article) === 1;
+  const headerTitle = ouvrage
+    ? isArticle
+      ? formatArticleNomAvecFournisseur(ouvrage.nom, ouvrage.fournisseur_nom)
+      : ouvrage.nom
+    : 'Ouvrage';
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text variant="headlineSmall" style={styles.title}>
-          {ouvrage?.nom || 'Ouvrage'}
+          {headerTitle}
         </Text>
       </View>
 
@@ -121,7 +155,11 @@ export default function OuvrageDetailsScreen({
       ) : ouvrage ? (
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <Surface style={styles.card} elevation={1}>
+            <InfoRow label="Type" value={isArticle ? 'Article' : 'Ouvrage'} />
             <InfoRow label="Nom" value={ouvrage.nom} />
+            {isArticle ? (
+              <InfoRow label="Fournisseur" value={ouvrage.fournisseur_nom || '—'} />
+            ) : null}
             <InfoRow
               label="Métier"
               value={ouvrage.metier_nom}
@@ -130,7 +168,7 @@ export default function OuvrageDetailsScreen({
           </Surface>
 
           <Text variant="titleMedium" style={styles.sectionTitle}>
-            Ouvrages unités
+            {isArticle ? 'Unité article' : 'Ouvrages unités'}
           </Text>
 
           {unites.length === 0 ? (
@@ -146,7 +184,7 @@ export default function OuvrageDetailsScreen({
                   {unite.nom}
                 </Text>
                 <InfoRow label="Formule" value={unite.formule} />
-                <InfoRow label="Type" value={formatUniteTypeLabel(unite.ind_dimension)} />
+                <InfoRow label="Type" value={formatUniteTypeLabel(unite.ind_dimension, unite.formule)} />
                 <InfoRow label="Prix unitaire" value={formatMontant(unite.prix_unitaire)} />
               </Surface>
             ))
@@ -160,7 +198,7 @@ export default function OuvrageDetailsScreen({
         </Surface>
       )}
 
-      {ouvrage ? (
+      {ouvrage && canDelete ? (
         <FlowSmallFab
           icon="delete"
           tierFromBottom={0}
@@ -174,6 +212,7 @@ export default function OuvrageDetailsScreen({
         visible={editModalVisible}
         ouvrage={ouvrage}
         unites={unites}
+        editPriceOnly={!canEditNomAndUnite}
         onDismiss={() => setEditModalVisible(false)}
         onSaved={handleSaved}
       />
