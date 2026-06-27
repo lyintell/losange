@@ -13,6 +13,32 @@ npm run dev
 
 Ouvrir [http://localhost:3000](http://localhost:3000).
 
+## Déploiement (admin.losange.app)
+
+Hébergement : **Vercel**. Branche Git de production : **`v2`**.
+
+```powershell
+git checkout v2
+git pull origin v2
+.\scripts\deploy-admin-web.ps1
+```
+
+Prérequis :
+
+1. Être sur la branche **`v2`** (le script refuse sinon)
+2. `webapps/admin/.env.local` (copier `.env.local.example`) avec `NEXT_PUBLIC_SUPABASE_*`
+3. `npx vercel login`
+4. DNS : `CNAME admin` → `cname.vercel-dns.com`
+
+**Deploy automatique (Git)** : connecter le repo sur Vercel, **Root Directory** = `webapps/admin`, **Production Branch** = `v2`.
+
+Variables d'environnement production (Vercel) :
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+Le script les pousse depuis `.env.local` puis lance `vercel deploy --prod`.
+
 ## Structure
 
 ```
