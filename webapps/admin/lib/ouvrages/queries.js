@@ -108,7 +108,7 @@ export async function fetchOuvrageById(ouvrageId, { entrepriseId } = {}) {
   const { data, error } = await ACTIVE_FILTER(
     supabase
       .from('ouvrages')
-      .select('id, nom, metier_id, entreprise_id, ind_article, cree_le, metiers ( nom )')
+      .select('id, nom, nom_devis, metier_id, entreprise_id, ind_article, cree_le, metiers ( nom )')
       .eq('id', ouvrageId)
       .eq('ind_article', 0)
   ).maybeSingle();
@@ -122,6 +122,7 @@ export async function fetchOuvrageById(ouvrageId, { entrepriseId } = {}) {
   return {
     id: data.id,
     nom: data.nom,
+    nom_devis: data.nom_devis || '',
     metier_id: data.metier_id,
     metier_nom: data.metiers?.nom || '',
     entreprise_id: data.entreprise_id,
@@ -186,7 +187,11 @@ export async function fetchCatalogueUnites() {
   return data || [];
 }
 
-export async function updateOuvrage(ouvrageId, { nom, unites = [] }, { entrepriseId } = {}) {
+export async function updateOuvrage(
+  ouvrageId,
+  { nom, nomDevis, unites = [] },
+  { entrepriseId } = {}
+) {
   const trimmedNom = nom?.trim();
   if (!ouvrageId || !trimmedNom) {
     throw new Error("Le nom de l'ouvrage est requis.");
@@ -197,11 +202,14 @@ export async function updateOuvrage(ouvrageId, { nom, unites = [] }, { entrepris
 
   const supabase = createServerSupabaseClient();
   const now = new Date().toISOString();
+  const trimmedNomDevis =
+    nomDevis === undefined ? existing.nom_devis || null : String(nomDevis || '').trim() || null;
 
   const { error: ouvrageError } = await supabase
     .from('ouvrages')
     .update({
       nom: trimmedNom,
+      nom_devis: trimmedNomDevis,
       mis_a_jour_le: now,
       _synced: 0,
     })
@@ -237,4 +245,82 @@ export async function updateOuvrage(ouvrageId, { nom, unites = [] }, { entrepris
   }
 
   return fetchOuvrageById(ouvrageId, { entrepriseId });
+}
+
+async function getNextOuvrageOrdre(supabase, metierId, entrepriseId) {
+  const { data, error } = await supabase
+    .from('ouvrages')
+    .select('ordre')
+    .eq('metier_id', metierId)
+    .eq('entreprise_id', entrepriseId)
+    .is('supprime_le', null)
+    .order('ordre', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message || 'Erreur lecture ordre ouvrage.');
+  return Number(data?.ordre ?? -1) + 1;
+}
+
+export async function createOuvrage(
+  { metierId, nom, nomDevis, unites = [] },
+  { entrepriseId } = {}
+) {
+  const trimmedNom = nom?.trim();
+  if (!metierId || !entrepriseId || !trimmedNom) {
+    throw new Error("Le métier et le nom de l'ouvrage sont requis.");
+  }
+
+  const trimmedNomDevis = String(nomDevis || '').trim() || null;
+
+  const primaryUnite = unites[0];
+  if (!primaryUnite?.uniteId) {
+    throw new Error('Unité requise.');
+  }
+
+  const prix = Number(primaryUnite.prixUnitaire);
+  if (!Number.isFinite(prix) || prix < 0) {
+    throw new Error('Prix unitaire invalide.');
+  }
+
+  const supabase = createServerSupabaseClient();
+  const now = new Date().toISOString();
+  const ouvrageId = crypto.randomUUID();
+  const ouvrageUniteId = crypto.randomUUID();
+  const ordre = await getNextOuvrageOrdre(supabase, metierId, entrepriseId);
+
+  const { error: ouvrageError } = await supabase.from('ouvrages').insert({
+    id: ouvrageId,
+    metier_id: metierId,
+    entreprise_id: entrepriseId,
+    nom: trimmedNom,
+    nom_devis: trimmedNomDevis,
+    ind_article: 0,
+    ind_actif: 1,
+    ordre,
+    cree_le: now,
+    mis_a_jour_le: now,
+    _synced: 0,
+  });
+
+  if (ouvrageError) throw new Error(ouvrageError.message || 'Erreur création ouvrage.');
+
+  const { error: uniteError } = await supabase.from('ouvrage_unites').insert({
+    id: ouvrageUniteId,
+    ouvrage_id: ouvrageId,
+    unite_id: primaryUnite.uniteId,
+    prix_unitaire: prix,
+    cree_le: now,
+    mis_a_jour_le: now,
+    _synced: 0,
+  });
+
+  if (uniteError) throw new Error(uniteError.message || 'Erreur création unité ouvrage.');
+
+  const created = await fetchOuvrageById(ouvrageId, { entrepriseId });
+  return {
+    ...created,
+    ordre,
+    unite_count: created?.unites?.length || 0,
+  };
 }

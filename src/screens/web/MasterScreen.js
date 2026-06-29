@@ -211,6 +211,7 @@ const TABLE_SCHEMAS = {
     { name: 'metier_id', type: 'TEXT', required: true, fkTable: 'metiers' },
     { name: 'entreprise_id', type: 'TEXT', required: true, fkTable: 'entreprises' },
     { name: 'nom', type: 'TEXT', required: true },
+    { name: 'nom_devis', type: 'TEXT', section: 'Catalogue' },
     {
       name: 'ind_article',
       type: 'INTEGER',

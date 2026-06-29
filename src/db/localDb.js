@@ -326,6 +326,7 @@ export const initLocalDatabase = async () => {
       metier_id TEXT NOT NULL,
       entreprise_id TEXT NOT NULL,
       nom TEXT NOT NULL,
+      nom_devis TEXT,
       ind_article INTEGER NOT NULL DEFAULT 0 CHECK (ind_article IN (0, 1)),
       fournisseur_id TEXT,
       photo TEXT,
@@ -733,6 +734,12 @@ const ensureSchemaMigrations = async (db) => {
 
   try {
     await db.execAsync('ALTER TABLE ouvrages ADD COLUMN ordre INTEGER NOT NULL DEFAULT 0;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync('ALTER TABLE ouvrages ADD COLUMN nom_devis TEXT;');
   } catch {
     // Colonne deja presente.
   }

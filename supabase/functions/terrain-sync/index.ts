@@ -133,6 +133,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     'metier_id',
     'entreprise_id',
     'nom',
+    'nom_devis',
     'ind_article',
     'fournisseur_id',
     'photo',

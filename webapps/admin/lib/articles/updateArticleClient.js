@@ -13,6 +13,21 @@ export async function updateArticleClient(articleId, payload) {
   return data.article;
 }
 
+export async function createArticleClient(payload) {
+  const response = await fetch('/api/articles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error || 'Erreur création article.');
+  }
+
+  return data.article;
+}
+
 export async function fetchCatalogueUnitesClient() {
   const response = await fetch('/api/unites');
   const data = await response.json().catch(() => ({}));

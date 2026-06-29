@@ -60,6 +60,7 @@
   :root, :host {
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
       "Courier New", monospace;
+    --spacing: 0.25rem;
     --default-font-family: var(--font-geist-sans);
     --default-mono-font-family: var(--font-mono);
   }
@@ -225,6 +226,9 @@
   .border {
     border-style: var(--tw-border-style);
     border-width: 1px;
+  }
+  .p-1 {
+    padding: var(--spacing);
   }
   .antialiased {
     -webkit-font-smoothing: antialiased;
@@ -1182,6 +1186,17 @@ body {
   gap: 8px;
   margin-bottom: 16px;
 }
+.catalogue-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.catalogue-toolbar .tabs {
+  margin-bottom: 0;
+}
 .tab-button {
   min-height: 42px;
   border: 1px solid var(--losange-border);
@@ -1320,6 +1335,10 @@ body {
 }
 .search-dropdown-item:hover {
   background: #f8f9fa;
+}
+.search-dropdown-item.search-result-button--selected,
+.search-dropdown-item.search-result-button--selected:hover {
+  background: #fff5f1;
 }
 .search-dropdown-meta {
   color: var(--losange-muted);
@@ -1522,12 +1541,13 @@ body {
   margin: 0 0 6px;
   font-weight: 700;
   font-size: 13px;
-  text-align: center;
+  text-align: left;
 }
 .devis-ouvrage {
   margin: 0 0 4px;
   font-weight: 700;
   font-size: 12px;
+  text-align: center;
 }
 .devis-dimension {
   margin: 0;

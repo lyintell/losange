@@ -21,6 +21,7 @@ export async function fetchMetiersCatalogueList({ entrepriseId } = {}) {
       .from('metiers')
       .select('id, nom, abbrev, ordre, ind_actif, ind_default, supprime_le')
       .eq('entreprise_id', entrepriseId)
+      .eq('ind_actif', 1)
   )
     .order('ordre', { ascending: true })
     .order('nom', { ascending: true });
@@ -72,7 +73,7 @@ export async function fetchMetierById(metierId, { entrepriseId } = {}) {
   ).maybeSingle();
 
   if (error) throw new Error(error.message || 'Erreur chargement métier.');
-  if (!row?.id || row.supprime_le) return null;
+  if (!row?.id || row.supprime_le || Number(row.ind_actif) === 0) return null;
 
   return mapMetierRow(row);
 }

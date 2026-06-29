@@ -8,7 +8,17 @@ import {
   fetchCatalogueUnitesClient,
   searchFournisseursClient,
   updateArticleClient,
+  createArticleClient,
 } from '@/lib/articles/updateArticleClient';
+
+function buildEmptyUniteDraft() {
+  return {
+    ouvrageUniteId: `new-${Date.now()}`,
+    uniteId: '',
+    prixUnitaire: '',
+    typeLabel: '—',
+  };
+}
 
 function buildUniteDrafts(unites = []) {
   return unites.map((unite) => ({
@@ -24,27 +34,64 @@ function formatFournisseurSubtitle(fournisseur) {
   return phones.join(' · ');
 }
 
-export default function ArticleEditModal({ open, article, onClose, onSaved }) {
+function normalizeFournisseurNom(nom) {
+  return String(nom || '').trim().toLocaleLowerCase('fr');
+}
+
+function findExactFournisseurMatch(results, nom) {
+  const normalized = normalizeFournisseurNom(nom);
+  if (!normalized) return null;
+  return results.find((fournisseur) => normalizeFournisseurNom(fournisseur.nom) === normalized) || null;
+}
+
+function resolveFournisseurPayload({ fournisseurNom, selectedFournisseurId, searchResults }) {
+  const trimmedNom = fournisseurNom.trim();
+  if (!trimmedNom) {
+    return { fournisseurId: null, fournisseurNom: null };
+  }
+
+  if (selectedFournisseurId) {
+    return { fournisseurId: selectedFournisseurId, fournisseurNom: null };
+  }
+
+  const exactMatch = findExactFournisseurMatch(searchResults, trimmedNom);
+  if (exactMatch) {
+    return { fournisseurId: exactMatch.id, fournisseurNom: null };
+  }
+
+  return { fournisseurId: null, fournisseurNom: trimmedNom };
+}
+
+export default function ArticleEditModal({ open, article, mode = 'edit', onClose, onSaved }) {
   if (!open || !article) return null;
+
+  const isCreate = mode === 'create';
 
   return (
     <ArticleEditModalForm
-      key={`${article.id}-${article.nom}-${article.fournisseur_id || ''}`}
+      key={isCreate ? 'create' : `${article.id}-${article.nom}-${article.fournisseur_id || ''}`}
       article={article}
+      mode={mode}
       onClose={onClose}
       onSaved={onSaved}
     />
   );
 }
 
-function ArticleEditModalForm({ article, onClose, onSaved }) {
-  const [nom, setNom] = useState(article.nom || '');
-  const [fournisseurNom, setFournisseurNom] = useState(article.fournisseur_nom || '');
-  const [selectedFournisseurId, setSelectedFournisseurId] = useState(article.fournisseur_id || null);
+function ArticleEditModalForm({ article, mode = 'edit', onClose, onSaved }) {
+  const isCreate = mode === 'create';
+  const [nom, setNom] = useState(isCreate ? '' : article.nom || '');
+  const [nomDevis, setNomDevis] = useState(isCreate ? '' : article.nom_devis || '');
+  const [fournisseurNom, setFournisseurNom] = useState(isCreate ? '' : article.fournisseur_nom || '');
+  const [selectedFournisseurId, setSelectedFournisseurId] = useState(
+    isCreate ? null : article.fournisseur_id || null
+  );
   const [fournisseurSearchResults, setFournisseurSearchResults] = useState([]);
   const [showFournisseurDropdown, setShowFournisseurDropdown] = useState(false);
   const [searchingFournisseurs, setSearchingFournisseurs] = useState(false);
-  const [uniteDrafts, setUniteDrafts] = useState(() => buildUniteDrafts(article.unites));
+  const [uniteDrafts, setUniteDrafts] = useState(() =>
+    isCreate ? [buildEmptyUniteDraft()] : buildUniteDrafts(article.unites)
+  );
   const [catalogueUnites, setCatalogueUnites] = useState([]);
   const [loadingUnites, setLoadingUnites] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -110,12 +157,35 @@ function ArticleEditModalForm({ article, onClose, onSaved }) {
     }
   };
 
+  const handleFournisseurFocus = () => {
+    setShowFournisseurDropdown(true);
+  };
+
+  const handleFournisseurBlur = () => {
+    window.setTimeout(() => setShowFournisseurDropdown(false), 150);
+  };
+
   const handleSelectFournisseur = (fournisseur) => {
     setSelectedFournisseurId(fournisseur.id);
     setFournisseurNom(fournisseur.nom || '');
     setFournisseurSearchResults([]);
     setShowFournisseurDropdown(false);
   };
+
+  const handleCreateFournisseurOption = () => {
+    setSelectedFournisseurId(null);
+    setShowFournisseurDropdown(false);
+  };
+
+  const trimmedFournisseurNom = fournisseurNom.trim();
+  const exactFournisseurMatch = findExactFournisseurMatch(fournisseurSearchResults, trimmedFournisseurNom);
+  const showCreateFournisseurOption =
+    Boolean(trimmedFournisseurNom) && !exactFournisseurMatch && !selectedFournisseurId;
+  const showFournisseurPanel =
+    showFournisseurDropdown &&
+    (searchingFournisseurs ||
+      fournisseurSearchResults.length > 0 ||
+      showCreateFournisseurOption);
 
   const handleUniteChange = (ouvrageUniteId, field, value) => {
     setUniteDrafts((prev) =>
@@ -138,7 +208,6 @@ function ArticleEditModalForm({ article, onClose, onSaved }) {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!article?.id) return;
 
     if (!nom.trim()) {
       setError("Le nom de l'article est requis.");
@@ -153,21 +222,42 @@ function ArticleEditModalForm({ article, onClose, onSaved }) {
     setSaving(true);
     setError('');
 
+    const unitesPayload = uniteDrafts.map((draft) => ({
+      ...(isCreate ? {} : { ouvrageUniteId: draft.ouvrageUniteId }),
+      uniteId: draft.uniteId,
+      prixUnitaire: draft.prixUnitaire,
+    }));
+
+    const fournisseurPayload = resolveFournisseurPayload({
+      fournisseurNom,
+      selectedFournisseurId,
+      searchResults: fournisseurSearchResults,
+    });
+
     try {
-      const updated = await updateArticleClient(article.id, {
-        nom: nom.trim(),
-        fournisseurId: selectedFournisseurId,
-        fournisseurNom: fournisseurNom.trim() || null,
-        unites: uniteDrafts.map((draft) => ({
-          ouvrageUniteId: draft.ouvrageUniteId,
-          uniteId: draft.uniteId,
-          prixUnitaire: draft.prixUnitaire,
-        })),
-      });
-      onSaved?.(updated);
+      const result = isCreate
+        ? await createArticleClient({
+            metierId: article.metier_id,
+            nom: nom.trim(),
+            nomDevis: nomDevis.trim() || null,
+            fournisseurId: fournisseurPayload.fournisseurId,
+            fournisseurNom: fournisseurPayload.fournisseurNom,
+            unites: unitesPayload,
+          })
+        : await updateArticleClient(article.id, {
+            nom: nom.trim(),
+            nomDevis: nomDevis.trim() || null,
+            fournisseurId: fournisseurPayload.fournisseurId,
+            fournisseurNom: fournisseurPayload.fournisseurNom,
+            unites: unitesPayload,
+          });
+      onSaved?.(result);
       onClose();
     } catch (saveError) {
-      setError(saveError.message || "Impossible de mettre à jour l'article.");
+      setError(
+        saveError.message ||
+          (isCreate ? "Impossible de créer l'article." : "Impossible de mettre à jour l'article.")
+      );
     } finally {
       setSaving(false);
     }
@@ -192,7 +282,7 @@ function ArticleEditModalForm({ article, onClose, onSaved }) {
       >
         <div className="admin-modal-header">
           <h3 id="article-edit-modal-title" className="admin-modal-title">
-            Modifier l&apos;article
+            {isCreate ? "Ajouter un article" : "Modifier l'article"}
           </h3>
           <button type="button" className="admin-modal-close" onClick={onClose} disabled={saving}>
             ×
@@ -223,44 +313,87 @@ function ArticleEditModalForm({ article, onClose, onSaved }) {
           </div>
 
           <div className="search-field">
+            <label className="search-field-label" htmlFor="article-edit-nom-devis">
+              Nom sur devis (optionnel)
+            </label>
+            <input
+              id="article-edit-nom-devis"
+              type="text"
+              className="search-field-input"
+              placeholder="Affiché sur les devis à la place du nom catalogue"
+              value={nomDevis}
+              onChange={(event) => setNomDevis(event.target.value)}
+              disabled={saving}
+            />
+          </div>
+
+          <div className="search-field search-field--dropdown">
             <label className="search-field-label" htmlFor="article-edit-fournisseur">
-              Nom du fournisseur (optionnel)
+              Fournisseur (optionnel)
             </label>
             <input
               id="article-edit-fournisseur"
               type="text"
               className="search-field-input"
-              placeholder="Nom ou téléphone"
+              placeholder="Rechercher ou saisir un nom"
               value={fournisseurNom}
               onChange={(event) => handleFournisseurNomChange(event.target.value)}
+              onFocus={handleFournisseurFocus}
+              onBlur={handleFournisseurBlur}
               disabled={saving}
+              autoComplete="off"
             />
-            {searchingFournisseurs ? (
-              <p className="search-field-hint">Recherche…</p>
+            {searchingFournisseurs ? <p className="search-field-hint">Recherche…</p> : null}
+            {exactFournisseurMatch && !selectedFournisseurId ? (
+              <p className="search-field-hint">Fournisseur existant — sélectionnez-le dans la liste.</p>
+            ) : null}
+
+            {showFournisseurPanel ? (
+              <ul className="search-dropdown" role="listbox">
+                {fournisseurSearchResults.map((fournisseur) => {
+                  const isExactMatch =
+                    normalizeFournisseurNom(fournisseur.nom) === normalizeFournisseurNom(trimmedFournisseurNom);
+                  const isSelected =
+                    selectedFournisseurId === fournisseur.id ||
+                    (isExactMatch && !selectedFournisseurId);
+
+                  return (
+                    <li key={fournisseur.id}>
+                      <button
+                        type="button"
+                        className={`search-dropdown-item${isSelected ? ' search-result-button--selected' : ''}`}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => handleSelectFournisseur(fournisseur)}
+                        disabled={saving}
+                      >
+                        <span className="search-result-name">{fournisseur.nom}</span>
+                        {formatFournisseurSubtitle(fournisseur) ? (
+                          <span className="search-dropdown-meta">
+                            {formatFournisseurSubtitle(fournisseur)}
+                          </span>
+                        ) : null}
+                      </button>
+                    </li>
+                  );
+                })}
+
+                {showCreateFournisseurOption ? (
+                  <li>
+                    <button
+                      type="button"
+                      className="search-dropdown-item"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={handleCreateFournisseurOption}
+                      disabled={saving}
+                    >
+                      <span className="search-result-name">Créer « {trimmedFournisseurNom} »</span>
+                      <span className="search-dropdown-meta">Nouveau fournisseur</span>
+                    </button>
+                  </li>
+                ) : null}
+              </ul>
             ) : null}
           </div>
-
-          {showFournisseurDropdown && fournisseurSearchResults.length > 0 ? (
-            <ul className="search-results-list">
-              {fournisseurSearchResults.map((fournisseur) => (
-                <li key={fournisseur.id}>
-                  <button
-                    type="button"
-                    className={`search-result-button${
-                      selectedFournisseurId === fournisseur.id ? ' search-result-button--selected' : ''
-                    }`}
-                    onClick={() => handleSelectFournisseur(fournisseur)}
-                    disabled={saving}
-                  >
-                    <span className="search-result-name">{fournisseur.nom}</span>
-                    {formatFournisseurSubtitle(fournisseur) ? (
-                      <span className="search-result-meta">{formatFournisseurSubtitle(fournisseur)}</span>
-                    ) : null}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
 
           {uniteDrafts.length === 0 ? (
             <p className="empty-state">Aucune unité associée.</p>
@@ -330,8 +463,8 @@ function ArticleEditModalForm({ article, onClose, onSaved }) {
             <button type="button" className="secondary-button" onClick={onClose} disabled={saving}>
               Annuler
             </button>
-            <button type="submit" className="primary-button" disabled={saving || !isValid}>
-              {saving ? 'Enregistrement…' : 'Enregistrer'}
+            <button type="submit" className="primary-button p-1" disabled={saving || !isValid}>
+              {saving ? 'Enregistrement…' : isCreate ? 'Ajouter' : 'Enregistrer'}
             </button>
           </div>
         </form>

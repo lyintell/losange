@@ -1,7 +1,8 @@
 {
+  "/api/unites/route": "app/api/unites/route.js",
   "/login/page": "app/login/page.js",
   "/(app)/tableau-de-bord/page": "app/(app)/tableau-de-bord/page.js",
-  "/(app)/clients/[clientId]/chantiers/[chantierId]/page": "app/(app)/clients/[clientId]/chantiers/[chantierId]/page.js",
-  "/(document)/chantiers/[chantierId]/devis/[releveId]/page": "app/(document)/chantiers/[chantierId]/devis/[releveId]/page.js",
-  "/(app)/profil/page": "app/(app)/profil/page.js"
+  "/(app)/ouvrages/page": "app/(app)/ouvrages/page.js",
+  "/(app)/clients/page": "app/(app)/clients/page.js",
+  "/(app)/ouvrages/[metierId]/page": "app/(app)/ouvrages/[metierId]/page.js"
 }

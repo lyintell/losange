@@ -9,13 +9,14 @@ import { formatDevisDimension } from '@/lib/format/devisGrouping';
 import { formatMontantFcfa } from '@/lib/format/formatLigneMesures';
 import { computeMontantLigneReleve } from '@/lib/format/ligneReleveCalcul';
 import { computeReleveFacturation } from '@/lib/format/releveFacturation';
+import { getLigneOuvrageNomPourDevis } from '@/lib/format/ouvrageNomDevis';
 
 export default function DevisEditClient({ chantier, releve, lignes = [], canEditRemise = false }) {
   const router = useRouter();
   const [rows, setRows] = useState(
     lignes.map((ligne) => ({
       id: ligne.id,
-      ouvrage_nom: ligne.ouvrage_nom,
+      ouvrage_nom: getLigneOuvrageNomPourDevis(ligne),
       metier_nom: ligne.metier_nom,
       nombre: ligne.nombre,
       prix_unitaire_applique: String(ligne.prix_unitaire_applique ?? ''),
@@ -179,7 +180,7 @@ export default function DevisEditClient({ chantier, releve, lignes = [], canEdit
         <button type="button" className="secondary-button" onClick={() => router.back()}>
           Annuler
         </button>
-        <button type="button" className="primary-button" onClick={handleSave} disabled={saving}>
+        <button type="button" className="primary-button p-1" onClick={handleSave} disabled={saving}>
           {saving ? 'Enregistrement…' : 'Enregistrer'}
         </button>
       </div>
