@@ -1,4 +1,5 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+# EAS Build upload — based on .gitignore + mobile-only exclusions.
+# See https://docs.expo.dev/build-reference/easignore/
 
 # dependencies
 node_modules/
@@ -59,7 +60,7 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# Environment & secrets (keep .env.example tracked)
+# Environment & secrets
 .env
 .env.*
 !.env.example
@@ -92,26 +93,38 @@ supabase/.branches/
 *.swo
 *~
 
-# Cursor / Claude (état local agents)
+# Cursor / Claude
 .cursor/
 .claude/
 
-# Prompts locaux (brouillons, exports prod, transcripts, captures)
-prompts/transcripts/
-prompts/terminal.txt
-prompts/errors.txt
-prompts/prod_stuff/
-prompts/screenshots/
-prompts/*.png
+# Test & coverage
+coverage/
+.turbo/
 
-# Web apps (Next.js — webapps/admin, etc.)
-webapps/**/.next/
-webapps/**/node_modules/
+# Next.js / Vercel artifacts (any path)
 .next/
 out/
 .vercel/
 next-env.d.ts
 
-# Test & coverage
-coverage/
-.turbo/
+# --- Not required for Expo Android/iOS build ---
+
+# Next.js admin webapp (~800 MB with node_modules + .next)
+webapps/
+
+# Dev prompts & docs
+prompts/
+
+# Supabase (migrations/functions deployed separately)
+supabase/
+
+# Deploy / build helper scripts
+scripts/
+
+# Repo metadata
+.git/
+
+# Docs not used at runtime
+AGENTS.md
+CLAUDE.md
+.cursorrules
