@@ -202,6 +202,12 @@
       "namedRegex": "^/accueil(?:/)?$"
     },
     {
+      "page": "/api/articles",
+      "regex": "^/api/articles(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/articles(?:/)?$"
+    },
+    {
       "page": "/api/auth/login",
       "regex": "^/api/auth/login(?:/)?$",
       "routeKeys": {},
@@ -230,6 +236,12 @@
       "regex": "^/api/fournisseurs/search(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/fournisseurs/search(?:/)?$"
+    },
+    {
+      "page": "/api/ouvrages",
+      "regex": "^/api/ouvrages(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/ouvrages(?:/)?$"
     },
     {
       "page": "/api/unites",

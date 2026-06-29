@@ -28,6 +28,7 @@ Set-Location $Root
 Write-Host ""
 Write-Host "=== Losange — Android preview ===" -ForegroundColor Cyan
 Write-Host "Profil EAS : preview (distribution internal, APK)"
+Write-Host "Archive : .easignore exclut webapps/, dist/, supabase/, prompts/."
 Write-Host ""
 
 if (-not (Test-Path "eas.json")) {
