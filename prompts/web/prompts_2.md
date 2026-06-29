@@ -41,3 +41,9 @@ Cette section reste en tete sur mobile (choix de section).
 Toujours, que ce soit nouveau releve, ou modifier (recap)
 Section -> Metier -> Ouvrage -> Ligne
 Les boutons retours vont dans ce sens aussi, et si on est n importe ou dans l etape, ca suit cet ordre
+
+9. Dans webapp, affiche les metiers actif de l'entreprise (meme si pas d'ouvrage pour le moment). N'affiche pas les metiers inactifs.
+Ajoute un bouton Ajouter ouvrage / article dans détails métier (liste des articles). On clique, un modal s'ouvre avec le formlaire d'ajout de l'ouvrage ou article.
+
+10. Ajoute nom_devis a la table ouvrage. Ce nom, si non-vide, est utilisé à la place du nom des ouvrages (ou article) sur les devis.
+Ajoute le au formulaire ajouter et modifier des ouvrages suelement pour le webapp. L'admin ou le commercial peut vouloir le modifier.

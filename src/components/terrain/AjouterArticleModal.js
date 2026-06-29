@@ -1,24 +1,20 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Dimensions, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Dimensions, ScrollView, StyleSheet, View } from 'react-native';
 import { ActivityIndicator, Menu, Modal, Portal, Text, TextInput } from 'react-native-paper';
 import MobileButton from './MobileButton';
+import FournisseurSearchField from './FournisseurSearchField';
 import {
   getAllUnitesLocal,
   insertArticleWithUniteLocal,
-  searchFournisseursLocal,
 } from '../../db/querries';
 import { chantierColors } from '../../styles/theme';
 import { formatUniteChoiceLabel } from '../../utils/formatUniteChoiceLabel';
+import { resolveFournisseurPayload } from '../../utils/fournisseurSearch';
 
 const normalizeNom = (value) => String(value || '').trim().toLowerCase();
 
 const DEFAULT_CT_PRIX_UNITAIRE = '1';
 const MODAL_BODY_MAX_HEIGHT = Math.round(Dimensions.get('window').height * 0.85);
-
-const formatFournisseurSubtitle = (fournisseur) => {
-  const phones = [fournisseur.telephone_1, fournisseur.telephone_2].filter(Boolean);
-  return phones.join(' · ');
-};
 
 export default function AjouterArticleModal({
   visible,
@@ -39,8 +35,6 @@ export default function AjouterArticleModal({
   const [uniteMenuOpen, setUniteMenuOpen] = useState(false);
   const [fournisseurNom, setFournisseurNom] = useState('');
   const [fournisseurSearchResults, setFournisseurSearchResults] = useState([]);
-  const [searchingFournisseurs, setSearchingFournisseurs] = useState(false);
-  const [showFournisseurDropdown, setShowFournisseurDropdown] = useState(false);
   const [selectedFournisseurId, setSelectedFournisseurId] = useState(null);
 
   const selectedUnite = unites.find((item) => item.id === uniteId) || null;
@@ -53,32 +47,6 @@ export default function AjouterArticleModal({
 
   const canSubmit = Boolean(nom.trim() && uniteId && !isDuplicateNom);
 
-  const runFournisseurSearch = useCallback(
-    async (query) => {
-      if (!metier?.id || !entrepriseId || !query.trim()) {
-        setFournisseurSearchResults([]);
-        return;
-      }
-      try {
-        setSearchingFournisseurs(true);
-        const results = await searchFournisseursLocal(metier.id, entrepriseId, query);
-        setFournisseurSearchResults(results || []);
-      } catch (searchError) {
-        console.error('Erreur recherche fournisseurs:', searchError);
-        setFournisseurSearchResults([]);
-      } finally {
-        setSearchingFournisseurs(false);
-      }
-    },
-    [metier?.id, entrepriseId]
-  );
-
-  useEffect(() => {
-    if (!visible || !showFournisseurDropdown) return undefined;
-    const timer = setTimeout(() => runFournisseurSearch(fournisseurNom), 300);
-    return () => clearTimeout(timer);
-  }, [fournisseurNom, runFournisseurSearch, showFournisseurDropdown, visible]);
-
   useEffect(() => {
     if (!visible) return undefined;
 
@@ -89,7 +57,6 @@ export default function AjouterArticleModal({
     setUniteMenuOpen(false);
     setFournisseurNom('');
     setFournisseurSearchResults([]);
-    setShowFournisseurDropdown(false);
     setSelectedFournisseurId(null);
 
     const load = async () => {
@@ -112,14 +79,6 @@ export default function AjouterArticleModal({
   const handleSelectFournisseur = (fournisseur) => {
     setSelectedFournisseurId(fournisseur.id);
     setFournisseurNom(fournisseur.nom || '');
-    setFournisseurSearchResults([]);
-    setShowFournisseurDropdown(false);
-  };
-
-  const handleFournisseurNomChange = (value) => {
-    setFournisseurNom(value);
-    setSelectedFournisseurId(null);
-    setShowFournisseurDropdown(true);
   };
 
   const handleSave = async () => {
@@ -143,14 +102,20 @@ export default function AjouterArticleModal({
 
     setSaving(true);
     try {
+      const fournisseurPayload = resolveFournisseurPayload({
+        fournisseurNom,
+        selectedFournisseurId,
+        searchResults: fournisseurSearchResults,
+      });
+
       const result = await insertArticleWithUniteLocal({
         metierId: metier.id,
         entrepriseId,
         nom: nom.trim(),
         uniteId,
         prixUnitaire: lockPrixUnitaireToOne ? DEFAULT_CT_PRIX_UNITAIRE : prixUnitaire,
-        fournisseurId: selectedFournisseurId,
-        fournisseurNom: fournisseurNom.trim() || null,
+        fournisseurId: fournisseurPayload.fournisseurId,
+        fournisseurNom: fournisseurPayload.fournisseurNom,
       });
       onCreated?.({
         ouvrage: result.ouvrage,
@@ -259,40 +224,18 @@ export default function AjouterArticleModal({
             Fournisseur
           </Text>
 
-          <TextInput
-            mode="outlined"
-            label="Nom du fournisseur (optionnel)"
-            placeholder="Nom ou téléphone"
-            value={fournisseurNom}
-            onChangeText={handleFournisseurNomChange}
-            style={styles.input}
-            right={
-              searchingFournisseurs ? (
-                <TextInput.Icon icon={() => <ActivityIndicator size={18} color={chantierColors.primary} />} />
-              ) : undefined
-            }
+          <FournisseurSearchField
+            visible={visible}
+            metierId={metier?.id}
+            entrepriseId={entrepriseId}
+            fournisseurNom={fournisseurNom}
+            selectedFournisseurId={selectedFournisseurId}
+            onFournisseurNomChange={setFournisseurNom}
+            onSelectFournisseur={handleSelectFournisseur}
+            onClearSelection={() => setSelectedFournisseurId(null)}
+            onSearchResultsChange={setFournisseurSearchResults}
+            disabled={saving}
           />
-
-          {showFournisseurDropdown && fournisseurSearchResults.length > 0 ? (
-            <View style={styles.searchResults}>
-              {fournisseurSearchResults.map((fournisseur) => (
-                <Pressable
-                  key={fournisseur.id}
-                  onPress={() => handleSelectFournisseur(fournisseur)}
-                  style={({ pressed }) => [
-                    styles.searchResultRow,
-                    selectedFournisseurId === fournisseur.id && styles.searchResultRowSelected,
-                    pressed && styles.searchResultPressed,
-                  ]}
-                >
-                  <Text style={styles.searchResultName}>{fournisseur.nom}</Text>
-                  {formatFournisseurSubtitle(fournisseur) ? (
-                    <Text style={styles.searchResultPhone}>{formatFournisseurSubtitle(fournisseur)}</Text>
-                  ) : null}
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
 
           {isDuplicateNom ? (
             <Text style={styles.errorText}>Un article avec ce nom existe déjà pour ce métier.</Text>
@@ -360,35 +303,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 4,
-  },
-  searchResults: {
-    borderWidth: 1,
-    borderColor: chantierColors.border,
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  searchResultRow: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: chantierColors.border,
-    backgroundColor: chantierColors.surface,
-  },
-  searchResultRowSelected: {
-    backgroundColor: '#FFF5F1',
-  },
-  searchResultPressed: {
-    opacity: 0.85,
-  },
-  searchResultName: {
-    color: chantierColors.text,
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  searchResultPhone: {
-    color: chantierColors.muted,
-    fontSize: 14,
-    marginTop: 2,
   },
   input: {
     backgroundColor: chantierColors.surface,

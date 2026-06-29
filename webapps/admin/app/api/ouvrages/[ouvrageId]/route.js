@@ -24,6 +24,7 @@ export async function PATCH(request, { params }) {
       ouvrageId,
       {
         nom: body?.nom,
+        nomDevis: body?.nomDevis,
         unites: body?.unites,
       },
       { entrepriseId: session.entrepriseId || null }

@@ -123,7 +123,7 @@ function ChantierInfoModalForm({ chantier, onClose, onSaved }) {
             <button type="button" className="secondary-button" onClick={onClose} disabled={saving}>
               Annuler
             </button>
-            <button type="submit" className="primary-button" disabled={saving || !isValid}>
+            <button type="submit" className="primary-button p-1" disabled={saving || !isValid}>
               {saving ? 'Enregistrement…' : 'Enregistrer'}
             </button>
           </div>

@@ -7,7 +7,17 @@ import { getMetierColor } from '@/lib/format/metierColors';
 import {
   fetchCatalogueUnitesClient,
   updateOuvrageClient,
+  createOuvrageClient,
 } from '@/lib/ouvrages/updateOuvrageClient';
+
+function buildEmptyUniteDraft() {
+  return {
+    ouvrageUniteId: `new-${Date.now()}`,
+    uniteId: '',
+    prixUnitaire: '',
+    typeLabel: '—',
+  };
+}
 
 function buildUniteDrafts(unites = []) {
   return unites.map((unite) => ({
@@ -18,22 +28,29 @@ function buildUniteDrafts(unites = []) {
   }));
 }
 
-export default function OuvrageEditModal({ open, ouvrage, onClose, onSaved }) {
+export default function OuvrageEditModal({ open, ouvrage, mode = 'edit', onClose, onSaved }) {
   if (!open || !ouvrage) return null;
+
+  const isCreate = mode === 'create';
 
   return (
     <OuvrageEditModalForm
-      key={`${ouvrage.id}-${ouvrage.nom}`}
+      key={isCreate ? 'create' : `${ouvrage.id}-${ouvrage.nom}`}
       ouvrage={ouvrage}
+      mode={mode}
       onClose={onClose}
       onSaved={onSaved}
     />
   );
 }
 
-function OuvrageEditModalForm({ ouvrage, onClose, onSaved }) {
-  const [nom, setNom] = useState(ouvrage.nom || '');
-  const [uniteDrafts, setUniteDrafts] = useState(() => buildUniteDrafts(ouvrage.unites));
+function OuvrageEditModalForm({ ouvrage, mode = 'edit', onClose, onSaved }) {
+  const isCreate = mode === 'create';
+  const [nom, setNom] = useState(isCreate ? '' : ouvrage.nom || '');
+  const [nomDevis, setNomDevis] = useState(isCreate ? '' : ouvrage.nom_devis || '');
+  const [uniteDrafts, setUniteDrafts] = useState(() =>
+    isCreate ? [buildEmptyUniteDraft()] : buildUniteDrafts(ouvrage.unites)
+  );
   const [catalogueUnites, setCatalogueUnites] = useState([]);
   const [loadingUnites, setLoadingUnites] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -84,7 +101,6 @@ function OuvrageEditModalForm({ ouvrage, onClose, onSaved }) {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!ouvrage?.id) return;
 
     if (!nom.trim()) {
       setError("Le nom de l'ouvrage est requis.");
@@ -99,19 +115,32 @@ function OuvrageEditModalForm({ ouvrage, onClose, onSaved }) {
     setSaving(true);
     setError('');
 
+    const unitesPayload = uniteDrafts.map((draft) => ({
+      ...(isCreate ? {} : { ouvrageUniteId: draft.ouvrageUniteId }),
+      uniteId: draft.uniteId,
+      prixUnitaire: draft.prixUnitaire,
+    }));
+
     try {
-      const updated = await updateOuvrageClient(ouvrage.id, {
-        nom: nom.trim(),
-        unites: uniteDrafts.map((draft) => ({
-          ouvrageUniteId: draft.ouvrageUniteId,
-          uniteId: draft.uniteId,
-          prixUnitaire: draft.prixUnitaire,
-        })),
-      });
-      onSaved?.(updated);
+      const result = isCreate
+        ? await createOuvrageClient({
+            metierId: ouvrage.metier_id,
+            nom: nom.trim(),
+            nomDevis: nomDevis.trim() || null,
+            unites: unitesPayload,
+          })
+        : await updateOuvrageClient(ouvrage.id, {
+            nom: nom.trim(),
+            nomDevis: nomDevis.trim() || null,
+            unites: unitesPayload,
+          });
+      onSaved?.(result);
       onClose();
     } catch (saveError) {
-      setError(saveError.message || "Impossible de mettre à jour l'ouvrage.");
+      setError(
+        saveError.message ||
+          (isCreate ? "Impossible de créer l'ouvrage." : "Impossible de mettre à jour l'ouvrage.")
+      );
     } finally {
       setSaving(false);
     }
@@ -136,7 +165,7 @@ function OuvrageEditModalForm({ ouvrage, onClose, onSaved }) {
       >
         <div className="admin-modal-header">
           <h3 id="ouvrage-edit-modal-title" className="admin-modal-title">
-            Modifier l&apos;ouvrage
+            {isCreate ? "Ajouter un ouvrage" : "Modifier l'ouvrage"}
           </h3>
           <button type="button" className="admin-modal-close" onClick={onClose} disabled={saving}>
             ×
@@ -163,6 +192,21 @@ function OuvrageEditModalForm({ ouvrage, onClose, onSaved }) {
               onChange={(event) => setNom(event.target.value)}
               disabled={saving}
               required
+            />
+          </div>
+
+          <div className="search-field">
+            <label className="search-field-label" htmlFor="ouvrage-edit-nom-devis">
+              Nom sur devis (optionnel)
+            </label>
+            <input
+              id="ouvrage-edit-nom-devis"
+              type="text"
+              className="search-field-input"
+              placeholder="Affiché sur les devis à la place du nom catalogue"
+              value={nomDevis}
+              onChange={(event) => setNomDevis(event.target.value)}
+              disabled={saving}
             />
           </div>
 
@@ -234,8 +278,8 @@ function OuvrageEditModalForm({ ouvrage, onClose, onSaved }) {
             <button type="button" className="secondary-button" onClick={onClose} disabled={saving}>
               Annuler
             </button>
-            <button type="submit" className="primary-button" disabled={saving || !isValid}>
-              {saving ? 'Enregistrement…' : 'Enregistrer'}
+            <button type="submit" className="primary-button p-1" disabled={saving || !isValid}>
+              {saving ? 'Enregistrement…' : isCreate ? 'Ajouter' : 'Enregistrer'}
             </button>
           </div>
         </form>

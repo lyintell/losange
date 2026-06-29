@@ -1,0 +1,2 @@
+ALTER TABLE ouvrages
+  ADD COLUMN IF NOT EXISTS nom_devis TEXT;

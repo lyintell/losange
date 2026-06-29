@@ -128,6 +128,7 @@ export async function fetchArticleById(articleId, { entrepriseId } = {}) {
         `
         id,
         nom,
+        nom_devis,
         metier_id,
         entreprise_id,
         ind_article,
@@ -150,6 +151,7 @@ export async function fetchArticleById(articleId, { entrepriseId } = {}) {
   return {
     id: data.id,
     nom: data.nom,
+    nom_devis: data.nom_devis || '',
     metier_id: data.metier_id,
     metier_nom: data.metiers?.nom || '',
     entreprise_id: data.entreprise_id,
@@ -182,6 +184,26 @@ export async function searchFournisseurs({ metierId, entrepriseId, query }) {
   return data || [];
 }
 
+async function findFournisseurByNomExact({ metierId, entrepriseId, nom }) {
+  const trimmedNom = String(nom || '').trim();
+  if (!trimmedNom || !metierId || !entrepriseId) return null;
+
+  const supabase = createServerSupabaseClient();
+  const { data, error } = await ACTIVE_FILTER(
+    supabase
+      .from('fournisseurs')
+      .select('id, nom')
+      .eq('metier_id', metierId)
+      .eq('entreprise_id', entrepriseId)
+      .ilike('nom', trimmedNom)
+  )
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message || 'Erreur fournisseur.');
+  return data;
+}
+
 async function resolveFournisseurId({ metierId, entrepriseId, fournisseurId, fournisseurNom }) {
   if (fournisseurId) {
     const supabase = createServerSupabaseClient();
@@ -201,6 +223,9 @@ async function resolveFournisseurId({ metierId, entrepriseId, fournisseurId, fou
 
   const trimmedNom = String(fournisseurNom || '').trim();
   if (!trimmedNom) return null;
+
+  const existing = await findFournisseurByNomExact({ metierId, entrepriseId, nom: trimmedNom });
+  if (existing) return existing.id;
 
   const supabase = createServerSupabaseClient();
   const now = new Date().toISOString();
@@ -224,7 +249,7 @@ async function resolveFournisseurId({ metierId, entrepriseId, fournisseurId, fou
 
 export async function updateArticle(
   articleId,
-  { nom, unites = [], fournisseurId, fournisseurNom },
+  { nom, nomDevis, unites = [], fournisseurId, fournisseurNom },
   { entrepriseId } = {}
 ) {
   const trimmedNom = nom?.trim();
@@ -237,6 +262,8 @@ export async function updateArticle(
 
   const supabase = createServerSupabaseClient();
   const now = new Date().toISOString();
+  const trimmedNomDevis =
+    nomDevis === undefined ? existing.nom_devis || null : String(nomDevis || '').trim() || null;
 
   let resolvedFournisseurId = existing.fournisseur_id ?? null;
   if (fournisseurId !== undefined || fournisseurNom !== undefined) {
@@ -256,6 +283,7 @@ export async function updateArticle(
     .from('ouvrages')
     .update({
       nom: trimmedNom,
+      nom_devis: trimmedNomDevis,
       fournisseur_id: resolvedFournisseurId,
       mis_a_jour_le: now,
       _synced: 0,
@@ -292,4 +320,87 @@ export async function updateArticle(
   }
 
   return fetchArticleById(articleId, { entrepriseId });
+}
+
+export async function createArticle(
+  { metierId, nom, nomDevis, unites = [], fournisseurId, fournisseurNom },
+  { entrepriseId } = {}
+) {
+  const trimmedNom = nom?.trim();
+  if (!metierId || !entrepriseId || !trimmedNom) {
+    throw new Error("Le métier et le nom de l'article sont requis.");
+  }
+
+  const trimmedNomDevis = String(nomDevis || '').trim() || null;
+
+  const primaryUnite = unites[0];
+  if (!primaryUnite?.uniteId) {
+    throw new Error('Unité requise.');
+  }
+
+  const prix = Number(primaryUnite.prixUnitaire);
+  if (!Number.isFinite(prix) || prix < 0) {
+    throw new Error('Prix unitaire invalide.');
+  }
+
+  const resolvedFournisseurId = await resolveFournisseurId({
+    metierId,
+    entrepriseId,
+    fournisseurId: fournisseurId ?? null,
+    fournisseurNom,
+  });
+
+  const supabase = createServerSupabaseClient();
+  const now = new Date().toISOString();
+  const articleId = crypto.randomUUID();
+  const ouvrageUniteId = crypto.randomUUID();
+
+  const { data: ordreRow, error: ordreError } = await supabase
+    .from('ouvrages')
+    .select('ordre')
+    .eq('metier_id', metierId)
+    .eq('entreprise_id', entrepriseId)
+    .is('supprime_le', null)
+    .order('ordre', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (ordreError) throw new Error(ordreError.message || 'Erreur lecture ordre article.');
+  const ordre = Number(ordreRow?.ordre ?? -1) + 1;
+
+  const { error: articleError } = await supabase.from('ouvrages').insert({
+    id: articleId,
+    metier_id: metierId,
+    entreprise_id: entrepriseId,
+    nom: trimmedNom,
+    nom_devis: trimmedNomDevis,
+    ind_article: 1,
+    ind_actif: 1,
+    fournisseur_id: resolvedFournisseurId,
+    ordre,
+    cree_le: now,
+    mis_a_jour_le: now,
+    _synced: 0,
+  });
+
+  if (articleError) throw new Error(articleError.message || 'Erreur création article.');
+
+  const { error: uniteError } = await supabase.from('ouvrage_unites').insert({
+    id: ouvrageUniteId,
+    ouvrage_id: articleId,
+    unite_id: primaryUnite.uniteId,
+    prix_unitaire: prix,
+    cree_le: now,
+    mis_a_jour_le: now,
+    _synced: 0,
+  });
+
+  if (uniteError) throw new Error(uniteError.message || 'Erreur création unité article.');
+
+  const created = await fetchArticleById(articleId, { entrepriseId });
+  return {
+    ...created,
+    ordre,
+    unite_count: created?.unites?.length || 0,
+  };
 }

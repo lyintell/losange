@@ -1,17 +1,14 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { ActivityIndicator, Menu, Modal, Portal, Text, TextInput } from 'react-native-paper';
 import MobileButton from './MobileButton';
-import { getAllUnitesLocal, searchFournisseursLocal, updateOuvrageLocal } from '../../db/querries';
+import FournisseurSearchField from './FournisseurSearchField';
+import { getAllUnitesLocal, updateOuvrageLocal } from '../../db/querries';
 import { getMetierColor } from '../../utils/metierColors';
 import { formatUniteTypeLabel } from '../../utils/formatLigneMesures';
 import { formatUniteChoiceLabel } from '../../utils/formatUniteChoiceLabel';
+import { resolveFournisseurPayload } from '../../utils/fournisseurSearch';
 import { chantierColors } from '../../styles/theme';
-
-const formatFournisseurSubtitle = (fournisseur) => {
-  const phones = [fournisseur.telephone_1, fournisseur.telephone_2].filter(Boolean);
-  return phones.join(' · ');
-};
 
 const mapCatalogueUnite = (catalogueUnite) => ({
   uniteId: catalogueUnite.id,
@@ -47,40 +44,8 @@ export default function OuvrageFormModal({
   const [fournisseurNom, setFournisseurNom] = useState('');
   const [selectedFournisseurId, setSelectedFournisseurId] = useState(null);
   const [fournisseurSearchResults, setFournisseurSearchResults] = useState([]);
-  const [searchingFournisseurs, setSearchingFournisseurs] = useState(false);
-  const [showFournisseurDropdown, setShowFournisseurDropdown] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-
-  const runFournisseurSearch = useCallback(
-    async (query) => {
-      if (!isArticle || !ouvrage?.metier_id || !ouvrage?.entreprise_id || !query.trim()) {
-        setFournisseurSearchResults([]);
-        return;
-      }
-      try {
-        setSearchingFournisseurs(true);
-        const results = await searchFournisseursLocal(
-          ouvrage.metier_id,
-          ouvrage.entreprise_id,
-          query
-        );
-        setFournisseurSearchResults(results || []);
-      } catch (searchError) {
-        console.error('Erreur recherche fournisseurs:', searchError);
-        setFournisseurSearchResults([]);
-      } finally {
-        setSearchingFournisseurs(false);
-      }
-    },
-    [isArticle, ouvrage?.metier_id, ouvrage?.entreprise_id]
-  );
-
-  useEffect(() => {
-    if (!visible || !isArticle || !showFournisseurDropdown) return undefined;
-    const timer = setTimeout(() => runFournisseurSearch(fournisseurNom), 300);
-    return () => clearTimeout(timer);
-  }, [fournisseurNom, isArticle, runFournisseurSearch, showFournisseurDropdown, visible]);
 
   useEffect(() => {
     if (!visible) return undefined;
@@ -92,7 +57,6 @@ export default function OuvrageFormModal({
     setFournisseurNom(ouvrage?.fournisseur_nom || '');
     setSelectedFournisseurId(ouvrage?.fournisseur_id || null);
     setFournisseurSearchResults([]);
-    setShowFournisseurDropdown(false);
 
     const load = async () => {
       if (editPriceOnly) {
@@ -139,14 +103,6 @@ export default function OuvrageFormModal({
   const handleSelectFournisseur = (fournisseur) => {
     setSelectedFournisseurId(fournisseur.id);
     setFournisseurNom(fournisseur.nom || '');
-    setFournisseurSearchResults([]);
-    setShowFournisseurDropdown(false);
-  };
-
-  const handleFournisseurNomChange = (value) => {
-    setFournisseurNom(value);
-    setSelectedFournisseurId(null);
-    setShowFournisseurDropdown(true);
   };
 
   const handleSave = async () => {
@@ -180,8 +136,13 @@ export default function OuvrageFormModal({
       };
 
       if (isArticle && !editPriceOnly) {
-        payload.fournisseurId = selectedFournisseurId;
-        payload.fournisseurNom = fournisseurNom.trim() || null;
+        const fournisseurPayload = resolveFournisseurPayload({
+          fournisseurNom,
+          selectedFournisseurId,
+          searchResults: fournisseurSearchResults,
+        });
+        payload.fournisseurId = fournisseurPayload.fournisseurId;
+        payload.fournisseurNom = fournisseurPayload.fournisseurNom;
       }
 
       const result = await updateOuvrageLocal(payload);
@@ -238,46 +199,18 @@ export default function OuvrageFormModal({
           )}
 
           {isArticle && !editPriceOnly ? (
-            <>
-              <TextInput
-                mode="outlined"
-                label="Nom du fournisseur (optionnel)"
-                placeholder="Nom ou téléphone"
-                value={fournisseurNom}
-                onChangeText={handleFournisseurNomChange}
-                style={styles.input}
-                right={
-                  searchingFournisseurs ? (
-                    <TextInput.Icon
-                      icon={() => <ActivityIndicator size={18} color={chantierColors.primary} />}
-                    />
-                  ) : undefined
-                }
-              />
-
-              {showFournisseurDropdown && fournisseurSearchResults.length > 0 ? (
-                <View style={styles.searchResults}>
-                  {fournisseurSearchResults.map((fournisseur) => (
-                    <Pressable
-                      key={fournisseur.id}
-                      onPress={() => handleSelectFournisseur(fournisseur)}
-                      style={({ pressed }) => [
-                        styles.searchResultRow,
-                        selectedFournisseurId === fournisseur.id && styles.searchResultRowSelected,
-                        pressed && styles.searchResultPressed,
-                      ]}
-                    >
-                      <Text style={styles.searchResultName}>{fournisseur.nom}</Text>
-                      {formatFournisseurSubtitle(fournisseur) ? (
-                        <Text style={styles.searchResultPhone}>
-                          {formatFournisseurSubtitle(fournisseur)}
-                        </Text>
-                      ) : null}
-                    </Pressable>
-                  ))}
-                </View>
-              ) : null}
-            </>
+            <FournisseurSearchField
+              visible={visible}
+              metierId={ouvrage?.metier_id}
+              entrepriseId={ouvrage?.entreprise_id}
+              fournisseurNom={fournisseurNom}
+              selectedFournisseurId={selectedFournisseurId}
+              onFournisseurNomChange={setFournisseurNom}
+              onSelectFournisseur={handleSelectFournisseur}
+              onClearSelection={() => setSelectedFournisseurId(null)}
+              onSearchResultsChange={setFournisseurSearchResults}
+              disabled={saving}
+            />
           ) : null}
 
           {isArticle && editPriceOnly ? (
@@ -409,36 +342,6 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: chantierColors.surface,
     marginBottom: 12,
-  },
-  searchResults: {
-    borderWidth: 1,
-    borderColor: chantierColors.border,
-    borderRadius: 10,
-    overflow: 'hidden',
-    backgroundColor: chantierColors.surface,
-    marginBottom: 12,
-  },
-  searchResultRow: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: chantierColors.border,
-  },
-  searchResultRowSelected: {
-    backgroundColor: '#FFF5F1',
-  },
-  searchResultPressed: {
-    backgroundColor: '#FFF5F1',
-  },
-  searchResultName: {
-    color: chantierColors.text,
-    fontWeight: '700',
-    fontSize: 16,
-  },
-  searchResultPhone: {
-    color: chantierColors.muted,
-    marginTop: 2,
-    fontSize: 14,
   },
   uniteBlock: {
     borderWidth: 1,

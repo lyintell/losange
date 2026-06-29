@@ -17,6 +17,7 @@ import { isDefaultSectionNom } from './defaultSection';
 import { getMetierColor } from './metierColors';
 import { groupLignesByMetier } from './groupLignesByMetier';
 import { groupLignesBySection } from './groupLignesBySection';
+import { getLigneOuvrageNomPourDevis } from './ouvrageNomDevis';
 
 export function formatDevisDimension(ligne) {
   if (!isLigneDimension(ligne)) return null;
@@ -45,7 +46,7 @@ function groupByMetierThenOuvrageInOrder(lignes = []) {
   lignes.forEach((ligne) => {
     const metierNom = ligne.metier_nom?.trim() || 'Autre';
     const metierId = ligne.metier_id || metierNom;
-    const ouvrageNom = ligne.ouvrage_nom?.trim() || 'Ouvrage';
+    const ouvrageNom = getLigneOuvrageNomPourDevis(ligne);
     const nomUnite = getLigneNomUnite(ligne);
     const isDimension = isLigneDimension(ligne);
     const ouvrageKey = `${metierId}::${ouvrageNom}::${isDimension ? `dim::${ligne.formule || ''}` : nomUnite}`;
@@ -83,7 +84,7 @@ function groupByMetierThenOuvrageInOrder(lignes = []) {
 }
 
 function buildOuvrageKey(metierId, ligne) {
-  const ouvrageNom = ligne.ouvrage_nom?.trim() || 'Ouvrage';
+  const ouvrageNom = getLigneOuvrageNomPourDevis(ligne);
   const nomUnite = getLigneNomUnite(ligne);
   const isDimension = isLigneDimension(ligne);
   return `${metierId}::${ouvrageNom}::${isDimension ? `dim::${ligne.formule || ''}` : nomUnite}`;

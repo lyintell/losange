@@ -1101,6 +1101,19 @@ body {
   margin-bottom: 16px;
 }
 
+.catalogue-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.catalogue-toolbar .tabs {
+  margin-bottom: 0;
+}
+
 .tab-button {
   min-height: 42px;
   border: 1px solid var(--losange-border);
@@ -1253,6 +1266,11 @@ body {
 
 .search-dropdown-item:hover {
   background: #f8f9fa;
+}
+
+.search-dropdown-item.search-result-button--selected,
+.search-dropdown-item.search-result-button--selected:hover {
+  background: #fff5f1;
 }
 
 .search-dropdown-meta {

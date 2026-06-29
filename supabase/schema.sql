@@ -138,6 +138,7 @@ CREATE TABLE IF NOT EXISTS ouvrages (
   metier_id TEXT NOT NULL REFERENCES metiers (id) ON DELETE CASCADE,
   entreprise_id TEXT NOT NULL REFERENCES entreprises (id) ON DELETE CASCADE,
   nom TEXT NOT NULL,
+  nom_devis TEXT,
   ind_article SMALLINT NOT NULL DEFAULT 0 CHECK (ind_article IN (0, 1)),
   fournisseur_id TEXT REFERENCES fournisseurs (id) ON DELETE SET NULL,
   photo TEXT,

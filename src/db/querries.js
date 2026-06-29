@@ -1536,6 +1536,27 @@ export const searchFournisseursLocal = async (metierId, entrepriseId, query) => 
   );
 };
 
+export const findFournisseurByNomExactLocal = async (metierId, entrepriseId, nom) => {
+  const trimmedNom = String(nom || '').trim();
+  if (!metierId || !entrepriseId || !trimmedNom) return null;
+
+  const db = await ensureLocalDatabaseReady();
+  const hasSupprimeLe = await tableHasColumn(db, 'fournisseurs', 'supprime_le');
+  const tombstoneFilter = hasSupprimeLe ? ' AND supprime_le IS NULL' : '';
+
+  return db.getFirstAsync(
+    `
+    SELECT id, nom
+    FROM fournisseurs
+    WHERE metier_id = ?
+      AND entreprise_id = ?${tombstoneFilter}
+      AND LOWER(TRIM(nom)) = LOWER(?)
+    LIMIT 1;
+    `,
+    [metierId, entrepriseId, trimmedNom]
+  );
+};
+
 export const insertFournisseurLocal = async ({
   metierId,
   entrepriseId,
@@ -1589,14 +1610,11 @@ export const insertArticleWithUniteLocal = async ({
   if (!resolvedFournisseurId) {
     const trimmedFournisseurNom = String(fournisseurNom || '').trim();
     if (trimmedFournisseurNom) {
-      const trimmedTelephone = String(fournisseurTelephone || '').trim() || null;
-      const fournisseur = await insertFournisseurLocal({
+      resolvedFournisseurId = await resolveArticleFournisseurIdLocal({
         metierId,
         entrepriseId,
-        nom: trimmedFournisseurNom,
-        telephone1: trimmedTelephone,
+        fournisseurNom: trimmedFournisseurNom,
       });
-      resolvedFournisseurId = fournisseur.id;
     }
   } else {
     const db = await ensureLocalDatabaseReady();
@@ -1897,6 +1915,7 @@ export const getLignesByReleveIdLocal = async (releveId) => {
       r.date_facture as releve_date_facture,
       r.cree_le as releve_cree_le,
       o.nom as ouvrage_nom,
+      o.nom_devis as ouvrage_nom_devis,
       m.id as metier_id,
       m.nom as metier_nom,
       u.nom_unite,
@@ -1949,6 +1968,7 @@ export const getLignesByChantierLocal = async (chantierId) => {
       r.date_facture as releve_date_facture,
       r.cree_le as releve_cree_le,
       o.nom as ouvrage_nom,
+      o.nom_devis as ouvrage_nom_devis,
       m.id as metier_id,
       m.nom as metier_nom,
       u.nom_unite,
@@ -2466,6 +2486,9 @@ const resolveArticleFournisseurIdLocal = async ({
 
   const trimmedFournisseurNom = String(fournisseurNom || '').trim();
   if (!trimmedFournisseurNom) return null;
+
+  const existing = await findFournisseurByNomExactLocal(metierId, entrepriseId, trimmedFournisseurNom);
+  if (existing) return existing.id;
 
   const fournisseur = await insertFournisseurLocal({
     metierId,

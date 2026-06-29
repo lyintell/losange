@@ -46,6 +46,7 @@ export async function fetchLignesByReleveId(releveId) {
         ),
         ouvrages!inner (
           nom,
+          nom_devis,
           metier_id,
           metiers!inner (
             id,
@@ -101,6 +102,7 @@ export async function fetchLignesByReleveId(releveId) {
       section_ordre: sectionOrdreById.get(ligne.section_id) ?? null,
       releve_date_facture: releve.date_facture,
       ouvrage_nom: ouvrage?.nom,
+      ouvrage_nom_devis: ouvrage?.nom_devis || null,
       metier_id: metier?.id,
       metier_nom: metier?.nom,
       nom_unite: unite?.nom_unite,

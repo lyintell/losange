@@ -24,6 +24,7 @@ export async function PATCH(request, { params }) {
       articleId,
       {
         nom: body?.nom,
+        nomDevis: body?.nomDevis,
         unites: body?.unites,
         fournisseurId: body?.fournisseurId,
         fournisseurNom: body?.fournisseurNom,
