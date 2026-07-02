@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import DevisDocumentView from '@/components/chantiers/DevisDocumentView';
+import { canModifyChantiers, canChangeChantierStatus, canChangeDevisStatus } from '@/lib/chantiers/access';
 import { fetchChantierDetail, fetchEntrepriseForSession } from '@/lib/chantiers/queries';
 import { fetchLignesByReleveId } from '@/lib/lignes/queries';
 import { getSession } from '@/lib/auth/session';
@@ -30,6 +31,9 @@ export default async function DevisDocumentPage({ params }) {
       lignes={lignes}
       releve={releve}
       entreprise={entreprise}
+      canModifyChantier={canModifyChantiers(session?.role)}
+      canChangeChantierStatus={canChangeChantierStatus(session?.role)}
+      canChangeDevisStatus={canChangeDevisStatus(session?.role)}
     />
   );
 }

@@ -42,7 +42,7 @@ function ReleveList({ chantierId, releves, emptyLabel }) {
   );
 }
 
-function DevisListItem({ chantierId, releve, savingReleveId, onReleveStatusClick }) {
+function DevisListItem({ chantierId, releve, savingReleveId, onReleveStatusClick, canChangeDevisStatus }) {
   const href = `/chantiers/${chantierId}/devis/${releve.id}`;
   const handleRowClick = useRowOpen(href, { newTab: true });
 
@@ -59,14 +59,14 @@ function DevisListItem({ chantierId, releve, savingReleveId, onReleveStatusClick
         <ReleveStatusBadge
           status={releve.status}
           saving={savingReleveId === releve.id}
-          onClick={() => onReleveStatusClick?.(releve)}
+          onClick={canChangeDevisStatus ? () => onReleveStatusClick?.(releve) : undefined}
         />
       </div>
     </li>
   );
 }
 
-function DevisList({ chantierId, releves, savingReleveId, onReleveStatusClick }) {
+function DevisList({ chantierId, releves, savingReleveId, onReleveStatusClick, canChangeDevisStatus }) {
   if (!releves.length) {
     return <p className="empty-state">Aucun devis pour ce chantier.</p>;
   }
@@ -80,6 +80,7 @@ function DevisList({ chantierId, releves, savingReleveId, onReleveStatusClick })
           releve={releve}
           savingReleveId={savingReleveId}
           onReleveStatusClick={onReleveStatusClick}
+          canChangeDevisStatus={canChangeDevisStatus}
         />
       ))}
     </ul>
@@ -90,6 +91,9 @@ export default function ChantierDetailClient({
   chantier,
   activeTab: controlledTab = null,
   onTabChange = null,
+  canModifyChantier = true,
+  canChangeChantierStatus = true,
+  canChangeDevisStatus = true,
 }) {
   const [internalTab, setInternalTab] = useState('devis');
   const tab = controlledTab ?? internalTab;
@@ -198,8 +202,9 @@ export default function ChantierDetailClient({
             </h2>
             <button
               type="button"
-              className="status-trigger-button status-trigger-button--inline"
-              onClick={openStatusModal}
+              className={`status-trigger-button status-trigger-button--inline${canChangeChantierStatus ? '' : ' status-trigger-button--readonly'}`}
+              onClick={canChangeChantierStatus ? openStatusModal : undefined}
+              disabled={!canChangeChantierStatus}
             >
               <ChantierStatusBadge status={chantierStatus} />
             </button>
@@ -207,14 +212,16 @@ export default function ChantierDetailClient({
           <p className="chantier-detail-meta">{info.adresse || 'Adresse non renseignée'}</p>
           {info.notes ? <p className="chantier-detail-meta chantier-detail-notes">{info.notes}</p> : null}
         </div>
-        <button
-          type="button"
-          className="secondary-button icon-text-button"
-          onClick={() => setInfoModalOpen(true)}
-        >
-          <AdminIcon name="pencil" size={16} />
-          <span>Modifier info</span>
-        </button>
+        {canModifyChantier ? (
+          <button
+            type="button"
+            className="secondary-button icon-text-button"
+            onClick={() => setInfoModalOpen(true)}
+          >
+            <AdminIcon name="pencil" size={16} />
+            <span>Modifier info</span>
+          </button>
+        ) : null}
       </div>
 
       <div className="tabs">
@@ -242,6 +249,7 @@ export default function ChantierDetailClient({
             releves={releves}
             savingReleveId={releveStatusSavingId}
             onReleveStatusClick={handleReleveStatusClick}
+            canChangeDevisStatus={canChangeDevisStatus}
           />
         </>
       ) : (

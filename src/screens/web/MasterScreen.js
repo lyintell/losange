@@ -49,6 +49,7 @@ const FIELD_LABELS = {
   notes: 'Notes chantier',
   supprime_le: 'Supprimé le (tombstone sync)',
   note: 'Note relevé',
+  prix_revient: 'Prix de revient',
 };
 
 const getFieldLabel = (field) => FIELD_LABELS[field.name] || field.name;
@@ -255,6 +256,7 @@ const TABLE_SCHEMAS = {
     { name: 'ouvrage_id', type: 'TEXT', required: true, fkTable: 'ouvrages' },
     { name: 'unite_id', type: 'TEXT', required: true, fkTable: 'unites' },
     { name: 'prix_unitaire', type: 'REAL', required: true },
+    { name: 'prix_revient', type: 'REAL' },
     { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
@@ -304,7 +306,7 @@ const TABLE_SCHEMAS = {
     { name: 'largeur', type: 'REAL' },
     { name: 'hauteur', type: 'REAL' },
     { name: 'profondeur', type: 'REAL' },
-    { name: 'nombre', type: 'INTEGER' },
+    { name: 'nombre', type: 'REAL' },
     { name: 'quantite', type: 'REAL', required: true, isAutoComputed: true },
     { name: 'prix_unitaire_applique', type: 'REAL', required: true },
     { name: 'montant', type: 'REAL', required: true, isAutoComputed: true },

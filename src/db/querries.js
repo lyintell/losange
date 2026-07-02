@@ -11,7 +11,7 @@ import { getLoggedInProfilLocal, getTerrainSessionLocal } from './terrainSync';
 import { markMetiersPreselectedLocal } from './metiersPreselection';
 import { scheduleTerrainSyncAfterWrite } from './terrainSyncScheduler';
 import { withReleveNumbers } from '../utils/releveNumber';
-import { canModifyReleveForProfil, canSeeAllChantiers, canChangeReleveStatus } from '../utils/terrainAccess';
+import { canModifyReleveForProfil, canChangeReleveStatus, canChangeChantierStatus, canToggleLigneIndCompleteOnReleve, filtersChantiersToOwnRelevesForProfil, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_COMMERCIAL_S } from '../utils/terrainAccess';
 import { computeReleveFacturation } from '../utils/releveFacturation';
 import { normalizeReleveStatus, RELEVE_STATUS_DEFAULT } from '../utils/releveStatus';
 import { computeChantierStatusFromReleves } from '../utils/chantierStatusFromReleves';
@@ -23,6 +23,7 @@ import {
   computeMontantLigneReleve,
   computeQuantiteLigneReleve,
 } from '../utils/ligneReleveCalcul';
+import { roundMontant, roundQuantite } from '../utils/formatLigneMesures';
 
 const nowIso = () => new Date().toISOString();
 
@@ -132,6 +133,20 @@ export const canCurrentUserModifyChantierLocal = async (chantierId) => {
   if (!chantierId) return false;
   const profil = await getLoggedInProfilLocal();
   if (!profil) return false;
+  if (profil.role === ROLE_ADMIN || profil.role === ROLE_COMMERCIAL_S) return true;
+
+  const db = await ensureLocalDatabaseReady();
+  const hasSupprimeLe = await tableHasColumn(db, 'releves', 'supprime_le');
+  const tombstoneFilter = hasSupprimeLe ? ' AND supprime_le IS NULL' : '';
+
+  if (profil.role === ROLE_COMMERCIAL) {
+    const ownRow = await db.getFirstAsync(
+      `SELECT id FROM releves WHERE chantier_id = ? AND prise_par_id = ?${tombstoneFilter} LIMIT 1;`,
+      [chantierId, profil.id]
+    );
+    return Boolean(ownRow);
+  }
+
   const releve = await getReleveByChantierLocal(chantierId);
   return canModifyReleveForProfil(profil, releve);
 };
@@ -1006,17 +1021,24 @@ export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) =>
     indComplete = 0,
   } = cotes;
   const uniteContext = await getUniteContextByOuvrageUniteId(ouvrageUniteId);
+  const resolvedLargeur =
+    largeur != null && largeur !== '' ? roundQuantite(largeur) : null;
+  const resolvedHauteur =
+    hauteur != null && hauteur !== '' ? roundQuantite(hauteur) : null;
+  const resolvedProfondeur =
+    profondeur != null && profondeur !== '' ? roundQuantite(profondeur) : null;
+  const resolvedPu = roundMontant(prixUnitaireApplique);
   const quantite = computeQuantiteLigneReleve({
     indDimension: uniteContext?.ind_dimension,
     formule: uniteContext?.formule,
-    largeur,
-    hauteur,
-    profondeur,
+    largeur: resolvedLargeur,
+    hauteur: resolvedHauteur,
+    profondeur: resolvedProfondeur,
     nombre,
   });
 
   const montant = computeMontantLigneReleve({
-    prixUnitaireApplique,
+    prixUnitaireApplique: resolvedPu,
     nombre: nombre || 1,
   });
 
@@ -1051,12 +1073,12 @@ export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) =>
         ouvrageUniteId,
         sectionId,
         Number(ordre) || 0,
-        largeur || null,
-        hauteur || null,
-        profondeur || null,
+        resolvedLargeur,
+        resolvedHauteur,
+        resolvedProfondeur,
         nombre || 1,
         quantite,
-        prixUnitaireApplique,
+        resolvedPu,
         montant,
         note?.trim() || null,
         photo || null,
@@ -1076,12 +1098,12 @@ export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) =>
         releveId,
         ouvrageUniteId,
         sectionId,
-        largeur || null,
-        hauteur || null,
-        profondeur || null,
+        resolvedLargeur,
+        resolvedHauteur,
+        resolvedProfondeur,
         nombre || 1,
         quantite,
-        prixUnitaireApplique,
+        resolvedPu,
         montant,
         note?.trim() || null,
         photo || null,
@@ -1101,12 +1123,12 @@ export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) =>
         releveId,
         ouvrageUniteId,
         Number(ordre) || 0,
-        largeur || null,
-        hauteur || null,
-        profondeur || null,
+        resolvedLargeur,
+        resolvedHauteur,
+        resolvedProfondeur,
         nombre || 1,
         quantite,
-        prixUnitaireApplique,
+        resolvedPu,
         montant,
         note?.trim() || null,
         photo || null,
@@ -1125,12 +1147,12 @@ export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) =>
         id,
         releveId,
         ouvrageUniteId,
-        largeur || null,
-        hauteur || null,
-        profondeur || null,
+        resolvedLargeur,
+        resolvedHauteur,
+        resolvedProfondeur,
         nombre || 1,
         quantite,
-        prixUnitaireApplique,
+        resolvedPu,
         montant,
         note?.trim() || null,
         photo || null,
@@ -1211,8 +1233,9 @@ export const updateChantierLocal = async (
 };
 
 export const updateChantierStatusLocal = async (chantierId, status) => {
-  if (!(await canCurrentUserModifyChantierLocal(chantierId))) {
-    throw new Error(RELEVE_ACCESS_DENIED_ERROR);
+  const profil = await getLoggedInProfilLocal();
+  if (!canChangeChantierStatus(profil)) {
+    throw new Error('Vous ne pouvez pas modifier le statut du chantier.');
   }
   const db = await ensureLocalDatabaseReady();
   await db.runAsync(
@@ -1255,7 +1278,9 @@ export const updateLigneReleveIndCompleteLocal = async (ligneId, indComplete) =>
   const db = await ensureLocalDatabaseReady();
   const ligneRow = await db.getFirstAsync('SELECT releve_id FROM ligne_releves WHERE id = ?;', [ligneId]);
   const releve = await getReleveByIdLocal(ligneRow?.releve_id);
-  await assertCanModifyReleveLocal(releve);
+  if (!canToggleLigneIndCompleteOnReleve(profil, releve)) {
+    throw new Error(RELEVE_ACCESS_DENIED_ERROR);
+  }
   const value = Number(indComplete) === 1 ? 1 : 0;
   await db.runAsync(
     `
@@ -1301,8 +1326,7 @@ export const refreshReleveTotaux = async (releveId) => {
 export const getChantiersWithClientLocal = async (entrepriseId = null) => {
   const db = await ensureLocalDatabaseReady();
   const profil = await getLoggedInProfilLocal();
-  const filterOwnChantiers = profil && !canSeeAllChantiers(profil);
-  const ownChantierFilter = filterOwnChantiers ? ' AND releve_prise.prise_par_id = ?' : '';
+  const filterOwnReleves = filtersChantiersToOwnRelevesForProfil(profil);
   const hasSupprimeLe =
     (await tableHasColumn(db, 'chantiers', 'supprime_le')) &&
     (await tableHasColumn(db, 'clients', 'supprime_le'));
@@ -1312,7 +1336,41 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
   const hasReleveSupprimeLe = await tableHasColumn(db, 'releves', 'supprime_le');
   const releveTombstoneClause = hasReleveSupprimeLe ? 'AND r2.supprime_le IS NULL' : '';
   const releveCountClause = hasReleveSupprimeLe ? ' AND r_count.supprime_le IS NULL' : '';
-  const relevePriseJoin = `
+  const ownReleveTombstoneClause = hasReleveSupprimeLe ? 'AND r_own.supprime_le IS NULL' : '';
+
+  const ownChantierFilter = filterOwnReleves
+    ? `
+    AND EXISTS (
+      SELECT 1
+      FROM releves r_own
+      WHERE r_own.chantier_id = chantiers.id
+      ${ownReleveTombstoneClause}
+      AND r_own.prise_par_id = ?
+    )`
+    : '';
+
+  const relevePriseJoin = filterOwnReleves
+    ? `
+    LEFT JOIN (
+      SELECT
+        r.chantier_id,
+        r.cree_le AS prise_le,
+        r.prise_par_id
+      FROM releves r
+      WHERE ${hasReleveSupprimeLe ? 'r.supprime_le IS NULL AND ' : ''}r.prise_par_id = ?
+        AND r.id = (
+          SELECT r2.id
+          FROM releves r2
+          WHERE r2.chantier_id = r.chantier_id
+          ${releveTombstoneClause}
+          AND r2.prise_par_id = ?
+          ORDER BY r2.cree_le DESC, r2.id DESC
+          LIMIT 1
+        )
+    ) releve_prise ON releve_prise.chantier_id = chantiers.id
+    LEFT JOIN profils prise_par ON prise_par.id = releve_prise.prise_par_id
+  `
+    : `
     LEFT JOIN (
       SELECT
         r.chantier_id,
@@ -1331,6 +1389,21 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
     LEFT JOIN profils prise_par ON prise_par.id = releve_prise.prise_par_id
   `;
 
+  const releveCountSelect = filterOwnReleves
+    ? `
+      (
+        SELECT COUNT(*)
+        FROM releves r_count
+        WHERE r_count.chantier_id = chantiers.id
+        AND r_count.prise_par_id = ?${releveCountClause}
+      ) as releve_count`
+    : `
+      (
+        SELECT COUNT(*)
+        FROM releves r_count
+        WHERE r_count.chantier_id = chantiers.id${releveCountClause}
+      ) as releve_count`;
+
   const query = entrepriseId
     ? `
     SELECT
@@ -1341,11 +1414,7 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
       releve_prise.prise_le as prise_le,
       releve_prise.prise_par_id as prise_par_id,
       TRIM(COALESCE(prise_par.prenom, '') || ' ' || COALESCE(prise_par.nom, '')) as prise_par_nom,
-      (
-        SELECT COUNT(*)
-        FROM releves r_count
-        WHERE r_count.chantier_id = chantiers.id${releveCountClause}
-      ) as releve_count
+      ${releveCountSelect}
     FROM chantiers
     JOIN clients ON chantiers.client_id = clients.id
     ${relevePriseJoin}
@@ -1361,11 +1430,7 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
       releve_prise.prise_le as prise_le,
       releve_prise.prise_par_id as prise_par_id,
       TRIM(COALESCE(prise_par.prenom, '') || ' ' || COALESCE(prise_par.nom, '')) as prise_par_nom,
-      (
-        SELECT COUNT(*)
-        FROM releves r_count
-        WHERE r_count.chantier_id = chantiers.id${releveCountClause}
-      ) as releve_count
+      ${releveCountSelect}
     FROM chantiers
     JOIN clients ON chantiers.client_id = clients.id
     ${relevePriseJoin}
@@ -1374,10 +1439,13 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
   `;
 
   if (entrepriseId) {
-    const params = filterOwnChantiers ? [entrepriseId, profil.id] : [entrepriseId];
+    const params = filterOwnReleves
+      ? [profil.id, profil.id, profil.id, entrepriseId, profil.id]
+      : [entrepriseId];
     return db.getAllAsync(query, params);
   }
-  return filterOwnChantiers ? db.getAllAsync(query, [profil.id]) : db.getAllAsync(query);
+  const params = filterOwnReleves ? [profil.id, profil.id, profil.id, profil.id] : [];
+  return params.length ? db.getAllAsync(query, params) : db.getAllAsync(query);
 };
 
 /**
@@ -1468,7 +1536,9 @@ export const getOuvragesByMetierAndEntreprise = async (metierId, entrepriseId) =
 export const getUnitesEtPrixParOuvrage = async (ouvrageId) => {
   const db = await ensureLocalDatabaseReady();
   const hasSupprimeLe = await tableHasColumn(db, 'ouvrage_unites', 'supprime_le');
+  const hasPrixRevient = await tableHasColumn(db, 'ouvrage_unites', 'prix_revient');
   const tombstoneFilter = hasSupprimeLe ? ' AND ou.supprime_le IS NULL' : '';
+  const prixRevientSelect = hasPrixRevient ? ', ou.prix_revient' : '';
   const query = `
     SELECT
       ou.id as ouvrage_unite_id,
@@ -1478,7 +1548,7 @@ export const getUnitesEtPrixParOuvrage = async (ouvrageId) => {
       u.nom,
       u.nom_unite,
       u.ind_dimension,
-      ou.prix_unitaire
+      ou.prix_unitaire${prixRevientSelect}
     FROM ouvrage_unites ou
     JOIN unites u ON ou.unite_id = u.id
     WHERE ou.ouvrage_id = ?${tombstoneFilter}
@@ -1600,6 +1670,7 @@ export const insertArticleWithUniteLocal = async ({
   nom,
   uniteId,
   prixUnitaire,
+  prixRevient = null,
   fournisseurId = null,
   fournisseurNom = null,
   fournisseurTelephone = null,
@@ -1635,6 +1706,7 @@ export const insertArticleWithUniteLocal = async ({
     nom,
     uniteId,
     prixUnitaire,
+    prixRevient,
     indArticle: 1,
     fournisseurId: resolvedFournisseurId,
     photo,
@@ -1651,12 +1723,23 @@ export const isLoggedInAdminLocal = async () => {
   return profil?.role === 'A';
 };
 
+const parseOptionalPrixRevient = (value) => {
+  const raw = String(value ?? '').trim();
+  if (!raw.length) return null;
+  const prix = Number(raw);
+  if (!Number.isFinite(prix) || prix < 0) {
+    throw new Error('Prix de revient invalide.');
+  }
+  return Math.round(prix);
+};
+
 export const insertOuvrageWithUniteLocal = async ({
   metierId,
   entrepriseId,
   nom,
   uniteId,
   prixUnitaire,
+  prixRevient = null,
   indArticle = 0,
   fournisseurId = null,
   photo = null,
@@ -1666,10 +1749,11 @@ export const insertOuvrageWithUniteLocal = async ({
     throw new Error('Métier, entreprise, nom et unité sont requis.');
   }
 
-  const prix = Number(prixUnitaire);
+  const prix = Math.round(Number(prixUnitaire));
   if (!Number.isFinite(prix) || prix < 0) {
     throw new Error('Prix unitaire invalide.');
   }
+  const resolvedPrixRevient = parseOptionalPrixRevient(prixRevient);
 
   const isArticle = Number(indArticle) === 1;
   if (!isArticle) {
@@ -1724,11 +1808,20 @@ export const insertOuvrageWithUniteLocal = async ({
     );
   }
 
-  await db.runAsync(
-    `INSERT INTO ouvrage_unites (id, ouvrage_id, unite_id, prix_unitaire, cree_le, mis_a_jour_le, _synced)
-     VALUES (?, ?, ?, ?, ?, ?, 0);`,
-    [ouvrageUniteId, ouvrageId, uniteId, prix, timestamp, timestamp]
-  );
+  const hasPrixRevient = await tableHasColumn(db, 'ouvrage_unites', 'prix_revient');
+  if (hasPrixRevient) {
+    await db.runAsync(
+      `INSERT INTO ouvrage_unites (id, ouvrage_id, unite_id, prix_unitaire, prix_revient, cree_le, mis_a_jour_le, _synced)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0);`,
+      [ouvrageUniteId, ouvrageId, uniteId, prix, resolvedPrixRevient, timestamp, timestamp]
+    );
+  } else {
+    await db.runAsync(
+      `INSERT INTO ouvrage_unites (id, ouvrage_id, unite_id, prix_unitaire, cree_le, mis_a_jour_le, _synced)
+       VALUES (?, ?, ?, ?, ?, ?, 0);`,
+      [ouvrageUniteId, ouvrageId, uniteId, prix, timestamp, timestamp]
+    );
+  }
 
   notifyLocalDataChanged();
 
@@ -1760,15 +1853,16 @@ export const insertOuvrageWithUniteLocal = async ({
   };
 };
 
-export const insertUniteForOuvrageLocal = async ({ ouvrageId, uniteId, prixUnitaire }) => {
+export const insertUniteForOuvrageLocal = async ({ ouvrageId, uniteId, prixUnitaire, prixRevient = null }) => {
   if (!ouvrageId || !uniteId) {
     throw new Error('Ouvrage et unité sont requis.');
   }
 
-  const prix = Number(prixUnitaire);
+  const prix = Math.round(Number(prixUnitaire));
   if (!Number.isFinite(prix) || prix < 0) {
     throw new Error('Prix unitaire invalide.');
   }
+  const resolvedPrixRevient = parseOptionalPrixRevient(prixRevient);
 
   const existing = await getOuvrageByIdLocal(ouvrageId);
   if (!existing) {
@@ -1783,12 +1877,21 @@ export const insertUniteForOuvrageLocal = async ({ ouvrageId, uniteId, prixUnita
   const db = await ensureLocalDatabaseReady();
   const ouvrageUniteId = uuidv4();
   const timestamp = nowIso();
+  const hasPrixRevient = await tableHasColumn(db, 'ouvrage_unites', 'prix_revient');
 
-  await db.runAsync(
-    `INSERT INTO ouvrage_unites (id, ouvrage_id, unite_id, prix_unitaire, cree_le, mis_a_jour_le, _synced)
-     VALUES (?, ?, ?, ?, ?, ?, 0);`,
-    [ouvrageUniteId, ouvrageId, uniteId, prix, timestamp, timestamp]
-  );
+  if (hasPrixRevient) {
+    await db.runAsync(
+      `INSERT INTO ouvrage_unites (id, ouvrage_id, unite_id, prix_unitaire, prix_revient, cree_le, mis_a_jour_le, _synced)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0);`,
+      [ouvrageUniteId, ouvrageId, uniteId, prix, resolvedPrixRevient, timestamp, timestamp]
+    );
+  } else {
+    await db.runAsync(
+      `INSERT INTO ouvrage_unites (id, ouvrage_id, unite_id, prix_unitaire, cree_le, mis_a_jour_le, _synced)
+       VALUES (?, ?, ?, ?, ?, ?, 0);`,
+      [ouvrageUniteId, ouvrageId, uniteId, prix, timestamp, timestamp]
+    );
+  }
 
   notifyLocalDataChanged();
 
@@ -1809,18 +1912,20 @@ export const getOuvrageUniteContextLocal = async (ouvrageUniteId) => {
   const hasOuvrageUniteSupprimeLe = await tableHasColumn(db, 'ouvrage_unites', 'supprime_le');
   const hasOuvrageSupprimeLe = await tableHasColumn(db, 'ouvrages', 'supprime_le');
   const hasFournisseurId = await tableHasColumn(db, 'ouvrages', 'fournisseur_id');
+  const hasPrixRevient = await tableHasColumn(db, 'ouvrage_unites', 'prix_revient');
   const ouTombstoneFilter = hasOuvrageUniteSupprimeLe ? ' AND ou.supprime_le IS NULL' : '';
   const oTombstoneFilter = hasOuvrageSupprimeLe ? ' AND o.supprime_le IS NULL' : '';
   const fournisseurJoin = hasFournisseurId
     ? 'LEFT JOIN fournisseurs f ON f.id = o.fournisseur_id'
     : '';
   const fournisseurSelect = hasFournisseurId ? ', f.nom AS fournisseur_nom' : '';
+  const prixRevientSelect = hasPrixRevient ? ', ou.prix_revient' : '';
   const row = await db.getFirstAsync(
     `
     SELECT
       ou.id AS ouvrage_unite_id,
       ou.ouvrage_id,
-      ou.prix_unitaire,
+      ou.prix_unitaire${prixRevientSelect},
       u.formule,
       u.nom,
       u.nom_unite,
@@ -1868,6 +1973,7 @@ export const getOuvrageUniteContextLocal = async (ouvrageUniteId) => {
       nom_unite: row.nom_unite,
       ind_dimension: row.ind_dimension,
       prix_unitaire: row.prix_unitaire,
+      ...(hasPrixRevient ? { prix_revient: row.prix_revient ?? null } : {}),
     },
   };
 };
@@ -1991,8 +2097,12 @@ export const getRelevesByChantierLocal = async (chantierId) => {
   if (!chantierId) return [];
 
   const db = await ensureLocalDatabaseReady();
+  const profil = await getLoggedInProfilLocal();
+  const filterOwnReleves = filtersChantiersToOwnRelevesForProfil(profil);
   const hasSupprimeLe = await tableHasColumn(db, 'releves', 'supprime_le');
   const tombstoneFilter = hasSupprimeLe ? ' AND r.supprime_le IS NULL' : '';
+  const ownReleveFilter = filterOwnReleves ? ' AND r.prise_par_id = ?' : '';
+  const params = filterOwnReleves ? [chantierId, profil.id] : [chantierId];
 
   return withReleveNumbers(
     await db.getAllAsync(
@@ -2002,10 +2112,10 @@ export const getRelevesByChantierLocal = async (chantierId) => {
       TRIM(COALESCE(p.prenom, '') || ' ' || COALESCE(p.nom, '')) AS prise_par_nom
     FROM releves r
     LEFT JOIN profils p ON p.id = r.prise_par_id
-    WHERE r.chantier_id = ?${tombstoneFilter}
+    WHERE r.chantier_id = ?${tombstoneFilter}${ownReleveFilter}
     ORDER BY r.cree_le DESC, r.id DESC;
     `,
-      [chantierId]
+      params
     )
   );
 };
@@ -2520,6 +2630,7 @@ export const updateOuvrageLocal = async ({
   const timestamp = nowIso();
   const isArticle = Number(existing.ind_article) === 1;
   const hasFournisseurId = await tableHasColumn(db, 'ouvrages', 'fournisseur_id');
+  const hasPrixRevient = await tableHasColumn(db, 'ouvrage_unites', 'prix_revient');
 
   let resolvedFournisseurId = existing.fournisseur_id ?? null;
   if (isArticle && hasFournisseurId && (fournisseurId !== undefined || fournisseurNom !== undefined)) {
@@ -2560,18 +2671,31 @@ export const updateOuvrageLocal = async ({
     if (!unite?.uniteId) {
       throw new Error('Unité requise.');
     }
-    const prix = Number(unite.prixUnitaire);
+    const prix = Math.round(Number(unite.prixUnitaire));
     if (!Number.isFinite(prix) || prix < 0) {
       throw new Error('Prix unitaire invalide.');
     }
-    await db.runAsync(
-      `
-      UPDATE ouvrage_unites
-      SET unite_id = ?, prix_unitaire = ?, _synced = 0, mis_a_jour_le = ?
-      WHERE id = ? AND ouvrage_id = ?;
-      `,
-      [unite.uniteId, prix, timestamp, unite.ouvrageUniteId, ouvrageId]
-    );
+    const shouldUpdatePrixRevient = hasPrixRevient && Object.prototype.hasOwnProperty.call(unite, 'prixRevient');
+    if (shouldUpdatePrixRevient) {
+      const resolvedPrixRevient = parseOptionalPrixRevient(unite.prixRevient);
+      await db.runAsync(
+        `
+        UPDATE ouvrage_unites
+        SET unite_id = ?, prix_unitaire = ?, prix_revient = ?, _synced = 0, mis_a_jour_le = ?
+        WHERE id = ? AND ouvrage_id = ?;
+        `,
+        [unite.uniteId, prix, resolvedPrixRevient, timestamp, unite.ouvrageUniteId, ouvrageId]
+      );
+    } else {
+      await db.runAsync(
+        `
+        UPDATE ouvrage_unites
+        SET unite_id = ?, prix_unitaire = ?, _synced = 0, mis_a_jour_le = ?
+        WHERE id = ? AND ouvrage_id = ?;
+        `,
+        [unite.uniteId, prix, timestamp, unite.ouvrageUniteId, ouvrageId]
+      );
+    }
   }
 
   notifyLocalDataChanged();

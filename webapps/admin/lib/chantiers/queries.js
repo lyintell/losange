@@ -46,8 +46,10 @@ async function fetchRelevesByChantierIds(supabase, chantierIds) {
 }
 
 function filterChantiersForRole(rows, { role, profilId }) {
-  if (role !== 'T') return rows;
-  return rows.filter((row) => row.prise_par_id === profilId);
+  if (role === 'C') {
+    return rows.filter((row) => row.prise_par_id === profilId);
+  }
+  return rows;
 }
 
 export async function fetchChantiersList({ entrepriseId, role, profilId }) {
@@ -253,11 +255,6 @@ export async function fetchChantierDetail(chantierId, { entrepriseId, role, prof
   }
 
   const releves = await fetchRelevesByChantierIds(supabase, [chantierId]);
-
-  if (role === 'T') {
-    const ownsChantier = releves.some((releve) => releve.prise_par_id === profilId);
-    if (!ownsChantier) return null;
-  }
 
   return {
     id: chantier.id,
@@ -527,9 +524,9 @@ export async function updateReleveLignesPrix(releveId, lignesPayload = [], optio
   const now = new Date().toISOString();
 
   for (const ligne of lignesPayload) {
-    const prixUnitaireApplique = Number(ligne.prix_unitaire_applique) || 0;
+    const prixUnitaireApplique = Math.round(Number(ligne.prix_unitaire_applique) || 0);
     const nombre = Number(ligne.nombre) || 0;
-    const montant = Math.round(prixUnitaireApplique * nombre * 100) / 100;
+    const montant = Math.round(prixUnitaireApplique * nombre);
 
     const { error } = await supabase
       .from('ligne_releves')

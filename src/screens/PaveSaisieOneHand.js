@@ -27,7 +27,7 @@ import {
   computeQuantiteLigneReleve,
   getRequiredCotesFromFormula,
 } from '../utils/ligneReleveCalcul';
-import { formatMontant, formatQuantite, roundQuantite } from '../utils/formatLigneMesures';
+import { formatMontant, formatQuantite, roundMontant, roundQuantite } from '../utils/formatLigneMesures';
 
 const FIELD_LABEL = {
   largeur: 'Largeur',
@@ -39,6 +39,9 @@ const FIELD_LABEL = {
 const COTE_KEY_HEIGHT = 60;
 const COTE_INACTIVE_BG = '#4B5563';
 const COTE_INACTIVE_BORDER = '#3F4654';
+
+/** Nombre/quantité : accepte les décimaux (virgule ou point), 2 décimales max. */
+const parseNombre = (value) => roundQuantite(parseFloat(String(value ?? '').replace(',', '.')) || 0);
 
 export default forwardRef(function PaveSaisieOneHand(
   {
@@ -221,7 +224,7 @@ export default forwardRef(function PaveSaisieOneHand(
     const largeur = resolveLockedCote('largeur', form.largeur);
     const hauteur = resolveLockedCote('hauteur', form.hauteur);
     const profondeur = resolveLockedCote('profondeur', form.profondeur);
-    const nombre = parseInt(form.nombre?.trim() || '0', 10);
+    const nombre = parseNombre(form.nombre);
 
     if (requiredCotes.needsLargeur && (!form.largeur?.trim() || !largeur)) return null;
     if (requiredCotes.needsHauteur && (!form.hauteur?.trim() || !hauteur)) return null;
@@ -245,12 +248,12 @@ export default forwardRef(function PaveSaisieOneHand(
     if (!quantite) return null;
 
     return {
-      largeur: requiredCotes.needsLargeur ? largeur : null,
-      hauteur: requiredCotes.needsHauteur ? hauteur : null,
-      profondeur: requiredCotes.needsProfondeur ? profondeur : null,
+      largeur: requiredCotes.needsLargeur ? roundQuantite(largeur) : null,
+      hauteur: requiredCotes.needsHauteur ? roundQuantite(hauteur) : null,
+      profondeur: requiredCotes.needsProfondeur ? roundQuantite(profondeur) : null,
       nombre,
       quantite,
-      prixUnitaireApplique: prixUnitaireAppliqueState,
+      prixUnitaireApplique: roundMontant(prixUnitaireAppliqueState),
       note: note.trim() || null,
       photo_pending_uri: photoPendingUri,
       photo_mime_type: photoMimeType,
@@ -298,7 +301,7 @@ export default forwardRef(function PaveSaisieOneHand(
   }, [form.hauteur, form.largeur, form.profondeur, form.nombre, isDimension, uniteFormule]);
 
   const montantPreview = useMemo(() => {
-    const nombre = parseInt(form.nombre?.trim() || '0', 10) || 0;
+    const nombre = parseNombre(form.nombre);
     return computeMontantLigneReleve({
       prixUnitaireApplique: prixUnitaireAppliqueState,
       nombre,
@@ -378,7 +381,7 @@ export default forwardRef(function PaveSaisieOneHand(
   };
 
   const quantiteAffichage = isDimensionMode
-    ? parseInt(form.nombre?.trim() || '0', 10) || 0
+    ? parseNombre(form.nombre)
     : quantitePreview;
   const quantiteLabel = `Qté = ${formatQuantite(quantiteAffichage)}${nomUnite ? ` ${nomUnite}` : ''}`;
 
@@ -405,7 +408,7 @@ export default forwardRef(function PaveSaisieOneHand(
       Alert.alert('Prix invalide', 'Saisissez un prix unitaire valide.');
       return;
     }
-    setPrixUnitaireAppliqueState(parsed);
+    setPrixUnitaireAppliqueState(roundMontant(parsed));
     prixManuallyEditedRef.current = true;
     setPrixModalVisible(false);
   };

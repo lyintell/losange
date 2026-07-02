@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import DevisEditClient from '@/components/chantiers/DevisEditClient';
+import { canModifyChantiers } from '@/lib/chantiers/access';
 import { fetchChantierDetail } from '@/lib/chantiers/queries';
 import { fetchLignesByReleveId } from '@/lib/lignes/queries';
 import { canEditReleveRemise } from '@/lib/chantiers/remise';
@@ -17,6 +18,7 @@ export default async function DevisEditPage({ params }) {
   }).catch(() => null);
 
   if (!chantier) notFound();
+  if (!canModifyChantiers(session?.role)) notFound();
 
   const releve = (chantier.releves || []).find((row) => row.id === releveId);
   if (!releve) notFound();

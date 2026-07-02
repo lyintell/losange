@@ -13,7 +13,7 @@ import ChantierStatutBadge from '../components/terrain/ChantierStatutBadge';
 import TerrainSyncOverlay from '../components/terrain/TerrainSyncOverlay';
 import { useTerrainSyncRefresh } from '../hooks/useTerrainSyncRefresh';
 import { canCurrentUserModifyChantierLocal, getChantiersWithClientLocal, getLoggedInProfilViewLocal, updateChantierStatusLocal } from '../db/querries';
-import { canCreateReleveOrLigne } from '../utils/terrainAccess';
+import { canCreateReleveOrLigne, canChangeChantierStatus } from '../utils/terrainAccess';
 import { formatPriseParLine, formatReleveCountLabel } from '../utils/releveDisplay';
 import { chantierColors } from '../styles/theme';
 
@@ -24,7 +24,7 @@ const formatClientPhoneLine = (name, phone) => {
   return parts.length ? parts.join(' / ') : 'Non renseigné';
 };
 
-function ChantierListCard({ item, onPress, onDelete, onStatusChange }) {
+function ChantierListCard({ item, onPress, onDelete, onStatusChange, canEditChantierStatus }) {
   const pressCountRef = useRef(0);
   const pressTimerRef = useRef(null);
   const releveCount = Number(item.releve_count) || 0;
@@ -69,6 +69,7 @@ function ChantierListCard({ item, onPress, onDelete, onStatusChange }) {
           </Pressable>
           <ChantierStatutBadge
             status={item.status || 'D'}
+            disabled={!canEditChantierStatus}
             onStatusChange={(nextStatus) => onStatusChange?.(item, nextStatus)}
           />
         </View>
@@ -112,6 +113,7 @@ export default function ListeChantiers({
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [canCreateReleve, setCanCreateReleve] = useState(true);
+  const [canEditChantierStatus, setCanEditChantierStatus] = useState(false);
   const pulseAnim = React.useRef(new Animated.Value(1)).current;
 
   const loadChantiers = useCallback(async () => {
@@ -153,11 +155,13 @@ export default function ListeChantiers({
         const profil = await getLoggedInProfilViewLocal();
         if (!cancelled) {
           setCanCreateReleve(canCreateReleveOrLigne(profil));
+          setCanEditChantierStatus(canChangeChantierStatus(profil));
         }
       } catch (error) {
         console.error('Erreur chargement acces creation releve:', error);
         if (!cancelled) {
           setCanCreateReleve(true);
+          setCanEditChantierStatus(false);
         }
       }
     };
@@ -198,11 +202,9 @@ export default function ListeChantiers({
     if (!chantier?.id || chantier.status === nextStatus) return;
 
     try {
-      if (!(await canCurrentUserModifyChantierLocal(chantier.id))) {
-        Alert.alert(
-          'Modification refusée',
-          "Vous ne pouvez pas modifier un chantier que vous n'avez pas pris."
-        );
+      const profil = await getLoggedInProfilViewLocal();
+      if (!canChangeChantierStatus(profil)) {
+        Alert.alert('Modification refusée', 'Vous ne pouvez pas modifier le statut du chantier.');
         return;
       }
       await updateChantierStatusLocal(chantier.id, nextStatus);
@@ -294,6 +296,7 @@ export default function ListeChantiers({
             onPress={onChantierPress}
             onDelete={handleDeleteChantierPress}
             onStatusChange={applyChantierStatus}
+            canEditChantierStatus={canEditChantierStatus}
           />
         )}
         ListEmptyComponent={

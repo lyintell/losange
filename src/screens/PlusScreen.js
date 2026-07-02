@@ -7,12 +7,13 @@ import PlusMenuButton from '../components/terrain/PlusMenuButton';
 import { FlowActionFab, FlowSmallFab, flowFabColors } from '../components/terrain/TerrainFlowFabs';
 import { useTerrainSyncRefresh } from '../hooks/useTerrainSyncRefresh';
 import { getLoggedInProfilViewLocal } from '../db/querries';
-import { canAccessRapports } from '../utils/terrainAccess';
+import { canAccessDatabase, canAccessRapports } from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
 
 export default function PlusScreen({ onProfilPress, onDatabasePress, onRapportsPress, onLogout, onSyncFromSupabase }) {
   const [isPro, setIsPro] = useState(false);
   const [canShowRapports, setCanShowRapports] = useState(false);
+  const [canShowDatabase, setCanShowDatabase] = useState(false);
   const { syncing, canSync, runSync } = useTerrainSyncRefresh({ onSyncFromSupabase });
 
   useEffect(() => {
@@ -24,12 +25,14 @@ export default function PlusScreen({ onProfilPress, onDatabasePress, onRapportsP
         if (!cancelled) {
           setIsPro(Boolean(profil?.is_pro));
           setCanShowRapports(canAccessRapports(profil));
+          setCanShowDatabase(canAccessDatabase(profil));
         }
       } catch (error) {
         console.error('Erreur chargement type de compte:', error);
         if (!cancelled) {
           setIsPro(false);
           setCanShowRapports(false);
+          setCanShowDatabase(false);
         }
       }
     };
@@ -59,9 +62,11 @@ export default function PlusScreen({ onProfilPress, onDatabasePress, onRapportsP
         Profil
       </PlusMenuButton>
 
-      <PlusMenuButton icon="database" onPress={onDatabasePress}>
-        Base de données
-      </PlusMenuButton>
+      {canShowDatabase ? (
+        <PlusMenuButton icon="database" onPress={onDatabasePress}>
+          Base de données
+        </PlusMenuButton>
+      ) : null}
 
       {canShowRapports ? (
         <PlusMenuButton icon="chart-pie" onPress={onRapportsPress}>

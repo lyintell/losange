@@ -37,7 +37,8 @@ Sauvegarde le plan dans /prompts/upgrade_downgrade.md et implemente le. Je valid
 
 4. Compte pro, Rapport disabled pour user C et T
 
-5. Base de donnees -> Metier et Ouvrages doit etre visible seulement pour A 
+5. Menu Plus → Base de données : visible seulement pour A (masqué pour C, T et S)
+Base de donnees -> Metier et Ouvrages doit etre visible seulement pour A 
 Base de donnees -> Client details, Modifier et Supprimer doivent etre disabled pour tout compte sauf A
 
 
@@ -66,14 +67,28 @@ Cependant peut modifier information Client / chantier. Peut aussi modifier prix 
 Peut voir et modifier ouvrages (dans base de données).
 
 11.
-Compte C et T: Ne doivent voir que les chantiers qui ont ete prise par eux meme. 
-A et S peuvent voir tous les chantiers
+Compte C (mobile) : voit les chantiers où il a saisi au moins un relevé ; à l'ouverture, seulement ses propres relevés.
+A, S et T peuvent voir tous les chantiers.
+Compte T (atelier): consultation seule — ne peut pas modifier les chantiers (mobile et webapp).
 
 12.
 Liste des chantiers: trier par ordre decroissant prise_le
 
 13. profil C et T, dans mobile Menu plus, ne pas montrer le telephone du client
-- profil C et T ne peux pas changer le status du releve
+- profil C et T ne peuvent pas changer le status du devis / relevé
+- profils S et T peuvent changer le statut du chantier (A aussi)
+- profil T ne peut pas changer le statut du devis
 
 - sur mobile, S ne peut activer ou desactiver, ou changer l ordre des ouvrage. Seul admin peut faire ca
 
+13. Dans le mobile, il y a des restrictions
+- Prix unitaires et prix de revient des ouvrages et articles -sont masqué pour les comptes T et C (existent en background mais affichage masqué).
+- Client et chantier (lors de l enregistrement) : ne pas montrer les informations de prix (TVA, remise, montants) pour les comptes T et C (existent en background)
+- Ajoute prix de revient lors de la creation des ouvrages et articles (compte Admin seulement)
+
+14. Pour les comptes ateliers (T) : accès à tous les chantiers en lecture seule (pas de modification infos / relevés / devis). Exceptions : changement du statut chantier et bascule ind_complete (OK par ligne) sur tout chantier (compte Pro).
+
+
+15. Compte C mobile:
+    - Il a acces aux chantiers ou il a entree au moins un releve. Si ce chantier a plusieur releve,
+        on clique, il a access seuleemnt au releve qu il a entree

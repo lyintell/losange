@@ -239,21 +239,25 @@ export default function App() {
   useEffect(() => {
     if (!isLoggedIn) return;
 
-    if (!isLoggedInAdmin && (screen === 'listeMetiers' || screen === 'listeSections')) {
-      setScreen('database');
-      return;
-    }
+    const isDatabaseSubtreeScreen =
+      screen === 'database' ||
+      screen === 'listeClients' ||
+      screen === 'listeMetiers' ||
+      screen === 'listeSections' ||
+      screen === 'listeOuvrages' ||
+      screen === 'ouvrageDetails' ||
+      screen === 'clientDetails';
 
-    if (!canAccessOuvragesDb && (screen === 'listeOuvrages' || screen === 'ouvrageDetails')) {
-      setScreen('database');
-      return;
+    if (!isLoggedInAdmin && isDatabaseSubtreeScreen) {
+      if (screen === 'clientDetails') {
+        setSelectedClient(null);
+      }
+      if (screen === 'ouvrageDetails') {
+        setSelectedOuvrage(null);
+      }
+      setScreen('plus');
     }
-
-    if (!isLoggedInAdmin && screen === 'clientDetails') {
-      setSelectedClient(null);
-      setScreen('listeClients');
-    }
-  }, [isLoggedIn, isLoggedInAdmin, canAccessOuvragesDb, screen]);
+  }, [isLoggedIn, isLoggedInAdmin, screen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -533,21 +537,15 @@ export default function App() {
     if (!chantier?.id) return;
 
     setSelectedChantier(chantier);
-    const releveCount = Number(chantier.releve_count) || 0;
+    const releves = await getRelevesByChantierLocal(chantier.id);
 
-    if (releveCount > 1) {
+    if (releves.length > 1) {
       setSelectedReleveId(null);
       setScreen('chantierReleves');
       return;
     }
 
-    if (releveCount === 1) {
-      const releves = await getRelevesByChantierLocal(chantier.id);
-      setSelectedReleveId(releves[0]?.id || null);
-    } else {
-      setSelectedReleveId(null);
-    }
-
+    setSelectedReleveId(releves[0]?.id || null);
     setScreen('chantierDetails');
   }, []);
 

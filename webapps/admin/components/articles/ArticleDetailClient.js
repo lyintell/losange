@@ -63,8 +63,11 @@ export default function ArticleDetailClient({ article: initialArticle }) {
               <div>
                 <p className="doc-list-title">{formatUniteChoiceLabel(unite)}</p>
                 <p className="doc-list-meta">
-                  {formatUniteTypeLabel(unite.ind_dimension, unite.formule)} ·{' '}
+                  {formatUniteTypeLabel(unite.ind_dimension, unite.formule)} · P.U.{' '}
                   {formatMontantFcfa(unite.prix_unitaire)}
+                  {unite.prix_revient != null && unite.prix_revient !== ''
+                    ? ` · Revient ${formatMontantFcfa(unite.prix_revient)}`
+                    : ''}
                 </p>
               </div>
             </li>

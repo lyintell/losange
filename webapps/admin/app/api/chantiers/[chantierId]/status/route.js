@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
+import { canChangeChantierStatus } from '@/lib/chantiers/access';
 import { CHANTIER_STATUS_OPTIONS } from '@/lib/chantiers/status';
 import { fetchChantierDetail, updateChantierStatus } from '@/lib/chantiers/queries';
 
@@ -8,6 +9,9 @@ export async function PATCH(request, { params }) {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ ok: false, error: 'Non authentifié.' }, { status: 401 });
+    }
+    if (!canChangeChantierStatus(session.role)) {
+      return NextResponse.json({ ok: false, error: 'Accès refusé.' }, { status: 403 });
     }
 
     const { chantierId } = await params;

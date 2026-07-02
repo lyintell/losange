@@ -1,14 +1,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Dimensions, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
+import {
+  NestableDraggableFlatList,
+  NestableScrollContainer,
+  ScaleDecorator,
+} from 'react-native-draggable-flatlist';
 import LigneReleveCard from './LigneReleveCard';
 import { chantierColors } from '../../styles/theme';
 import { groupLignesByMetier } from '../../utils/groupLignesByMetier';
 import { groupLignesBySection } from '../../utils/groupLignesBySection';
 import { isDefaultSectionNom } from '../../utils/defaultSection';
 import { getMetierColor } from '../../utils/metierColors';
+
+/** Zone gauche (poignée) seule : le reste de la ligne laisse défiler le récap. */
+const DRAG_HANDLE_ZONE_WIDTH = 44;
+const dragHitSlop = { right: -(Dimensions.get('window').width - DRAG_HANDLE_ZONE_WIDTH) };
 
 export function LignesReleveGroupedSections({
   lignes,
@@ -233,11 +241,11 @@ function SectionGroupBlockWithDrag({
         metierGroups.map((metierGroup) => (
           <View key={metierGroup.metierId} style={styles.metierBlock}>
             <MetierSubHeader metierId={metierGroup.metierId} nom={metierGroup.metierNom} />
-            <DraggableFlatList
+            <NestableDraggableFlatList
               data={localMetierLignes[metierGroup.metierId] || metierGroup.lignes}
               keyExtractor={(item) => String(item.id)}
               scrollEnabled={false}
-              activationDistance={8}
+              dragHitSlop={dragHitSlop}
               onDragEnd={({ data }) => handleMetierDragEnd(metierGroup.metierId, data)}
               contentContainerStyle={styles.cards}
               renderItem={({ item, drag, isActive }) => (
@@ -255,11 +263,11 @@ function SectionGroupBlockWithDrag({
           </View>
         ))
       ) : (
-        <DraggableFlatList
+        <NestableDraggableFlatList
           data={localLignes}
           keyExtractor={(item) => String(item.id)}
           scrollEnabled={false}
-          activationDistance={8}
+          dragHitSlop={dragHitSlop}
           onDragEnd={handleSectionDragEnd}
           contentContainerStyle={styles.cards}
           renderItem={({ item, drag, isActive }) => (
@@ -308,7 +316,7 @@ export function LignesReleveGroupedList({
 
     if (enableLigneDrag && onLigneReorder) {
       return (
-        <ScrollView
+        <NestableScrollContainer
           style={[styles.draggableScroll, style]}
           contentContainerStyle={[
             styles.draggableContent,
@@ -330,7 +338,7 @@ export function LignesReleveGroupedList({
               onLigneReorder={onLigneReorder}
             />
           ))}
-        </ScrollView>
+        </NestableScrollContainer>
       );
     }
 

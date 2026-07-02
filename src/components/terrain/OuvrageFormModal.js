@@ -25,6 +25,7 @@ const buildUniteDrafts = (unites) =>
     formule: unite.formule || '',
     typeLabel: formatUniteTypeLabel(unite.ind_dimension, unite.formule),
     prixUnitaire: String(unite.prix_unitaire ?? ''),
+    prixRevient: unite.prix_revient != null && unite.prix_revient !== '' ? String(unite.prix_revient) : '',
   }));
 
 export default function OuvrageFormModal({
@@ -32,6 +33,8 @@ export default function OuvrageFormModal({
   ouvrage,
   unites,
   editPriceOnly = false,
+  showCataloguePrices = true,
+  showPrixRevient = false,
   onDismiss,
   onSaved,
 }) {
@@ -89,6 +92,14 @@ export default function OuvrageFormModal({
     );
   };
 
+  const handleUnitePrixRevientChange = (ouvrageUniteId, value) => {
+    setUniteDrafts((prev) =>
+      prev.map((draft) =>
+        draft.ouvrageUniteId === ouvrageUniteId ? { ...draft, prixRevient: value } : draft
+      )
+    );
+  };
+
   const handleUniteSelect = (ouvrageUniteId, catalogueUnite) => {
     setUniteDrafts((prev) =>
       prev.map((draft) =>
@@ -131,6 +142,7 @@ export default function OuvrageFormModal({
             ouvrageUniteId: draft.ouvrageUniteId,
             uniteId: editPriceOnly ? originalUnite?.unite_id || draft.uniteId : draft.uniteId,
             prixUnitaire: draft.prixUnitaire,
+            ...(showPrixRevient ? { prixRevient: draft.prixRevient } : {}),
           };
         }),
       };
@@ -279,15 +291,31 @@ export default function OuvrageFormModal({
 
                   {!editPriceOnly ? <Text style={styles.uniteMeta}>Type : {draft.typeLabel}</Text> : null}
 
-                  <TextInput
-                    mode="outlined"
-                    label="Prix unitaire"
-                    value={draft.prixUnitaire}
-                    onChangeText={(value) => handleUnitePrixChange(draft.ouvrageUniteId, value)}
-                    keyboardType="decimal-pad"
-                    style={styles.input}
-                    right={<TextInput.Affix text="F" />}
-                  />
+                  {showCataloguePrices ? (
+                    <TextInput
+                      mode="outlined"
+                      label="Prix unitaire"
+                      value={draft.prixUnitaire}
+                      onChangeText={(value) => handleUnitePrixChange(draft.ouvrageUniteId, value)}
+                      keyboardType="decimal-pad"
+                      style={styles.input}
+                      right={<TextInput.Affix text="F" />}
+                    />
+                  ) : null}
+
+                  {showPrixRevient ? (
+                    <TextInput
+                      mode="outlined"
+                      label="Prix de revient (optionnel)"
+                      value={draft.prixRevient}
+                      onChangeText={(value) =>
+                        handleUnitePrixRevientChange(draft.ouvrageUniteId, value)
+                      }
+                      keyboardType="decimal-pad"
+                      style={styles.input}
+                      right={<TextInput.Affix text="F" />}
+                    />
+                  ) : null}
                 </View>
               );
             })

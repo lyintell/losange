@@ -113,3 +113,4 @@ Les metiers sont alors cree pour ces entreprise dans la table metier en base (un
 15. Deplace parametres juste en haut de profil.
 - Dans paramètres, permet de modifier les info de l'entreprise (comme dans mobile)
 - De meme que 
+

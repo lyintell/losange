@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import UnitesPrixCell from '@/components/catalogue/UnitesPrixCell';
+import UnitesPrixCell, { UnitesPrixRevientCell } from '@/components/catalogue/UnitesPrixCell';
 import { useRowNavigate } from '@/components/ui/useRowNavigate';
 import { getMetierColor } from '@/lib/format/metierColors';
 
@@ -27,6 +27,7 @@ export default function OuvragesTable({
             <th>Ouvrage</th>
             {showMetierColumn ? <th>Métier</th> : null}
             <th>Prix unitaires</th>
+            <th>Prix de revient</th>
           </tr>
         </thead>
         <tbody>
@@ -76,6 +77,9 @@ function OuvrageRow({ row, href, showMetierColumn, onRowSelect }) {
       ) : null}
       <td>
         <UnitesPrixCell unites={row.unites} />
+      </td>
+      <td>
+        <UnitesPrixRevientCell unites={row.unites} />
       </td>
     </tr>
   );

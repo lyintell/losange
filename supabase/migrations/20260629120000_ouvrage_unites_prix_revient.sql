@@ -1,0 +1,2 @@
+ALTER TABLE ouvrage_unites
+  ADD COLUMN IF NOT EXISTS prix_revient DOUBLE PRECISION;
