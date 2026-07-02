@@ -7,7 +7,15 @@ import { buildDocumentFileName } from '@/lib/chantiers/format';
 import { getNextReleveStatus } from '@/lib/chantiers/releveStatus';
 import { updateReleveStatusClient } from '@/lib/chantiers/updateReleveStatusClient';
 
-export default function DevisDocumentView({ chantier, lignes, releve, entreprise }) {
+export default function DevisDocumentView({
+  chantier,
+  lignes,
+  releve,
+  entreprise,
+  canModifyChantier = true,
+  canChangeChantierStatus = true,
+  canChangeDevisStatus = true,
+}) {
   const [chantierStatus, setChantierStatus] = useState(chantier.status || 'D');
   const [releveStatus, setReleveStatus] = useState(releve.status);
   const [releveStatusSaving, setReleveStatusSaving] = useState(false);
@@ -41,6 +49,9 @@ export default function DevisDocumentView({ chantier, lignes, releve, entreprise
       <DocumentViewToolbar
         fileName={buildDocumentFileName(chantier, 'devis')}
         modifyHref={modifyHref}
+        canModifyChantier={canModifyChantier}
+        canChangeChantierStatus={canChangeChantierStatus}
+        canChangeDevisStatus={canChangeDevisStatus}
         chantierId={chantier.id}
         chantierStatus={chantierStatus}
         onStatusChange={setChantierStatus}

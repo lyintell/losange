@@ -22,6 +22,7 @@ export default function AjouterOuvrageModal({
   entrepriseId,
   existingOuvrages = [],
   lockPrixUnitaireToOne = false,
+  showPrixRevient = false,
   onDismiss,
   onCreated,
 }) {
@@ -31,6 +32,7 @@ export default function AjouterOuvrageModal({
   const [error, setError] = useState('');
   const [nom, setNom] = useState('');
   const [prixUnitaire, setPrixUnitaire] = useState('');
+  const [prixRevient, setPrixRevient] = useState('');
   const [uniteId, setUniteId] = useState(null);
   const [uniteMenuOpen, setUniteMenuOpen] = useState(false);
   const [selectedOuvrage, setSelectedOuvrage] = useState(null);
@@ -62,6 +64,7 @@ export default function AjouterOuvrageModal({
 
     setNom('');
     setPrixUnitaire(lockPrixUnitaireToOne ? DEFAULT_CT_PRIX_UNITAIRE : '');
+    setPrixRevient('');
     setUniteId(null);
     setError('');
     setUniteMenuOpen(false);
@@ -158,11 +161,13 @@ export default function AjouterOuvrageModal({
     setSaving(true);
     try {
       const prix = lockPrixUnitaireToOne ? DEFAULT_CT_PRIX_UNITAIRE : prixUnitaire;
+      const revientPayload = showPrixRevient ? prixRevient : null;
       const result = selectedOuvrage?.id
         ? await insertUniteForOuvrageLocal({
             ouvrageId: selectedOuvrage.id,
             uniteId,
             prixUnitaire: prix,
+            prixRevient: revientPayload,
           })
         : await insertOuvrageWithUniteLocal({
             metierId: metier.id,
@@ -170,6 +175,7 @@ export default function AjouterOuvrageModal({
             nom: nom.trim(),
             uniteId,
             prixUnitaire: prix,
+            prixRevient: revientPayload,
           });
       onCreated?.(result);
       onDismiss?.();
@@ -277,12 +283,7 @@ export default function AjouterOuvrageModal({
             </Menu>
           )}
 
-          {lockPrixUnitaireToOne ? (
-            <View style={styles.contextBlock}>
-              <Text style={styles.contextLabel}>Prix unitaire</Text>
-              <Text style={styles.contextValue}>{DEFAULT_CT_PRIX_UNITAIRE} F</Text>
-            </View>
-          ) : (
+          {!lockPrixUnitaireToOne ? (
             <TextInput
               mode="outlined"
               label="Prix unitaire"
@@ -292,7 +293,19 @@ export default function AjouterOuvrageModal({
               style={styles.input}
               right={<TextInput.Affix text="F" />}
             />
-          )}
+          ) : null}
+
+          {showPrixRevient ? (
+            <TextInput
+              mode="outlined"
+              label="Prix de revient (optionnel)"
+              value={prixRevient}
+              onChangeText={setPrixRevient}
+              keyboardType="decimal-pad"
+              style={styles.input}
+              right={<TextInput.Affix text="F" />}
+            />
+          ) : null}
 
           {loadingExistingUnites ? (
             <ActivityIndicator size="small" color={chantierColors.primary} style={styles.loader} />

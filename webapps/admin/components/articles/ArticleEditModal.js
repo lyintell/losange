@@ -16,6 +16,7 @@ function buildEmptyUniteDraft() {
     ouvrageUniteId: `new-${Date.now()}`,
     uniteId: '',
     prixUnitaire: '',
+    prixRevient: '',
     typeLabel: '—',
   };
 }
@@ -25,6 +26,8 @@ function buildUniteDrafts(unites = []) {
     ouvrageUniteId: unite.ouvrage_unite_id,
     uniteId: unite.unite_id,
     prixUnitaire: String(unite.prix_unitaire ?? ''),
+    prixRevient:
+      unite.prix_revient != null && unite.prix_revient !== '' ? String(unite.prix_revient) : '',
     typeLabel: formatUniteTypeLabel(unite.ind_dimension, unite.formule),
   }));
 }
@@ -201,7 +204,7 @@ function ArticleEditModalForm({ article, mode = 'edit', onClose, onSaved }) {
               : draft.typeLabel,
           };
         }
-        return { ...draft, prixUnitaire: value };
+        return { ...draft, [field]: value };
       })
     );
   };
@@ -226,6 +229,7 @@ function ArticleEditModalForm({ article, mode = 'edit', onClose, onSaved }) {
       ...(isCreate ? {} : { ouvrageUniteId: draft.ouvrageUniteId }),
       uniteId: draft.uniteId,
       prixUnitaire: draft.prixUnitaire,
+      prixRevient: draft.prixRevient,
     }));
 
     const fournisseurPayload = resolveFournisseurPayload({
@@ -451,6 +455,28 @@ function ArticleEditModalForm({ article, mode = 'edit', onClose, onSaved }) {
                     }
                     disabled={saving}
                     required
+                  />
+                </div>
+
+                <div className="search-field">
+                  <label
+                    className="search-field-label"
+                    htmlFor={`article-edit-revient-${draft.ouvrageUniteId}`}
+                  >
+                    Prix de revient (FCFA, optionnel)
+                  </label>
+                  <input
+                    id={`article-edit-revient-${draft.ouvrageUniteId}`}
+                    type="number"
+                    min="0"
+                    step="1"
+                    className="search-field-input"
+                    placeholder="Coût interne"
+                    value={draft.prixRevient}
+                    onChange={(event) =>
+                      handleUniteChange(draft.ouvrageUniteId, 'prixRevient', event.target.value)
+                    }
+                    disabled={saving}
                   />
                 </div>
               </div>

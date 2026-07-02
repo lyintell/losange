@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import UnitesPrixCell from '@/components/catalogue/UnitesPrixCell';
+import UnitesPrixCell, { UnitesPrixRevientCell } from '@/components/catalogue/UnitesPrixCell';
 import { useRowNavigate } from '@/components/ui/useRowNavigate';
 import { formatArticleDisplayName } from '@/lib/articles/format';
 import { getMetierColor } from '@/lib/format/metierColors';
@@ -30,6 +30,7 @@ export default function ArticlesTable({
             {showMetierColumn ? <th>Métier</th> : null}
             {showFournisseurColumn ? <th>Fournisseur</th> : null}
             <th>Prix unitaires</th>
+            <th>Prix de revient</th>
           </tr>
         </thead>
         <tbody>
@@ -81,6 +82,9 @@ function ArticleRow({ row, href, showMetierColumn, showFournisseurColumn, onRowS
       {showFournisseurColumn ? <td>{row.fournisseur_nom || '—'}</td> : null}
       <td>
         <UnitesPrixCell unites={row.unites} />
+      </td>
+      <td>
+        <UnitesPrixRevientCell unites={row.unites} />
       </td>
     </tr>
   );

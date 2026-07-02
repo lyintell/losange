@@ -1,4 +1,4 @@
-import { roundQuantite } from './formatLigneMesures';
+import { roundMontant, roundQuantite } from './formatLigneMesures';
 
 /**
  * Symboles ligne_releve : l=largeur, h=hauteur, p/e=épaisseur (profondeur), n=nombre.
@@ -101,13 +101,13 @@ export const computePrixUnitaireAppliqueDefault = ({
 }) => {
   const pu = Number(prixUnitaire) || 0;
   if (Number(indDimension) !== 1) {
-    return roundQuantite(pu);
+    return roundMontant(pu);
   }
 
   const dimensionValue = computeDimensionFactor({ formule, largeur, hauteur, profondeur });
-  return roundQuantite(pu * dimensionValue);
+  return roundMontant(pu * dimensionValue);
 };
 
 /** Montant ligne : P.U applique x n (nombre). */
 export const computeMontantLigneReleve = ({ prixUnitaireApplique, nombre }) =>
-  roundQuantite((Number(prixUnitaireApplique) || 0) * (Number(nombre) || 0));
+  roundMontant((Number(prixUnitaireApplique) || 0) * (Number(nombre) || 0));

@@ -47,3 +47,12 @@ Ajoute un bouton Ajouter ouvrage / article dans détails métier (liste des arti
 
 10. Ajoute nom_devis a la table ouvrage. Ce nom, si non-vide, est utilisé à la place du nom des ouvrages (ou article) sur les devis.
 Ajoute le au formulaire ajouter et modifier des ouvrages suelement pour le webapp. L'admin ou le commercial peut vouloir le modifier.
+
+11. Les chiffres entrées en ligne releve pour les mesures (ex. largeur, hauteur, etc) sont entrain d'etre aroundi. L'arrondissement doit se faire au deuxieme decimal (ex. 10,987 doit etre 10,99.) Affiche les decimaux si des decimaux sont entré ou calculé pour les lignes relevés. Si decimaux non-entré, n'affiche pas les decimaux du tout. A l affichage des decimaux sur le recapitulatif, releves et devis sont ",". Pas ".".
+cependant les PU et les montant sont arrondi à l'unité (ex. 19.33 devient 19, 156.8 devient 157). Ceux ci s applique seulement aux montants et prix. 
+
+12. Ajoute un champ prix_revient a la table ouvrage_unites (null par defaut). Met a jour Master screen.
+
+13. 
+Dans webapp, affiche Prix de revient dans la liste des ouvrages et articles.
+Ajuste les formulaires ajouter et modifier pour inclure le prix de revient.

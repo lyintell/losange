@@ -22,6 +22,7 @@ export default function AjouterArticleModal({
   entrepriseId,
   existingArticles = [],
   lockPrixUnitaireToOne = false,
+  showPrixRevient = false,
   onDismiss,
   onCreated,
 }) {
@@ -31,6 +32,7 @@ export default function AjouterArticleModal({
   const [error, setError] = useState('');
   const [nom, setNom] = useState('');
   const [prixUnitaire, setPrixUnitaire] = useState('');
+  const [prixRevient, setPrixRevient] = useState('');
   const [uniteId, setUniteId] = useState(null);
   const [uniteMenuOpen, setUniteMenuOpen] = useState(false);
   const [fournisseurNom, setFournisseurNom] = useState('');
@@ -52,6 +54,7 @@ export default function AjouterArticleModal({
 
     setNom('');
     setPrixUnitaire(lockPrixUnitaireToOne ? DEFAULT_CT_PRIX_UNITAIRE : '');
+    setPrixRevient('');
     setUniteId(null);
     setError('');
     setUniteMenuOpen(false);
@@ -114,6 +117,7 @@ export default function AjouterArticleModal({
         nom: nom.trim(),
         uniteId,
         prixUnitaire: lockPrixUnitaireToOne ? DEFAULT_CT_PRIX_UNITAIRE : prixUnitaire,
+        prixRevient: showPrixRevient ? prixRevient : null,
         fournisseurId: fournisseurPayload.fournisseurId,
         fournisseurNom: fournisseurPayload.fournisseurNom,
       });
@@ -203,12 +207,7 @@ export default function AjouterArticleModal({
             </Menu>
           )}
 
-          {lockPrixUnitaireToOne ? (
-            <View style={styles.contextBlock}>
-              <Text style={styles.contextLabel}>Prix unitaire</Text>
-              <Text style={styles.contextValue}>{DEFAULT_CT_PRIX_UNITAIRE} F</Text>
-            </View>
-          ) : (
+          {!lockPrixUnitaireToOne ? (
             <TextInput
               mode="outlined"
               label="Prix unitaire"
@@ -218,7 +217,19 @@ export default function AjouterArticleModal({
               style={styles.input}
               right={<TextInput.Affix text="F" />}
             />
-          )}
+          ) : null}
+
+          {showPrixRevient ? (
+            <TextInput
+              mode="outlined"
+              label="Prix de revient (optionnel)"
+              value={prixRevient}
+              onChangeText={setPrixRevient}
+              keyboardType="decimal-pad"
+              style={styles.input}
+              right={<TextInput.Affix text="F" />}
+            />
+          ) : null}
 
           <Text variant="titleMedium" style={styles.sectionTitle}>
             Fournisseur

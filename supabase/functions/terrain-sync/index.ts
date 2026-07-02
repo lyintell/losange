@@ -149,6 +149,7 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     'ouvrage_id',
     'unite_id',
     'prix_unitaire',
+    'prix_revient',
     'supprime_le',
     'cree_le',
     'mis_a_jour_le',

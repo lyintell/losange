@@ -1,9 +1,39 @@
+/** Mesures et quantités : 2 décimales max. */
 export function roundQuantite(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 
+/** Montants et P.U. : arrondi à l'unité. */
+export function roundMontant(value) {
+  return Math.round(Number(value) || 0);
+}
+
+/**
+ * Affichage mesure/qté : virgule décimale, décimaux seulement si nécessaires.
+ * Ex. 10 → "10", 10.5 → "10,5", 10.987 → "10,99"
+ */
+export function formatMesureAffichage(value) {
+  const rounded = roundQuantite(value);
+  if (!Number.isFinite(rounded)) return '0';
+  if (Math.abs(rounded - Math.trunc(rounded)) < 1e-9) {
+    return String(Math.trunc(rounded));
+  }
+  const str = rounded.toFixed(2).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  return str.replace('.', ',');
+}
+
+/** Cote saisie (l, h, p, n) : respecte les décimaux entrés, arrondi à 2 max. */
+export function formatCoteAffichage(value) {
+  if (value == null || value === '') return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const numeric = Number(raw.replace(',', '.'));
+  if (!Number.isFinite(numeric)) return raw.replace('.', ',');
+  return formatMesureAffichage(numeric);
+}
+
 export function formatQuantite(value) {
-  return roundQuantite(value).toFixed(2);
+  return formatMesureAffichage(value);
 }
 
 export function getLigneNomUnite(ligne) {
@@ -39,13 +69,16 @@ export function formatLigneDimensionsSelonFormule(ligne) {
   const { needsLargeur, needsHauteur, needsProfondeur } = getFormulaCoteFlags(ligne?.formule);
   const parts = [];
   if (needsLargeur && ligne.largeur != null && ligne.largeur !== '') {
-    parts.push(String(ligne.largeur));
+    const formatted = formatCoteAffichage(ligne.largeur);
+    if (formatted != null) parts.push(formatted);
   }
   if (needsHauteur && ligne.hauteur != null && ligne.hauteur !== '') {
-    parts.push(String(ligne.hauteur));
+    const formatted = formatCoteAffichage(ligne.hauteur);
+    if (formatted != null) parts.push(formatted);
   }
   if (needsProfondeur && ligne.profondeur != null && ligne.profondeur !== '') {
-    parts.push(String(ligne.profondeur));
+    const formatted = formatCoteAffichage(ligne.profondeur);
+    if (formatted != null) parts.push(formatted);
   }
   return parts.length ? parts.join(' x ') : '—';
 }
@@ -121,7 +154,7 @@ export function formatLigneQuantiteAffichage(ligne) {
 }
 
 export function getLignePrixUnitaireApplique(ligne) {
-  return Number(ligne?.prix_unitaire_applique) || 0;
+  return roundMontant(ligne?.prix_unitaire_applique);
 }
 
 /** P.U catalogue ouvrage_unite (reference, distinct du P.U applique editable). */
@@ -138,27 +171,32 @@ export function getLignePrixUnitaireAffichage(ligne) {
 export function getLigneMontant(ligne) {
   const stored = Number(ligne?.montant);
   if (Number.isFinite(stored) && ligne?.montant != null && ligne?.montant !== '') {
-    return roundQuantite(stored);
+    return roundMontant(stored);
   }
-  return roundQuantite(getLignePrixUnitaireApplique(ligne) * (Number(ligne?.nombre) || 0));
+  return roundMontant(getLignePrixUnitaireApplique(ligne) * (Number(ligne?.nombre) || 0));
+}
+
+function pushCotePart(parts, value) {
+  const formatted = formatCoteAffichage(value);
+  if (formatted != null) parts.push(formatted);
 }
 
 export function formatLigneMesures(ligne) {
   const parts = [];
-  if (ligne.largeur != null && ligne.largeur !== '') parts.push(String(ligne.largeur));
-  if (ligne.hauteur != null && ligne.hauteur !== '') parts.push(String(ligne.hauteur));
-  if (ligne.profondeur != null && ligne.profondeur !== '') parts.push(String(ligne.profondeur));
+  pushCotePart(parts, ligne.largeur);
+  pushCotePart(parts, ligne.hauteur);
+  pushCotePart(parts, ligne.profondeur);
   if (!isLigneDimension(ligne)) {
-    parts.push(String(ligne.nombre ?? 0));
+    pushCotePart(parts, ligne.nombre ?? 0);
   }
   return parts.length ? parts.join(' x ') : '—';
 }
 
 export function formatLigneDimensions(ligne) {
   const parts = [];
-  if (ligne.largeur != null && ligne.largeur !== '') parts.push(String(ligne.largeur));
-  if (ligne.hauteur != null && ligne.hauteur !== '') parts.push(String(ligne.hauteur));
-  if (ligne.profondeur != null && ligne.profondeur !== '') parts.push(String(ligne.profondeur));
+  pushCotePart(parts, ligne.largeur);
+  pushCotePart(parts, ligne.hauteur);
+  pushCotePart(parts, ligne.profondeur);
   return parts.length ? parts.join(' x ') : '—';
 }
 
@@ -166,10 +204,10 @@ export function formatLigneDimensions(ligne) {
 export function formatLigneDimensionsLxhN(ligne) {
   if (!isLigneDimension(ligne)) return null;
   const parts = [];
-  if (ligne.largeur != null && ligne.largeur !== '') parts.push(String(ligne.largeur));
-  if (ligne.hauteur != null && ligne.hauteur !== '') parts.push(String(ligne.hauteur));
-  if (ligne.profondeur != null && ligne.profondeur !== '') parts.push(String(ligne.profondeur));
-  if (ligne.nombre != null && ligne.nombre !== '') parts.push(String(ligne.nombre));
+  pushCotePart(parts, ligne.largeur);
+  pushCotePart(parts, ligne.hauteur);
+  pushCotePart(parts, ligne.profondeur);
+  pushCotePart(parts, ligne.nombre);
   return parts.length ? parts.join(' x ') : null;
 }
 
@@ -177,7 +215,7 @@ export function formatLigneDimensionsLxhN(ligne) {
 export function formatLigneNombrePdf(ligne) {
   if (isLigneDimension(ligne)) return null;
   if (ligne.nombre == null || ligne.nombre === '') return '0';
-  return String(ligne.nombre);
+  return formatCoteAffichage(ligne.nombre) ?? '0';
 }
 
 export function formatMontant(value) {
@@ -185,6 +223,6 @@ export function formatMontant(value) {
 }
 
 export function formatMontantFcfa(value) {
-  const amount = Math.round(Number(value) || 0);
+  const amount = roundMontant(value);
   return `${amount.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} FCFA`;
 }

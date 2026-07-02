@@ -7,7 +7,7 @@ import { FlowSmallFab, flowFabColors, getFabColumnPadding } from '../components/
 import { deleteOuvrageLocal, getLoggedInProfilViewLocal, getOuvrageByIdLocal, getUnitesEtPrixParOuvrage } from '../db/querries';
 import { formatArticleNomAvecFournisseur, formatMontant, formatUniteTypeLabel } from '../utils/formatLigneMesures';
 import { getMetierColor } from '../utils/metierColors';
-import { canDeleteOuvrage, canEditOuvrageNomAndUnite } from '../utils/terrainAccess';
+import { canDeleteOuvrage, canEditOuvrageNomAndUnite, canEditPrixRevient, canSeeCataloguePrices } from '../utils/terrainAccess';
 import { chantierColors } from '../styles/theme';
 
 function InfoRow({ label, value, valueColor }) {
@@ -36,6 +36,8 @@ export default function OuvrageDetailsScreen({
   const [deleting, setDeleting] = useState(false);
   const [canDelete, setCanDelete] = useState(false);
   const [canEditNomAndUnite, setCanEditNomAndUnite] = useState(false);
+  const [showCataloguePrices, setShowCataloguePrices] = useState(true);
+  const [showPrixRevient, setShowPrixRevient] = useState(false);
   const lastEditRequestIdRef = useRef(0);
 
   useEffect(() => {
@@ -47,12 +49,16 @@ export default function OuvrageDetailsScreen({
         if (!cancelled) {
           setCanDelete(canDeleteOuvrage(profil));
           setCanEditNomAndUnite(canEditOuvrageNomAndUnite(profil));
+          setShowCataloguePrices(canSeeCataloguePrices(profil));
+          setShowPrixRevient(canEditPrixRevient(profil));
         }
       } catch (error) {
         console.error('Erreur chargement acces ouvrage:', error);
         if (!cancelled) {
           setCanDelete(false);
           setCanEditNomAndUnite(false);
+          setShowCataloguePrices(true);
+          setShowPrixRevient(false);
         }
       }
     };
@@ -185,7 +191,12 @@ export default function OuvrageDetailsScreen({
                 </Text>
                 <InfoRow label="Formule" value={unite.formule} />
                 <InfoRow label="Type" value={formatUniteTypeLabel(unite.ind_dimension, unite.formule)} />
-                <InfoRow label="Prix unitaire" value={formatMontant(unite.prix_unitaire)} />
+                {showCataloguePrices ? (
+                  <InfoRow label="Prix unitaire" value={formatMontant(unite.prix_unitaire)} />
+                ) : null}
+                {showPrixRevient && unite.prix_revient != null && unite.prix_revient !== '' ? (
+                  <InfoRow label="Prix de revient" value={formatMontant(unite.prix_revient)} />
+                ) : null}
               </Surface>
             ))
           )}
@@ -213,6 +224,8 @@ export default function OuvrageDetailsScreen({
         ouvrage={ouvrage}
         unites={unites}
         editPriceOnly={!canEditNomAndUnite}
+        showCataloguePrices={showCataloguePrices}
+        showPrixRevient={showPrixRevient}
         onDismiss={() => setEditModalVisible(false)}
         onSaved={handleSaved}
       />

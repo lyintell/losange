@@ -9,11 +9,22 @@ function mapOuvrageUniteRow(row) {
     ouvrage_id: row.ouvrage_id,
     unite_id: row.unite_id,
     prix_unitaire: row.prix_unitaire,
+    prix_revient: row.prix_revient ?? null,
     nom: unite.nom || '',
     formule: unite.formule || '',
     nom_unite: unite.nom_unite || '',
     ind_dimension: unite.ind_dimension ?? 0,
   };
+}
+
+function parseOptionalPrix(value, label = 'Prix de revient') {
+  const raw = String(value ?? '').trim();
+  if (!raw.length) return null;
+  const prix = Number(raw);
+  if (!Number.isFinite(prix) || prix < 0) {
+    throw new Error(`${label} invalide.`);
+  }
+  return Math.round(prix);
 }
 
 export async function fetchOuvragesByMetierId(metierId, { entrepriseId } = {}) {
@@ -152,6 +163,7 @@ export async function fetchUnitesByOuvrageIds(ouvrageIds = []) {
         ouvrage_id,
         unite_id,
         prix_unitaire,
+        prix_revient,
         unites (
           nom,
           formule,
@@ -224,16 +236,18 @@ export async function updateOuvrage(
       throw new Error('Unité requise.');
     }
 
-    const prix = Number(unite.prixUnitaire);
+    const prix = Math.round(Number(unite.prixUnitaire));
     if (!Number.isFinite(prix) || prix < 0) {
       throw new Error('Prix unitaire invalide.');
     }
+    const prixRevient = parseOptionalPrix(unite.prixRevient);
 
     const { error: uniteError } = await supabase
       .from('ouvrage_unites')
       .update({
         unite_id: unite.uniteId,
         prix_unitaire: prix,
+        prix_revient: prixRevient,
         mis_a_jour_le: now,
         _synced: 0,
       })
@@ -278,10 +292,11 @@ export async function createOuvrage(
     throw new Error('Unité requise.');
   }
 
-  const prix = Number(primaryUnite.prixUnitaire);
+  const prix = Math.round(Number(primaryUnite.prixUnitaire));
   if (!Number.isFinite(prix) || prix < 0) {
     throw new Error('Prix unitaire invalide.');
   }
+  const prixRevient = parseOptionalPrix(primaryUnite.prixRevient);
 
   const supabase = createServerSupabaseClient();
   const now = new Date().toISOString();
@@ -310,6 +325,7 @@ export async function createOuvrage(
     ouvrage_id: ouvrageId,
     unite_id: primaryUnite.uniteId,
     prix_unitaire: prix,
+    prix_revient: prixRevient,
     cree_le: now,
     mis_a_jour_le: now,
     _synced: 0,

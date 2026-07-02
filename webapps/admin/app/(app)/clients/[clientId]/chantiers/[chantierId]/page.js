@@ -1,5 +1,6 @@
 import { notFound, redirect } from 'next/navigation';
 import ChantierDetailPageClient from '@/components/chantiers/ChantierDetailPageClient';
+import { canModifyChantiers, canChangeChantierStatus, canChangeDevisStatus } from '@/lib/chantiers/access';
 import { fetchChantierDetail } from '@/lib/chantiers/queries';
 import { getSession } from '@/lib/auth/session';
 import { CLIENTS_SECTION_LABEL, getAdminNavItem } from '@/lib/navigation/adminNav';
@@ -36,6 +37,9 @@ export default async function ClientChantierDetailPage({ params }) {
       clientId={clientId}
       clientName={chantier.client_nom}
       chantier={chantier}
+      canModifyChantier={canModifyChantiers(session?.role)}
+      canChangeChantierStatus={canChangeChantierStatus(session?.role)}
+      canChangeDevisStatus={canChangeDevisStatus(session?.role)}
     />
   );
 }

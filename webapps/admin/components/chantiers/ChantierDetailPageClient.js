@@ -5,7 +5,15 @@ import AdminPageShell from '@/components/layout/AdminPageShell';
 import ChantierDetailClient from '@/components/chantiers/ChantierDetailClient';
 import { breadcrumbChantierDetail } from '@/lib/navigation/breadcrumbs';
 
-export default function ChantierDetailPageClient({ navItem, clientId, clientName, chantier }) {
+export default function ChantierDetailPageClient({
+  navItem,
+  clientId,
+  clientName,
+  chantier,
+  canModifyChantier = true,
+  canChangeChantierStatus = true,
+  canChangeDevisStatus = true,
+}) {
   const [tab, setTab] = useState('devis');
 
   const breadcrumbs = breadcrumbChantierDetail({
@@ -18,7 +26,14 @@ export default function ChantierDetailPageClient({ navItem, clientId, clientName
 
   return (
     <AdminPageShell navItem={navItem} breadcrumbs={breadcrumbs}>
-      <ChantierDetailClient chantier={chantier} activeTab={tab} onTabChange={setTab} />
+      <ChantierDetailClient
+        chantier={chantier}
+        activeTab={tab}
+        onTabChange={setTab}
+        canModifyChantier={canModifyChantier}
+        canChangeChantierStatus={canChangeChantierStatus}
+        canChangeDevisStatus={canChangeDevisStatus}
+      />
     </AdminPageShell>
   );
 }

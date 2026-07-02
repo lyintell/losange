@@ -40,6 +40,7 @@ import { computeMontantLigneReleve } from '../utils/ligneReleveCalcul';
 import {
   canCreateOuvrageInReleveFlow,
   canCreateReleveOrLigne,
+  canEditPrixRevient,
   hidesPriceUiForRole,
 } from '../utils/terrainAccess';
 import PaveSaisieOneHand from './PaveSaisieOneHand';
@@ -110,6 +111,7 @@ export default function NouvelleDimensionScreen({
   const [canCreateOuvrage, setCanCreateOuvrage] = useState(false);
   const [canAddReleveLigne, setCanAddReleveLigne] = useState(true);
   const [hidesPriceUi, setHidesPriceUi] = useState(false);
+  const [showPrixRevient, setShowPrixRevient] = useState(false);
   const [addOuvrageModalVisible, setAddOuvrageModalVisible] = useState(false);
   const [addArticleModalVisible, setAddArticleModalVisible] = useState(false);
   const [addSectionModalVisible, setAddSectionModalVisible] = useState(false);
@@ -262,11 +264,13 @@ export default function NouvelleDimensionScreen({
         setCanCreateOuvrage(canCreateOuvrageInReleveFlow(profil));
         setCanAddReleveLigne(canCreateReleveOrLigne(profil));
         setHidesPriceUi(hidesPriceUiForRole(profil?.role));
+        setShowPrixRevient(canEditPrixRevient(profil));
       } catch (error) {
         console.error('Erreur verification acces profil:', error);
         setCanCreateOuvrage(false);
         setCanAddReleveLigne(true);
         setHidesPriceUi(false);
+        setShowPrixRevient(false);
       }
     };
     loadProfilAccess();
@@ -860,6 +864,7 @@ export default function NouvelleDimensionScreen({
           entrepriseId={entrepriseId}
           existingOuvrages={isArticleMode ? [] : catalogItems}
           lockPrixUnitaireToOne={hidesPriceUi}
+          showPrixRevient={showPrixRevient}
           onDismiss={() => setAddOuvrageModalVisible(false)}
           onCreated={handleCatalogItemCreated}
         />
@@ -869,6 +874,7 @@ export default function NouvelleDimensionScreen({
           entrepriseId={entrepriseId}
           existingArticles={isArticleMode ? catalogItems : []}
           lockPrixUnitaireToOne={hidesPriceUi}
+          showPrixRevient={showPrixRevient}
           onDismiss={() => setAddArticleModalVisible(false)}
           onCreated={handleCatalogItemCreated}
         />

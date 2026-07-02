@@ -3,6 +3,16 @@ import { fetchCatalogueUnites, fetchOuvrageUnites, fetchUnitesByOuvrageIds } fro
 
 const ACTIVE_FILTER = (query) => query.is('supprime_le', null);
 
+function parseOptionalPrix(value, label = 'Prix de revient') {
+  const raw = String(value ?? '').trim();
+  if (!raw.length) return null;
+  const prix = Number(raw);
+  if (!Number.isFinite(prix) || prix < 0) {
+    throw new Error(`${label} invalide.`);
+  }
+  return Math.round(prix);
+}
+
 export { fetchCatalogueUnites };
 
 export async function fetchArticlesByMetierId(metierId, { entrepriseId } = {}) {
@@ -299,16 +309,18 @@ export async function updateArticle(
       throw new Error('Unité requise.');
     }
 
-    const prix = Number(unite.prixUnitaire);
+    const prix = Math.round(Number(unite.prixUnitaire));
     if (!Number.isFinite(prix) || prix < 0) {
       throw new Error('Prix unitaire invalide.');
     }
+    const prixRevient = parseOptionalPrix(unite.prixRevient);
 
     const { error: uniteError } = await supabase
       .from('ouvrage_unites')
       .update({
         unite_id: unite.uniteId,
         prix_unitaire: prix,
+        prix_revient: prixRevient,
         mis_a_jour_le: now,
         _synced: 0,
       })
@@ -338,10 +350,11 @@ export async function createArticle(
     throw new Error('Unité requise.');
   }
 
-  const prix = Number(primaryUnite.prixUnitaire);
+  const prix = Math.round(Number(primaryUnite.prixUnitaire));
   if (!Number.isFinite(prix) || prix < 0) {
     throw new Error('Prix unitaire invalide.');
   }
+  const prixRevient = parseOptionalPrix(primaryUnite.prixRevient);
 
   const resolvedFournisseurId = await resolveFournisseurId({
     metierId,
@@ -390,6 +403,7 @@ export async function createArticle(
     ouvrage_id: articleId,
     unite_id: primaryUnite.uniteId,
     prix_unitaire: prix,
+    prix_revient: prixRevient,
     cree_le: now,
     mis_a_jour_le: now,
     _synced: 0,

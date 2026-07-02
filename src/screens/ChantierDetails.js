@@ -22,7 +22,7 @@ import {
   updateReleveStatusLocal,
 } from '../db/querries';
 import { CHANTIER_PHOTO_SLOTS, resolveTerrainImageUri } from '../db/terrainImageStorage';
-import { canModifyReleveForProfil, canChangeReleveStatus, hidesPriceUiForRole } from '../utils/terrainAccess';
+import { canModifyReleveForProfil, canChangeReleveStatus, hidesPriceUiForRole, canToggleLigneIndCompleteOnReleve, canAccessReleveForProfil } from '../utils/terrainAccess';
 import { formatPriseParLine } from '../utils/releveDisplay';
 import {
   downloadDevisPdf,
@@ -81,6 +81,7 @@ export default function ChantierDetails({
   const [hidesDevisUi, setHidesDevisUi] = useState(false);
   const [isProAccount, setIsProAccount] = useState(false);
   const [canEditReleveStatus, setCanEditReleveStatus] = useState(false);
+  const [canToggleLigneComplete, setCanToggleLigneComplete] = useState(false);
   const [imageModal, setImageModal] = useState({
     visible: false,
     uri: null,
@@ -126,6 +127,14 @@ export default function ChantierDetails({
         getChantierWithClientByIdLocal(chantier.id),
         getSectionOrderByReleveIdLocal(releveId),
       ]);
+      const profil = await getLoggedInProfilViewLocal();
+      if (releveData && !canAccessReleveForProfil(profil, releveData)) {
+        setReleve(null);
+        setLignes([]);
+        setSectionOrder([]);
+        Alert.alert('Accès refusé', "Vous n'avez pas accès à ce relevé.");
+        return;
+      }
       setReleve(releveData || null);
       setLignes(lignesData || []);
       setSectionOrder(order || []);
@@ -155,6 +164,7 @@ export default function ChantierDetails({
         setCanEditReleveStatus(
           canChangeReleveStatus(profil) && canModifyReleveForProfil(profil, releve)
         );
+        setCanToggleLigneComplete(canToggleLigneIndCompleteOnReleve(profil, releve));
         if (hidesPriceUiForRole(profil?.role)) {
           setShowPrices(false);
         }
@@ -163,6 +173,7 @@ export default function ChantierDetails({
         setHidesDevisUi(false);
         setIsProAccount(false);
         setCanEditReleveStatus(false);
+        setCanToggleLigneComplete(false);
       }
     };
     loadAccess();
@@ -243,8 +254,6 @@ export default function ChantierDetails({
   };
 
   const handleToggleComplete = async (ligne) => {
-    if (!isProAccount) return;
-
     const nextValue = Number(ligne.ind_complete) === 1 ? 0 : 1;
     try {
       await updateLigneReleveIndCompleteLocal(ligne.id, nextValue);
@@ -432,7 +441,7 @@ export default function ChantierDetails({
         sectionOrder={sectionOrder}
         showPrices={showPrices}
         onLignePress={handleLignePress}
-        onLigneDoublePress={isProAccount ? handleToggleComplete : undefined}
+        onLigneDoublePress={canToggleLigneComplete ? handleToggleComplete : undefined}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadLignes} />}
         contentContainerStyle={[
           styles.listContent,

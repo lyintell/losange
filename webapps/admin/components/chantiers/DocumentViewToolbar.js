@@ -9,6 +9,9 @@ import { markChantierAsDevisIfNeeded } from '@/lib/chantiers/updateChantierStatu
 export default function DocumentViewToolbar({
   fileName,
   modifyHref = null,
+  canModifyChantier = true,
+  canChangeChantierStatus = true,
+  canChangeDevisStatus = true,
   chantierId = null,
   chantierStatus = null,
   onStatusChange = null,
@@ -21,7 +24,7 @@ export default function DocumentViewToolbar({
   const [error, setError] = useState('');
 
   const maybeMarkAsDevis = async () => {
-    if (!chantierId || chantierStatus !== 'D') return;
+    if (!canChangeChantierStatus || !chantierId || chantierStatus !== 'D') return;
 
     try {
       const nextStatus = await markChantierAsDevisIfNeeded(chantierId, chantierStatus);
@@ -88,7 +91,7 @@ export default function DocumentViewToolbar({
           <AdminIcon name="download" size={16} />
           <span>{downloading ? 'Génération…' : 'Télécharger PDF'}</span>
         </button>
-        {modifyHref ? (
+        {modifyHref && canModifyChantier ? (
           <Link href={modifyHref} className="secondary-button document-toolbar-button">
             <AdminIcon name="pencil" size={16} />
             <span>Modifier</span>
@@ -100,7 +103,7 @@ export default function DocumentViewToolbar({
           status={releveStatus}
           className="document-toolbar-status"
           saving={releveStatusSaving}
-          onClick={onReleveStatusClick || undefined}
+          onClick={canChangeDevisStatus ? onReleveStatusClick || undefined : undefined}
         />
       ) : null}
       {releveStatusError ? (

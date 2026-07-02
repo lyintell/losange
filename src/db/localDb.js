@@ -358,6 +358,7 @@ export const initLocalDatabase = async () => {
       ouvrage_id TEXT NOT NULL,
       unite_id TEXT NOT NULL,
       prix_unitaire REAL NOT NULL DEFAULT 0.0,
+      prix_revient REAL,
       supprime_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
@@ -417,7 +418,7 @@ export const initLocalDatabase = async () => {
       largeur REAL,
       hauteur REAL,
       profondeur REAL,
-      nombre INTEGER DEFAULT 1,
+      nombre REAL DEFAULT 1,
       quantite REAL NOT NULL DEFAULT 1.0,
       prix_unitaire_applique REAL NOT NULL,
       montant REAL NOT NULL,
@@ -740,6 +741,12 @@ const ensureSchemaMigrations = async (db) => {
 
   try {
     await db.execAsync('ALTER TABLE ouvrages ADD COLUMN nom_devis TEXT;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync('ALTER TABLE ouvrage_unites ADD COLUMN prix_revient REAL;');
   } catch {
     // Colonne deja presente.
   }
