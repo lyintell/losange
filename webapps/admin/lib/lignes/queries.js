@@ -32,8 +32,10 @@ export async function fetchLignesByReleveId(releveId) {
       prix_unitaire_applique,
       montant,
       note,
+      note_2,
       ind_complete,
       ordre,
+      metier_ordre,
       sections (
         nom
       ),
@@ -95,8 +97,10 @@ export async function fetchLignesByReleveId(releveId) {
       prix_unitaire: ou?.prix_unitaire,
       montant: ligne.montant,
       note: ligne.note,
+      note_2: ligne.note_2,
       ind_complete: ligne.ind_complete,
       ordre: ligne.ordre,
+      metier_ordre: ligne.metier_ordre ?? 0,
       section_id: ligne.section_id || null,
       section_nom: ligne.sections?.nom || null,
       section_ordre: sectionOrdreById.get(ligne.section_id) ?? null,

@@ -5,7 +5,8 @@ export default function DimensionLigne({ row }) {
   const equivalence = row.isDimensionLine ? row.dimensionEquivalence || '' : '';
   const note = row.note || '';
   const measureLine = [measure, equivalence].filter(Boolean).join(' ');
-  const measureClass = measure || equivalence ? 'dim-measure' : 'dim-measure-secondary';
+  const measureBaseClass = measure || equivalence ? 'dim-measure' : 'dim-measure-secondary';
+  const measureClass = `${measureBaseClass}${row.indComplete ? ' dim-measure--complete' : ''}`;
 
   if (measureLine && note) {
     return (

@@ -3,6 +3,8 @@
 import { useMemo, useState } from 'react';
 import { matchesOuvrageSearch } from '@/lib/ouvrages/format';
 import OuvragesTable from '@/components/ouvrages/OuvragesTable';
+import TablePagination from '@/components/ui/TablePagination';
+import { useTablePagination } from '@/hooks/useTablePagination';
 
 const SEARCH_PLACEHOLDERS = {
   default: 'Nom ouvrage, métier…',
@@ -25,6 +27,7 @@ export default function OuvragesListClient({
       ),
     [ouvrages, query, showMetierColumn]
   );
+  const { pageItems, paginationProps } = useTablePagination(filtered);
 
   return (
     <div className="ouvrages-list">
@@ -39,11 +42,12 @@ export default function OuvragesListClient({
         />
       </label>
       <OuvragesTable
-        rows={filtered}
+        rows={pageItems}
         metierId={metierId}
         showMetierColumn={showMetierColumn}
         onRowSelect={onRowSelect}
       />
+      <TablePagination {...paginationProps} />
     </div>
   );
 }

@@ -23,6 +23,7 @@ import {
   getDraftDimensionFlow,
   removeLigneFromDraft,
   reorderDraftLignesInSection,
+  reorderDraftMetierInSection,
   setDraftUiStep,
   updateDraftDimensionFlow,
   updateLigneInDraft,
@@ -37,6 +38,7 @@ import {
   getUnitesEtPrixParOuvrage,
 } from '../db/querries';
 import { computeMontantLigneReleve } from '../utils/ligneReleveCalcul';
+import { sortSectionsForSelection } from '../utils/defaultSection';
 import {
   canCreateOuvrageInReleveFlow,
   canCreateReleveOrLigne,
@@ -90,7 +92,6 @@ export default function NouvelleDimensionScreen({
   onCancel,
   onFinish,
   onBackToChantiers,
-  onDeleteChantier,
   onNavHandlersChange,
 }) {
   const saisieRef = useRef(null);
@@ -157,17 +158,15 @@ export default function NouvelleDimensionScreen({
     () => draft?.lignes?.find((ligne) => ligne.id === editingLigneId) || null,
     [draft?.lignes, editingLigneId]
   );
-  const catalogItemsSorted = useMemo(() => {
-    const items = [...catalogItems];
-    return items.sort((a, b) => {
-      const ordreA = Number(a.ordre);
-      const ordreB = Number(b.ordre);
-      if (Number.isFinite(ordreA) && Number.isFinite(ordreB) && ordreA !== ordreB) {
-        return ordreA - ordreB;
-      }
-      return (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' });
-    });
-  }, [catalogItems]);
+  const catalogItemsSorted = useMemo(
+    () =>
+      [...catalogItems].sort((a, b) =>
+        String(a.nom || '').localeCompare(String(b.nom || ''), 'fr', { sensitivity: 'base' })
+      ),
+    [catalogItems]
+  );
+
+  const sectionsSorted = useMemo(() => sortSectionsForSelection(sections), [sections]);
 
   const loadCatalogItems = useCallback(
     async (metierId, kind = catalogueKind) => {
@@ -479,11 +478,19 @@ export default function NouvelleDimensionScreen({
         catalogue_kind: current.catalogueKind || 'ouvrage',
         ouvrage_unite_id: current.ouvrageUnite?.ouvrage_unite_id,
         prix_unitaire_applique: prixUnitaireApplique,
+        prix_revient_applique:
+          payload.prixRevientApplique == null || payload.prixRevientApplique === ''
+            ? null
+            : Number(payload.prixRevientApplique),
         montant: computeMontantLigneReleve({
           prixUnitaireApplique,
+          quantite,
           nombre: payload.nombre,
+          indDimension: current.ouvrageUnite?.ind_dimension ?? 0,
+          nomUnite: current.ouvrageUnite?.nom_unite,
         }),
         note: payload.note || null,
+        note_2: payload.note_2 || null,
         photo_pending_uri: payload.photo_pending_uri || null,
         photo_mime_type: payload.photo_mime_type || null,
         photo: payload.photo || null,
@@ -548,6 +555,24 @@ export default function NouvelleDimensionScreen({
             if (editingLigneId === ligne.id) {
               setEditingLigneId(null);
             }
+            refreshDraft();
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDuplicateLigne = (ligne) => {
+    Alert.alert(
+      'Dupliquer',
+      `Dupliquer "${ligne.ouvrage_nom || 'cette entrée'}" ?`,
+      [
+        { text: 'Non', style: 'cancel' },
+        {
+          text: 'Oui',
+          onPress: () => {
+            const { id: _omitId, ...rest } = ligne;
+            addLigneToDraft(rest);
             refreshDraft();
           },
         },
@@ -752,13 +777,13 @@ export default function NouvelleDimensionScreen({
         </Text>
         {loadingSections ? (
           <LosangeLogoLoader size="large" containerStyle={styles.loader} />
-        ) : sections.length === 0 ? (
+        ) : sectionsSorted.length === 0 ? (
           <Text style={styles.infoText}>
             Aucune section. Utilisez + pour créer RDC, Salon, Étage…
           </Text>
         ) : (
           <View style={styles.choiceList}>
-            {sections.map((section) => (
+            {sectionsSorted.map((section) => (
               <MobileButton
                 key={section.id}
                 mode={draft?.section?.id === section.id ? 'contained' : 'outlined'}
@@ -893,7 +918,9 @@ export default function NouvelleDimensionScreen({
           profondeur: editingLigne.profondeur,
           nombre: editingLigne.nombre,
           note: editingLigne.note,
+          note_2: editingLigne.note_2,
           prix_unitaire_applique: editingLigne.prix_unitaire_applique,
+          prix_revient_applique: editingLigne.prix_revient_applique,
           photo: editingLigne.photo || null,
           photo_pending_uri: editingLigne.photo_pending_uri || null,
           photo_mime_type: editingLigne.photo_mime_type || null,
@@ -910,6 +937,8 @@ export default function NouvelleDimensionScreen({
             hidePriceUi={hidesPriceUi}
             ouvrageUniteId={ouvrageUnite?.ouvrage_unite_id || ''}
             prixUnitaireApplique={ouvrageUnite?.prix_unitaire || 0}
+            prixRevientCatalogue={ouvrageUnite?.prix_revient ?? null}
+            showPrixRevient={showPrixRevient}
             isDimension={Number(ouvrageUnite?.ind_dimension) === 1}
             uniteFormule={ouvrageUnite?.formule || ''}
             nomUnite={ouvrageUnite?.nom_unite || ''}
@@ -963,6 +992,14 @@ export default function NouvelleDimensionScreen({
     [refreshDraft]
   );
 
+  const handleMetierReorder = useCallback(
+    (sectionId, metierId, direction) => {
+      reorderDraftMetierInSection(sectionId, metierId, direction);
+      refreshDraft();
+    },
+    [refreshDraft]
+  );
+
   const handleRecapSectionPress = useCallback(
     (sectionId, sectionNom) => {
       if (!sectionId) return;
@@ -1000,27 +1037,8 @@ export default function NouvelleDimensionScreen({
     [loadSections, recapSectionPicker.sectionId, refreshDraft]
   );
 
-  const isEditingChantier = Boolean(draft?.chantierId);
-
-  const handleDeleteChantierPress = () => {
-    if (!draft?.chantierId) return;
-    Alert.alert(
-      'Supprimer',
-      `Voulez-vous supprimer le chantier "${draft.chantierNom || ''}" ?`,
-      [
-        { text: 'Non', style: 'cancel' },
-        {
-          text: 'Oui',
-          style: 'destructive',
-          onPress: () =>
-            onDeleteChantier?.({ id: draft.chantierId, nom: draft.chantierNom }),
-        },
-      ]
-    );
-  };
-
   const renderRecapStep = () => {
-    const fabPadding = getFabColumnPadding(isEditingChantier ? 1 : 0);
+    const fabPadding = getFabColumnPadding(0);
     const lignes = draft?.lignes || [];
 
     return (
@@ -1037,9 +1055,11 @@ export default function NouvelleDimensionScreen({
             sectionOrder={draft?.sectionOrder}
             enableLigneDrag
             onLigneReorder={handleLigneReorder}
+            onMetierReorder={handleMetierReorder}
             onSectionPress={handleRecapSectionPress}
             onLignePress={handleEditLigne}
-            onLigneDoublePress={handleDeleteLigne}
+            onLigneDoublePress={handleDuplicateLigne}
+            onLigneLongPress={handleDeleteLigne}
             contentPaddingBottom={fabPadding}
             style={styles.recapList}
           />
@@ -1052,7 +1072,7 @@ export default function NouvelleDimensionScreen({
             ? `Section : ${recapSectionPicker.sectionNom}`
             : 'Changer de section'
         }
-        sections={sections}
+        sections={sectionsSorted}
         selectedSectionId={recapSectionPicker.sectionId}
         onDismiss={() =>
           setRecapSectionPicker({ visible: false, sectionId: null, sectionNom: null })
@@ -1074,16 +1094,8 @@ export default function NouvelleDimensionScreen({
         <FlowActionFab
           icon="plus"
           color={flowFabColors.primary}
-          smallCountBelow={isEditingChantier ? 1 : 0}
+          smallCountBelow={0}
           onPress={handleContinuerRecap}
-        />
-      ) : null}
-      {isEditingChantier ? (
-        <FlowSmallFab
-          icon="delete"
-          tierFromBottom={0}
-          color={flowFabColors.muted}
-          onPress={handleDeleteChantierPress}
         />
       ) : null}
     </>

@@ -2,7 +2,9 @@
 
 import { useMemo, useState } from 'react';
 import MetiersTable from '@/components/metiers/MetiersTable';
+import TablePagination from '@/components/ui/TablePagination';
 import { matchesMetierSearch } from '@/lib/metiers/format';
+import { useTablePagination } from '@/hooks/useTablePagination';
 
 export default function MetiersListClient({ metiers = [] }) {
   const [query, setQuery] = useState('');
@@ -11,6 +13,7 @@ export default function MetiersListClient({ metiers = [] }) {
     () => metiers.filter((row) => matchesMetierSearch(row, query)),
     [metiers, query]
   );
+  const { pageItems, paginationProps } = useTablePagination(filtered);
 
   return (
     <div className="clients-list">
@@ -24,7 +27,8 @@ export default function MetiersListClient({ metiers = [] }) {
           onChange={(event) => setQuery(event.target.value)}
         />
       </label>
-      <MetiersTable rows={filtered} />
+      <MetiersTable rows={pageItems} />
+      <TablePagination {...paginationProps} />
     </div>
   );
 }

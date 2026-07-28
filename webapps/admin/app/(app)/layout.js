@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation';
-import Sidebar from '@/components/layout/Sidebar';
-import EntrepriseBrandHeader from '@/components/layout/EntrepriseBrandHeader';
+import AppShell from '@/components/layout/AppShell';
 import { getSession, clearSession } from '@/lib/auth/session';
 import { canAccessAdminWeb } from '@/lib/auth/webAccess';
 
@@ -16,13 +15,5 @@ export default async function AppLayout({ children }) {
     redirect('/login');
   }
 
-  return (
-    <div className="app-shell">
-      <Sidebar session={session} />
-      <div className="app-main">
-        <EntrepriseBrandHeader session={session} />
-        <main className="app-content">{children}</main>
-      </div>
-    </div>
-  );
+  return <AppShell session={session}>{children}</AppShell>;
 }

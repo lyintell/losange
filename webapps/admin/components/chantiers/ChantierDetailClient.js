@@ -1,89 +1,141 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import ChantierInfoModal from '@/components/chantiers/ChantierInfoModal';
 import ChantierStatusModal from '@/components/chantiers/ChantierStatusModal';
 import { ChantierStatusBadge } from '@/components/chantiers/ChantiersTable';
 import AdminIcon from '@/components/ui/AdminIcon';
 import ReleveStatusBadge from '@/components/chantiers/ReleveStatusBadge';
+import TablePagination from '@/components/ui/TablePagination';
 import { useRowOpen } from '@/components/ui/useRowNavigate';
+import { useTablePagination } from '@/hooks/useTablePagination';
 import { formatDisplayDate, formatDisplayDateTime } from '@/lib/chantiers/format';
+import { formatMontantFcfa } from '@/lib/format/formatLigneMesures';
 import { getNextReleveStatus } from '@/lib/chantiers/releveStatus';
 import { updateChantierStatusClient } from '@/lib/chantiers/updateChantierStatusClient';
 import { updateReleveStatusClient } from '@/lib/chantiers/updateReleveStatusClient';
 
-function ReleveListItem({ chantierId, releve }) {
-  const href = `/chantiers/${chantierId}/releves/${releve.id}`;
-  const handleRowClick = useRowOpen(href, { newTab: true });
-
-  return (
-    <li className="doc-list-item doc-list-item--clickable" onClick={handleRowClick}>
-      <div>
-        <p className="doc-list-title">Relevé {releve.numero ?? 1}</p>
-        <p className="doc-list-meta">
-          {formatDisplayDateTime(releve.cree_le)} · {formatDisplayDate(releve.date_facture)}
-        </p>
-      </div>
-    </li>
-  );
-}
-
 function ReleveList({ chantierId, releves, emptyLabel }) {
+  const { pageItems, paginationProps } = useTablePagination(releves);
+
   if (!releves.length) {
     return <p className="empty-state">{emptyLabel}</p>;
   }
 
   return (
-    <ul className="doc-list">
-      {releves.map((releve) => (
-        <ReleveListItem key={releve.id} chantierId={chantierId} releve={releve} />
-      ))}
-    </ul>
+    <>
+      <div className="data-table-wrap">
+        <table className="data-table data-table--rich">
+          <thead>
+            <tr>
+              <th>N°</th>
+              <th>Date relevé</th>
+              <th>Créé le</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pageItems.map((releve) => (
+              <ReleveRow key={releve.id} chantierId={chantierId} releve={releve} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <TablePagination {...paginationProps} />
+    </>
   );
 }
 
-function DevisListItem({ chantierId, releve, savingReleveId, onReleveStatusClick, canChangeDevisStatus }) {
-  const href = `/chantiers/${chantierId}/devis/${releve.id}`;
+function ReleveRow({ chantierId, releve }) {
+  const href = `/chantiers/${chantierId}/releves/${releve.id}`;
   const handleRowClick = useRowOpen(href, { newTab: true });
 
   return (
-    <li className="doc-list-item doc-list-item--clickable" onClick={handleRowClick}>
-      <div>
-        <p className="doc-list-title">Devis {releve.numero ?? 1}</p>
-        <p className="doc-list-meta">
-          {formatDisplayDate(releve.date_facture)} · HT{' '}
-          {Math.round(Number(releve.total_ht_facture) || 0).toLocaleString('fr-FR')} FCFA
-        </p>
-      </div>
-      <div className="doc-list-actions">
-        <ReleveStatusBadge
-          status={releve.status}
-          saving={savingReleveId === releve.id}
-          onClick={canChangeDevisStatus ? () => onReleveStatusClick?.(releve) : undefined}
-        />
-      </div>
-    </li>
+    <tr className="data-table-row--clickable" onClick={handleRowClick}>
+      <td>
+        <span className="table-link">Relevé {releve.numero ?? 1}</span>
+      </td>
+      <td>{formatDisplayDate(releve.date_facture)}</td>
+      <td className="table-muted">{formatDisplayDateTime(releve.cree_le)}</td>
+    </tr>
   );
 }
 
 function DevisList({ chantierId, releves, savingReleveId, onReleveStatusClick, canChangeDevisStatus }) {
+  const { pageItems, paginationProps } = useTablePagination(releves);
+
   if (!releves.length) {
     return <p className="empty-state">Aucun devis pour ce chantier.</p>;
   }
 
   return (
-    <ul className="doc-list">
-      {releves.map((releve) => (
-        <DevisListItem
-          key={releve.id}
-          chantierId={chantierId}
-          releve={releve}
-          savingReleveId={savingReleveId}
-          onReleveStatusClick={onReleveStatusClick}
-          canChangeDevisStatus={canChangeDevisStatus}
+    <>
+      <div className="data-table-wrap">
+        <table className="data-table data-table--rich">
+          <thead>
+            <tr>
+              <th>N°</th>
+              <th>Date</th>
+              <th>Statut</th>
+              <th className="num">Remise</th>
+              <th className="num">Total HT</th>
+              <th className="num">Total TTC</th>
+              <th>Créé le</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pageItems.map((releve) => (
+              <DevisRow
+                key={releve.id}
+                chantierId={chantierId}
+                releve={releve}
+                savingReleveId={savingReleveId}
+                onReleveStatusClick={onReleveStatusClick}
+                canChangeDevisStatus={canChangeDevisStatus}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <TablePagination {...paginationProps} />
+    </>
+  );
+}
+
+function DevisRow({ chantierId, releve, savingReleveId, onReleveStatusClick, canChangeDevisStatus }) {
+  const href = `/chantiers/${chantierId}/devis/${releve.id}`;
+  const handleRowClick = useRowOpen(href, { newTab: true });
+  const remise = Number(releve.remise) || 0;
+  const hasTva = Number(releve.ind_tva) === 1;
+
+  return (
+    <tr className="data-table-row--clickable" onClick={handleRowClick}>
+      <td>
+        <div className="table-stack">
+          <span className="table-link">Devis {releve.numero ?? 1}</span>
+          {hasTva ? <span className="table-subtext">TVA incluse</span> : null}
+        </div>
+      </td>
+      <td>{formatDisplayDate(releve.date_facture)}</td>
+      <td>
+        <ReleveStatusBadge
+          status={releve.status}
+          saving={savingReleveId === releve.id}
+          onClick={
+            canChangeDevisStatus
+              ? (event) => {
+                  event.stopPropagation();
+                  onReleveStatusClick?.(releve);
+                }
+              : undefined
+          }
         />
-      ))}
-    </ul>
+      </td>
+      <td className="num">{remise > 0 ? formatMontantFcfa(remise) : '—'}</td>
+      <td className="num">{formatMontantFcfa(releve.total_ht_facture)}</td>
+      <td className="num">{formatMontantFcfa(releve.total_ttc_facture)}</td>
+      <td className="table-muted">{formatDisplayDateTime(releve.cree_le)}</td>
+    </tr>
   );
 }
 
@@ -95,6 +147,7 @@ export default function ChantierDetailClient({
   canChangeChantierStatus = true,
   canChangeDevisStatus = true,
 }) {
+  const router = useRouter();
   const [internalTab, setInternalTab] = useState('devis');
   const tab = controlledTab ?? internalTab;
 
@@ -224,21 +277,33 @@ export default function ChantierDetailClient({
         ) : null}
       </div>
 
-      <div className="tabs">
-        <button
-          type="button"
-          className={`tab-button ${tab === 'devis' ? 'tab-button--active' : ''}`}
-          onClick={() => setTab('devis')}
-        >
-          Les devis
-        </button>
-        <button
-          type="button"
-          className={`tab-button ${tab === 'releves' ? 'tab-button--active' : ''}`}
-          onClick={() => setTab('releves')}
-        >
-          Les relevés
-        </button>
+      <div className="chantier-tabs-toolbar">
+        <div className="tabs">
+          <button
+            type="button"
+            className={`tab-button ${tab === 'devis' ? 'tab-button--active' : ''}`}
+            onClick={() => setTab('devis')}
+          >
+            Les devis
+          </button>
+          <button
+            type="button"
+            className={`tab-button ${tab === 'releves' ? 'tab-button--active' : ''}`}
+            onClick={() => setTab('releves')}
+          >
+            Les relevés
+          </button>
+        </div>
+        {tab === 'devis' && canModifyChantier ? (
+          <button
+            type="button"
+            className="primary-button icon-text-button list-toolbar-action"
+            onClick={() => router.push(`/chantiers/${chantier.id}/devis/nouveau`)}
+          >
+            <AdminIcon name="plus" size={16} />
+            <span>Ajouter un devis</span>
+          </button>
+        ) : null}
       </div>
 
       {tab === 'devis' ? (
@@ -265,6 +330,11 @@ export default function ChantierDetailClient({
         chantier={chantierForModals}
         onClose={() => setInfoModalOpen(false)}
         onSaved={handleInfoSaved}
+        onDeleted={() => {
+          const clientId = info.client_id || chantier.client_id;
+          router.push(clientId ? `/clients/${clientId}` : '/chantiers');
+          router.refresh();
+        }}
       />
 
       <ChantierStatusModal

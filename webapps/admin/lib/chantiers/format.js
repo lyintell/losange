@@ -90,5 +90,6 @@ export function buildDocumentFileName(chantier, kind) {
   const client = slugifyClient(chantier?.client_nom);
   const date = new Date().toISOString().slice(0, 10);
   if (kind === 'devis') return `devis_${client}_${date}.pdf`;
+  if (kind === 'devis-excel') return `devis_${client}_${date}.xlsx`;
   return `releves_${client}_${date}.pdf`;
 }

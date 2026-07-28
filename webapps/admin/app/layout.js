@@ -10,6 +10,10 @@ const geistSans = Geist({
 export const metadata = {
   title: `${APP_NAME} Admin`,
   description: 'Administration Losange — chantiers, devis et paramètres.',
+  icons: {
+    icon: [{ url: '/icon.png', type: 'image/png' }],
+    apple: [{ url: '/apple-icon.png', type: 'image/png' }],
+  },
 };
 
 export default function RootLayout({ children }) {

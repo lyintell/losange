@@ -1,7 +1,7 @@
 import DocumentExportLogo from '@/components/chantiers/DocumentExportLogo';
 import { formatDevisDocumentDate } from '@/lib/chantiers/documentDates';
 import { buildDevisTableRows } from '@/lib/format/devisGrouping';
-import { formatMontantFcfa } from '@/lib/format/formatLigneMesures';
+import { formatMontantFcfa, formatMontantNombre } from '@/lib/format/formatLigneMesures';
 import { montantEnLettresFcfa } from '@/lib/format/montantEnLettres';
 import { computeReleveFacturation } from '@/lib/format/releveFacturation';
 
@@ -17,7 +17,8 @@ export default function DevisDocument({ chantier, lignes = [], releve, entrepris
   const afficheTva = Number(entreprise?.ind_pro) === 1 && facturation.applyTva;
   const montantArrete = afficheTva ? facturation.totalTtc : facturation.totalHt;
   const montantArreteLettres = montantEnLettresFcfa(montantArrete, { includeTtcLabel: afficheTva });
-  const tel = [entreprise?.telephone_1, entreprise?.telephone_2].filter(Boolean).join(' / ');
+  const entete1 = String(entreprise?.entete_1 || '').trim();
+  const entete2 = String(entreprise?.entete_2 || '').trim();
 
   return (
     <article className={`pdf-document pdf-document--devis${bare ? ' pdf-document--bare' : ''}`}>
@@ -26,8 +27,8 @@ export default function DevisDocument({ chantier, lignes = [], releve, entrepris
           <DocumentExportLogo storageKey={entreprise?.logo} alt={entreprise?.nom || 'Entreprise'} />
           <div className="pdf-devis-company">
             <h1>{entreprise?.nom || 'Entreprise'}</h1>
-            {tel ? <p className="pdf-muted">{tel}</p> : null}
-            {entreprise?.adresse ? <p className="pdf-muted">{entreprise.adresse}</p> : null}
+            {entete1 ? <p className="pdf-muted">{entete1}</p> : null}
+            {entete2 ? <p className="pdf-muted">{entete2}</p> : null}
           </div>
         </div>
         <p className="pdf-devis-title">DEVIS ESTIMATIF</p>
@@ -50,7 +51,8 @@ export default function DevisDocument({ chantier, lignes = [], releve, entrepris
           <thead>
             <tr>
               <th className="designation">Designation</th>
-              <th className="num">Quantite</th>
+              <th className="num">Qté</th>
+              <th className="num unite">U</th>
               <th className="num">P.U</th>
               <th className="num">Montant</th>
             </tr>
@@ -61,7 +63,7 @@ export default function DevisDocument({ chantier, lignes = [], releve, entrepris
                 if (row.isSectionSeparator) {
                   return (
                     <tr key={`section-sep-${index}`} className="row-section-divider">
-                      <td colSpan={4} />
+                      <td colSpan={5} />
                     </tr>
                   );
                 }
@@ -69,7 +71,7 @@ export default function DevisDocument({ chantier, lignes = [], releve, entrepris
                 if (row.isSectionHeader) {
                   return (
                     <tr key={`section-header-${index}`} className="row-section-header">
-                      <td colSpan={4}>
+                      <td colSpan={5}>
                         <p className="devis-section">{row.sectionNom}</p>
                       </td>
                     </tr>
@@ -94,18 +96,22 @@ export default function DevisDocument({ chantier, lignes = [], releve, entrepris
                         </p>
                       ) : null}
                       {row.showOuvrage ? <p className="devis-ouvrage">{row.ouvrageNom}</p> : null}
+                      {row.showOuvrage && row.note_2 ? (
+                        <p className="devis-ouvrage-note2">({row.note_2})</p>
+                      ) : null}
                       {row.dimension ? <p className="devis-dimension">{row.dimension}</p> : null}
                     </div>
                   </td>
                   <td className="num">{row.quantiteLabel}</td>
-                  <td className="num">{formatMontantFcfa(row.prixUnitaire)}</td>
-                  <td className="num">{formatMontantFcfa(row.montant)}</td>
+                  <td className="num unite">{row.uniteLabel || ''}</td>
+                  <td className="num">{formatMontantNombre(row.prixUnitaire)}</td>
+                  <td className="num">{formatMontantNombre(row.montant)}</td>
                 </tr>
                 );
               })
             ) : (
               <tr>
-                <td colSpan={4}>Aucune ligne</td>
+                <td colSpan={5}>Aucune ligne</td>
               </tr>
             )}
           </tbody>
@@ -154,8 +160,6 @@ export default function DevisDocument({ chantier, lignes = [], releve, entrepris
 
       <footer className="pdf-devis-footer">
         {entreprise?.nom || ''}
-        {tel ? ` · ${tel}` : ''}
-        {entreprise?.adresse ? ` · ${entreprise.adresse}` : ''}
       </footer>
     </article>
   );

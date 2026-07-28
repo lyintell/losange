@@ -90,7 +90,7 @@ const PUSH_ORDER = [
 ] as const;
 
 const TIMESTAMP_COLUMNS = new Set(['cree_le', 'mis_a_jour_le', 'supprime_le']);
-const FLAG_COLUMNS = new Set(['ind_pro', 'ind_active', 'ind_tva', '_synced', 'ind_dimension', 'ind_complete', 'ind_article', 'ind_actif', 'ind_default', 'ind_admin_connecte_mobile', 'ind_metiers_preselectionnes']);
+const FLAG_COLUMNS = new Set(['ind_pro', 'ind_active', 'ind_tva', 'ind_dimension_terrain', 'ind_changement', '_synced', 'ind_dimension', 'ind_complete', 'ind_article', 'ind_actif', 'ind_default', 'ind_admin_connecte_mobile', 'ind_metiers_preselectionnes']);
 
 const TABLE_COLUMNS: Record<string, string[]> = {
   metiers: [
@@ -195,6 +195,9 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     'ind_tva',
     'status',
     'note',
+    'ind_dimension_terrain',
+    'ind_changement',
+    'id_qui_change',
     'supprime_le',
     'cree_le',
     'mis_a_jour_le',
@@ -222,9 +225,12 @@ const TABLE_COLUMNS: Record<string, string[]> = {
     'prix_unitaire_applique',
     'montant',
     'note',
+    'note_2',
     'photo',
     'section_id',
     'ordre',
+    'metier_ordre',
+    'prix_revient_applique',
     'ind_complete',
     'supprime_le',
     'cree_le',
@@ -671,6 +677,13 @@ const pushEntrepriseRow = async (
     throw new Error('Nom entreprise requis.');
   }
 
+  const entete1Raw = row.entete_1;
+  const entete2Raw = row.entete_2;
+  const entete_1 =
+    entete1Raw == null || String(entete1Raw).trim() === '' ? null : String(entete1Raw).trim();
+  const entete_2 =
+    entete2Raw == null || String(entete2Raw).trim() === '' ? null : String(entete2Raw).trim();
+
   const misAJourLe =
     typeof row.mis_a_jour_le === 'string' && row.mis_a_jour_le
       ? row.mis_a_jour_le
@@ -680,6 +693,8 @@ const pushEntrepriseRow = async (
     .from('entreprises')
     .update({
       nom,
+      entete_1,
+      entete_2,
       ind_tva: Number(row.ind_tva) === 1 ? 1 : 0,
       mis_a_jour_le: misAJourLe,
     })

@@ -23,11 +23,12 @@ import {
 } from '../utils/terrainAccess';
 import {
   computeMontantLigneReleve,
+  computePrixRevientAppliqueDefault,
   computePrixUnitaireAppliqueDefault,
   computeQuantiteLigneReleve,
   getRequiredCotesFromFormula,
 } from '../utils/ligneReleveCalcul';
-import { formatMontant, formatQuantite, roundMontant, roundQuantite } from '../utils/formatLigneMesures';
+import { formatMontant, formatQuantite, isNomUnitePiece, roundMontant, roundQuantite } from '../utils/formatLigneMesures';
 
 const FIELD_LABEL = {
   largeur: 'Largeur',
@@ -48,6 +49,8 @@ export default forwardRef(function PaveSaisieOneHand(
     releveId = '',
     ouvrageUniteId = '',
     prixUnitaireApplique = 0,
+    prixRevientCatalogue = null,
+    showPrixRevient = false,
     isDimension = true,
     uniteFormule = '',
     nomUnite = '',
@@ -105,21 +108,37 @@ export default forwardRef(function PaveSaisieOneHand(
   const replaceOnNextKeyRef = useRef(true);
   const [form, setForm] = useState(buildInitialForm);
   const [note, setNote] = useState(initialValues?.note || '');
+  const [note2, setNote2] = useState(initialValues?.note_2 || '');
   const [noteDraft, setNoteDraft] = useState('');
+  const [note2Draft, setNote2Draft] = useState('');
   const [notesModalVisible, setNotesModalVisible] = useState(false);
   const [prixUnitaireDraft, setPrixUnitaireDraft] = useState('');
+  const [prixRevientDraft, setPrixRevientDraft] = useState('');
   const [prixModalVisible, setPrixModalVisible] = useState(false);
   const [photoPendingUri, setPhotoPendingUri] = useState(initialValues?.photo_pending_uri || null);
   const [photoMimeType, setPhotoMimeType] = useState(initialValues?.photo_mime_type || null);
   const [existingPhotoKey, setExistingPhotoKey] = useState(initialValues?.photo || null);
   const cataloguePu = Number(prixUnitaireApplique) || 0;
+  const cataloguePr =
+    prixRevientCatalogue == null || prixRevientCatalogue === ''
+      ? null
+      : Number(prixRevientCatalogue);
   const [prixUnitaireAppliqueState, setPrixUnitaireAppliqueState] = useState(() => {
     if (initialValues?.prix_unitaire_applique != null) {
       return Number(initialValues.prix_unitaire_applique) || 0;
     }
     return cataloguePu;
   });
+  const [prixRevientAppliqueState, setPrixRevientAppliqueState] = useState(() => {
+    if (initialValues?.prix_revient_applique != null && initialValues.prix_revient_applique !== '') {
+      return Number(initialValues.prix_revient_applique);
+    }
+    return null;
+  });
   const prixManuallyEditedRef = useRef(initialValues?.prix_unitaire_applique != null);
+  const prixRevientManuallyEditedRef = useRef(
+    initialValues?.prix_revient_applique != null && initialValues.prix_revient_applique !== ''
+  );
   const [saving, setSaving] = useState(false);
   const [resolvedHidePriceUi, setResolvedHidePriceUi] = useState(hidePriceUi);
   const [canEditPuApplique, setCanEditPuApplique] = useState(!hidePriceUi);
@@ -163,6 +182,18 @@ export default forwardRef(function PaveSaisieOneHand(
 
   const defaultPuApplique = useMemo(() => {
     try {
+      // Unité pièce (u) : ne pas recalculer tant que toutes les cotes
+      // requises ne sont pas saisies (sinon formule incomplète → P.U. = 0).
+      if (isDimensionMode && isNomUnitePiece(nomUnite)) {
+        const missingCote =
+          (requiredCotes.needsLargeur && !(Number(form.largeur) > 0)) ||
+          (requiredCotes.needsHauteur && !(Number(form.hauteur) > 0)) ||
+          (requiredCotes.needsProfondeur && !(Number(form.profondeur) > 0));
+        if (missingCote) {
+          return roundMontant(cataloguePu);
+        }
+      }
+
       return computePrixUnitaireAppliqueDefault({
         indDimension: isDimensionMode ? 1 : 0,
         prixUnitaire: cataloguePu,
@@ -170,11 +201,61 @@ export default forwardRef(function PaveSaisieOneHand(
         largeur: form.largeur,
         hauteur: form.hauteur,
         profondeur: form.profondeur,
+        nomUnite,
       });
     } catch {
-      return isDimensionMode ? 0 : cataloguePu;
+      return roundMontant(cataloguePu);
     }
-  }, [cataloguePu, form.hauteur, form.largeur, form.profondeur, isDimensionMode, uniteFormule]);
+  }, [
+    cataloguePu,
+    form.hauteur,
+    form.largeur,
+    form.profondeur,
+    isDimensionMode,
+    nomUnite,
+    requiredCotes.needsHauteur,
+    requiredCotes.needsLargeur,
+    requiredCotes.needsProfondeur,
+    uniteFormule,
+  ]);
+
+  const defaultPrApplique = useMemo(() => {
+    if (!showPrixRevient || cataloguePr == null || Number.isNaN(cataloguePr)) return null;
+    try {
+      if (isDimensionMode && isNomUnitePiece(nomUnite)) {
+        const missingCote =
+          (requiredCotes.needsLargeur && !(Number(form.largeur) > 0)) ||
+          (requiredCotes.needsHauteur && !(Number(form.hauteur) > 0)) ||
+          (requiredCotes.needsProfondeur && !(Number(form.profondeur) > 0));
+        if (missingCote) {
+          return roundMontant(cataloguePr);
+        }
+      }
+      return computePrixRevientAppliqueDefault({
+        indDimension: isDimensionMode ? 1 : 0,
+        prixRevient: cataloguePr,
+        formule: uniteFormule,
+        largeur: form.largeur,
+        hauteur: form.hauteur,
+        profondeur: form.profondeur,
+        nomUnite,
+      });
+    } catch {
+      return roundMontant(cataloguePr);
+    }
+  }, [
+    cataloguePr,
+    form.hauteur,
+    form.largeur,
+    form.profondeur,
+    isDimensionMode,
+    nomUnite,
+    requiredCotes.needsHauteur,
+    requiredCotes.needsLargeur,
+    requiredCotes.needsProfondeur,
+    showPrixRevient,
+    uniteFormule,
+  ]);
 
   useEffect(() => {
     if (initialValues?.prix_unitaire_applique != null) {
@@ -186,10 +267,29 @@ export default forwardRef(function PaveSaisieOneHand(
   }, [initialValues?.prix_unitaire_applique, ouvrageUniteId]);
 
   useEffect(() => {
+    if (initialValues?.prix_revient_applique != null && initialValues.prix_revient_applique !== '') {
+      setPrixRevientAppliqueState(Number(initialValues.prix_revient_applique));
+      prixRevientManuallyEditedRef.current = true;
+      return;
+    }
+    prixRevientManuallyEditedRef.current = false;
+    setPrixRevientAppliqueState(null);
+  }, [initialValues?.prix_revient_applique, ouvrageUniteId]);
+
+  useEffect(() => {
     if (initialValues?.prix_unitaire_applique != null) return;
     if (prixManuallyEditedRef.current) return;
     setPrixUnitaireAppliqueState(defaultPuApplique);
   }, [defaultPuApplique, initialValues?.prix_unitaire_applique]);
+
+  useEffect(() => {
+    if (!showPrixRevient) return;
+    if (initialValues?.prix_revient_applique != null && initialValues.prix_revient_applique !== '') {
+      return;
+    }
+    if (prixRevientManuallyEditedRef.current) return;
+    setPrixRevientAppliqueState(defaultPrApplique);
+  }, [defaultPrApplique, initialValues?.prix_revient_applique, showPrixRevient]);
 
   useEffect(() => {
     if (lockDimensionCotes) {
@@ -254,7 +354,12 @@ export default forwardRef(function PaveSaisieOneHand(
       nombre,
       quantite,
       prixUnitaireApplique: roundMontant(prixUnitaireAppliqueState),
+      prixRevientApplique:
+        showPrixRevient && prixRevientAppliqueState != null && prixRevientAppliqueState !== ''
+          ? roundMontant(prixRevientAppliqueState)
+          : null,
       note: note.trim() || null,
+      note_2: note2.trim() || null,
       photo_pending_uri: photoPendingUri,
       photo_mime_type: photoMimeType,
       photo: photoPendingUri ? null : existingPhotoKey,
@@ -265,7 +370,10 @@ export default forwardRef(function PaveSaisieOneHand(
     uniteFormule,
     requiredCotes,
     prixUnitaireAppliqueState,
+    prixRevientAppliqueState,
+    showPrixRevient,
     note,
+    note2,
     photoPendingUri,
     photoMimeType,
     existingPhotoKey,
@@ -301,12 +409,14 @@ export default forwardRef(function PaveSaisieOneHand(
   }, [form.hauteur, form.largeur, form.profondeur, form.nombre, isDimension, uniteFormule]);
 
   const montantPreview = useMemo(() => {
-    const nombre = parseNombre(form.nombre);
     return computeMontantLigneReleve({
       prixUnitaireApplique: prixUnitaireAppliqueState,
-      nombre,
+      quantite: quantitePreview,
+      nombre: parseNombre(form.nombre),
+      indDimension: isDimension ? 1 : 0,
+      nomUnite,
     });
-  }, [form.nombre, prixUnitaireAppliqueState]);
+  }, [form.nombre, isDimension, nomUnite, prixUnitaireAppliqueState, quantitePreview]);
 
   const handleKeyPress = (value) => {
     if (!focusField || isCoteFieldLocked(focusField)) return;
@@ -352,11 +462,17 @@ export default forwardRef(function PaveSaisieOneHand(
 
       setForm({ largeur: '', hauteur: '', profondeur: '', nombre: '' });
       setNote('');
+      setNote2('');
       setPhotoPendingUri(null);
       setPhotoMimeType(null);
       setExistingPhotoKey(null);
       prixManuallyEditedRef.current = false;
-      setPrixUnitaireAppliqueState(isDimensionMode ? 0 : cataloguePu);
+      prixRevientManuallyEditedRef.current = false;
+      // Toujours repartir du P.U. catalogue (pas 0) pour la ligne suivante.
+      setPrixUnitaireAppliqueState(roundMontant(cataloguePu));
+      setPrixRevientAppliqueState(
+        showPrixRevient && cataloguePr != null ? roundMontant(cataloguePr) : null
+      );
       setFocusIndex(0);
       replaceOnNextKeyRef.current = true;
       return true;
@@ -380,24 +496,30 @@ export default forwardRef(function PaveSaisieOneHand(
     return '0';
   };
 
-  const quantiteAffichage = isDimensionMode
-    ? parseNombre(form.nombre)
-    : quantitePreview;
+  const quantiteAffichage =
+    isDimensionMode && isNomUnitePiece(nomUnite) ? parseNombre(form.nombre) : quantitePreview;
   const quantiteLabel = `Qté = ${formatQuantite(quantiteAffichage)}${nomUnite ? ` ${nomUnite}` : ''}`;
 
   const openNotesModal = () => {
     setNoteDraft(note);
+    setNote2Draft(note2);
     setNotesModalVisible(true);
   };
 
   const saveNotes = () => {
     setNote(noteDraft.trim());
+    setNote2(note2Draft.trim());
     setNotesModalVisible(false);
   };
 
   const openPrixModal = () => {
     if (!canEditPuApplique) return;
     setPrixUnitaireDraft(String(prixUnitaireAppliqueState || 0));
+    setPrixRevientDraft(
+      prixRevientAppliqueState != null && prixRevientAppliqueState !== ''
+        ? String(prixRevientAppliqueState)
+        : ''
+    );
     setPrixModalVisible(true);
   };
 
@@ -410,6 +532,23 @@ export default forwardRef(function PaveSaisieOneHand(
     }
     setPrixUnitaireAppliqueState(roundMontant(parsed));
     prixManuallyEditedRef.current = true;
+
+    if (showPrixRevient) {
+      const prRaw = String(prixRevientDraft || '').trim();
+      if (!prRaw) {
+        setPrixRevientAppliqueState(null);
+        prixRevientManuallyEditedRef.current = true;
+      } else {
+        const parsedPr = parseFloat(prRaw.replace(',', '.'));
+        if (Number.isNaN(parsedPr) || parsedPr < 0) {
+          Alert.alert('Prix de revient invalide', 'Saisissez un P.R appliqué valide ou laissez vide.');
+          return;
+        }
+        setPrixRevientAppliqueState(roundMontant(parsedPr));
+        prixRevientManuallyEditedRef.current = true;
+      }
+    }
+
     setPrixModalVisible(false);
   };
 
@@ -471,15 +610,26 @@ export default forwardRef(function PaveSaisieOneHand(
         contentContainerStyle={styles.notesModal}
       >
         <Text variant="titleLarge" style={styles.notesModalTitle}>
-          Note
+          Notes
         </Text>
+        <Text style={styles.notesFieldLabel}>Note relevé</Text>
         <TextInput
           mode="outlined"
           multiline
-          numberOfLines={4}
+          numberOfLines={3}
           value={noteDraft}
           onChangeText={setNoteDraft}
-          placeholder="Saisir une note pour cette ligne..."
+          placeholder="Note pour le relevé…"
+          style={styles.notesInput}
+        />
+        <Text style={styles.notesFieldLabel}>Note devis</Text>
+        <TextInput
+          mode="outlined"
+          multiline
+          numberOfLines={3}
+          value={note2Draft}
+          onChangeText={setNote2Draft}
+          placeholder="Note affichée sous l'ouvrage (devis)…"
           style={styles.notesInput}
         />
         <View style={styles.notesModalActions}>
@@ -502,11 +652,13 @@ export default forwardRef(function PaveSaisieOneHand(
         contentContainerStyle={styles.notesModal}
       >
         <Text variant="titleLarge" style={styles.notesModalTitle}>
-          P.U. appliqué
+          Prix
         </Text>
         <Text style={styles.prixModalHint}>
-          Par défaut : P.U catalogue, ou P.U × l × h si dimension. Montant = P.U. appliqué × n.
+          Par défaut : catalogue (m2…), ou catalogue × formule si pièce (u). Montant = P.U. appliqué ×
+          Quantité.
         </Text>
+        <Text style={styles.prixFieldLabel}>P.U. appliqué</Text>
         <TextInput
           mode="outlined"
           keyboardType="decimal-pad"
@@ -516,6 +668,20 @@ export default forwardRef(function PaveSaisieOneHand(
           style={styles.prixInput}
           right={<TextInput.Affix text="F" />}
         />
+        {showPrixRevient ? (
+          <>
+            <Text style={styles.prixFieldLabel}>P.R. appliqué (optionnel)</Text>
+            <TextInput
+              mode="outlined"
+              keyboardType="decimal-pad"
+              value={prixRevientDraft}
+              onChangeText={setPrixRevientDraft}
+              placeholder="Laisser vide si non utiliséé"
+              style={styles.prixInput}
+              right={<TextInput.Affix text="F" />}
+            />
+          </>
+        ) : null}
         <View style={styles.notesModalActions}>
           <MobileButton mode="outlined" onPress={() => setPrixModalVisible(false)}>
             Annuler
@@ -534,11 +700,11 @@ export default forwardRef(function PaveSaisieOneHand(
         <PaveMetaButton
           icon="note-text-outline"
           onPress={openNotesModal}
-          active={Boolean(note)}
+          active={Boolean(note || note2)}
           tile
           style={styles.metaButtonTile}
         >
-          Note
+          Notes
         </PaveMetaButton>
         {canEditPuApplique && !resolvedHidePriceUi ? (
           <PaveMetaButton
@@ -565,6 +731,9 @@ export default forwardRef(function PaveSaisieOneHand(
         {!resolvedHidePriceUi ? (
           <>
             <Text style={styles.puLine}>P.U. = {formatMontant(prixUnitaireAppliqueState)}</Text>
+            {showPrixRevient && prixRevientAppliqueState != null ? (
+              <Text style={styles.prLine}>P.R. = {formatMontant(prixRevientAppliqueState)}</Text>
+            ) : null}
             <Text style={styles.montantLine}>MT = {formatMontant(montantPreview)}</Text>
           </>
         ) : null}
@@ -742,6 +911,18 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 0.5,
   },
+  prLine: {
+    color: chantierColors.text,
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  prixFieldLabel: {
+    color: chantierColors.muted,
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
   montantLine: {
     color: '#1D4ED8',
     fontSize: 18,
@@ -768,8 +949,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 12,
   },
+  notesFieldLabel: {
+    color: chantierColors.muted,
+    fontWeight: '700',
+    fontSize: 13,
+    marginBottom: 6,
+  },
   notesInput: {
-    minHeight: 120,
+    minHeight: 80,
     marginBottom: 12,
   },
   notesModalActions: {

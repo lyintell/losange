@@ -1,24 +1,43 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useState } from 'react';
 import SidebarNavItem from '@/components/layout/SidebarNavItem';
+import AdminIcon from '@/components/ui/AdminIcon';
 import { APP_NAME } from '@/lib/theme/colors';
-import { ROLE_LABELS } from '@/lib/auth/constants';
-import { ADMIN_FOOTER_NAV_ITEMS, ADMIN_NAV_ITEMS, getDashboardNavLabel } from '@/lib/navigation/adminNav';
+import { ADMIN_NAV_ITEMS, getSidebarFooterNavItems } from '@/lib/navigation/adminNav';
 
 function isNavItemActive(pathname, href) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export default function Sidebar({ session }) {
+export default function Sidebar({ session, open = false, onNavigate }) {
   const pathname = usePathname();
-  const roleLabel = ROLE_LABELS[session.role] || session.role;
+  const router = useRouter();
+  const [logoutLoading, setLogoutLoading] = useState(false);
+  const footerItems = getSidebarFooterNavItems(session);
+
+  const handleLogout = async () => {
+    setLogoutLoading(true);
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      onNavigate?.();
+      router.replace('/login');
+      router.refresh();
+    } finally {
+      setLogoutLoading(false);
+    }
+  };
 
   return (
-    <aside className="app-sidebar">
+    <aside
+      id="app-sidebar"
+      className={`app-sidebar${open ? ' app-sidebar--open' : ''}`}
+      aria-hidden={!open}
+      {...(!open ? { inert: true } : {})}
+    >
       <div className="sidebar-brand">
         <p className="sidebar-brand-name">{APP_NAME}</p>
-        <p className="sidebar-brand-sub">Administration</p>
       </div>
 
       <nav className="sidebar-nav" aria-label="Navigation principale">
@@ -26,29 +45,39 @@ export default function Sidebar({ session }) {
           <SidebarNavItem
             key={item.href}
             href={item.href}
-            label={item.greetingNav ? getDashboardNavLabel(session.prenom) : item.label}
+            label={item.label}
             icon={item.icon}
             active={isNavItemActive(pathname, item.href)}
+            onClick={onNavigate}
           />
         ))}
       </nav>
 
       <div className="sidebar-footer">
-        {ADMIN_FOOTER_NAV_ITEMS.map((item) => (
+        <p className="sidebar-user-name">
+          {session.prenom} {session.nom}
+        </p>
+        {footerItems.map((item) => (
           <SidebarNavItem
             key={item.href}
             href={item.href}
             label={item.label}
             icon={item.icon}
             active={isNavItemActive(pathname, item.href)}
+            onClick={onNavigate}
           />
         ))}
-        <p className="sidebar-user-name">
-          {session.prenom} {session.nom}
-        </p>
-        <p className="sidebar-user-meta">
-          {session.identifiant} · {roleLabel}
-        </p>
+        <button
+          type="button"
+          className="sidebar-logout-button"
+          onClick={handleLogout}
+          disabled={logoutLoading}
+        >
+          <span className="sidebar-nav-icon" aria-hidden="true">
+            <AdminIcon name="logout" size={20} />
+          </span>
+          <span>{logoutLoading ? 'Déconnexion…' : 'Se déconnecter'}</span>
+        </button>
       </div>
     </aside>
   );

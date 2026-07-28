@@ -58,7 +58,10 @@ export default function SelecteurMetierOuvrage({
     setLoading(true);
     try {
       const data = await getOuvragesByMetierAndEntreprise(metier.id, entrepriseId);
-      setOuvrages(data || []);
+      const sorted = [...(data || [])].sort((a, b) =>
+        String(a.nom || '').localeCompare(String(b.nom || ''), 'fr', { sensitivity: 'base' })
+      );
+      setOuvrages(sorted);
     } catch (error) {
       console.error('Erreur chargement ouvrages:', error);
       setOuvrages([]);

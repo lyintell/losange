@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Modal, Portal, Text } from 'react-native-paper';
 import MobileButton from './MobileButton';
+import { sortSectionsForSelection } from '../../utils/defaultSection';
 import { chantierColors } from '../../styles/theme';
 
 export default function ChoixSectionModal({
@@ -13,6 +14,8 @@ export default function ChoixSectionModal({
   onSelect,
   onCreatePress,
 }) {
+  const sectionsSorted = useMemo(() => sortSectionsForSelection(sections), [sections]);
+
   return (
     <Portal>
       <Modal visible={visible} onDismiss={onDismiss} contentContainerStyle={styles.modal}>
@@ -29,7 +32,7 @@ export default function ChoixSectionModal({
           </Text>
 
           <View style={styles.list}>
-            {sections.map((section) => (
+            {sectionsSorted.map((section) => (
               <MobileButton
                 key={section.id}
                 mode={selectedSectionId === section.id ? 'contained' : 'outlined'}

@@ -81,3 +81,27 @@ Si nombre de releve > 1:
 23. Un ouvrage peut avoir multiple unite, dans mobile, fait les changements suivants:
 - Lors de la creation de ouvrage, nom ouvrage est un search drop down. Lorsque l entree match des ouvrage existant, affiche les pour selection. Si selection (ou non selection), cree nouveau ouvrage. Mais si selection et que la combinaison (ouvrage et unite) existe deja, alors cree disabled.
 - Lors que un ouvrage est selectionné et nombre unité > 1, alors modal to select parmi les unites existant
+
+24. Dans le devis, Il doit y avoir une difference entre l affichage des lignes releves pour les ind_dimension = 1 et nom_unite = u vs nom_unite = autres (Ex. m2, etc).
+- Pour ind_dimension = 1 et nom_unite != u, dans le devis, dans la designation c est formule x n. Ex. si lxh, alors dans designation lxhxn.
+Ne change rien dans le releve PDF.
+
+25. 
+
+Pour une unite dimensionel, si ind_dimension = 1 et nom_unite != u, alors il y a les particularite suivantes:
+    - dans devis, designation affiche formule x n. Ex. si formule = lxh, alors affiche lxhxn (ie. ajoute x n)
+    - dans details et recapitulatif et pave, quantite = formule x n.
+
+P.U applique change pour ind_dimension dependemment de nom_unite.
+    - si nom_unite != u, alors P.U applique est P.U catalogue toujours (ie. n est pas P.U x l x h). ie. Montant = P.U applique x n (meme chose dans devis)
+    - si nom_unite = u, comportement actuel maintenu
+
+26.
+Ajoute les champ entete_1 et entete_2 a entreprise. Ceci apparaitra sur le DEVIS, sous nom de l entreprise. N affiche pas le numero de l entreprise sous le nom de l entreprise. juste les entete_1 and entete_2 apparaisse.
+
+27. 
+Enleve les entetes du footer dans devis.
+Centre le nom de l entreprise sur les devis et le releve PDF
+Le nom sur la meme ligne que le logo. Les entetes en bas du nom
+
+28.

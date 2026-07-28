@@ -539,13 +539,14 @@ export default function App() {
     setSelectedChantier(chantier);
     const releves = await getRelevesByChantierLocal(chantier.id);
 
-    if (releves.length > 1) {
+    // Toujours la liste des relevés s'il en existe (suppression releve/chantier disponible).
+    if (releves.length >= 1) {
       setSelectedReleveId(null);
       setScreen('chantierReleves');
       return;
     }
 
-    setSelectedReleveId(releves[0]?.id || null);
+    setSelectedReleveId(null);
     setScreen('chantierDetails');
   }, []);
 
@@ -630,10 +631,18 @@ export default function App() {
                       prev ? { ...prev, releve_count: count } : prev
                     );
                     setChantierListRefreshToken((value) => value + 1);
-                    if (count <= 1) {
+                    if (count === 0) {
                       setSelectedReleveId(null);
                       setScreen('chantiers');
                     }
+                  }}
+                  onChantierDeleted={() => {
+                    clearDraftDimensionFlow();
+                    setSelection(null);
+                    setSelectedChantier(null);
+                    setSelectedReleveId(null);
+                    setChantierListRefreshToken((value) => value + 1);
+                    setScreen('chantiers');
                   }}
                 />
               )}
@@ -644,7 +653,6 @@ export default function App() {
                   onCancel={confirmCancelDimensionFlow}
                   onBackToChantiers={confirmCancelDimensionFlow}
                   onFinish={handleDimensionFlowFinish}
-                  onDeleteChantier={handleDeleteChantier}
                   onNavHandlersChange={handleDimensionNavHandlersChange}
                 />
               )}
@@ -852,13 +860,8 @@ export default function App() {
                       return;
                     }
                     if (isChantierDetailsScreen) {
-                      if ((Number(selectedChantier?.releve_count) || 0) > 1) {
-                        setSelectedReleveId(null);
-                        setScreen('chantierReleves');
-                        return;
-                      }
                       setSelectedReleveId(null);
-                      setScreen('chantiers');
+                      setScreen('chantierReleves');
                       return;
                     }
                     if (isChantierRelevesScreen) {
@@ -874,9 +877,7 @@ export default function App() {
                     : isPlusSubScreen
                       ? 'Retour'
                       : isChantierDetailsScreen
-                        ? (Number(selectedChantier?.releve_count) || 0) > 1
-                          ? 'Retour aux relevés'
-                          : 'Retour aux chantiers'
+                        ? 'Retour aux relevés'
                         : isChantierRelevesScreen
                           ? 'Retour aux chantiers'
                         : 'Chantiers'}

@@ -1,4 +1,5 @@
 import { buildSectionOrderFromLignes } from '../utils/groupLignesBySection';
+import { groupLignesByMetier } from '../utils/groupLignesByMetier';
 
 let draftDimensionFlow = null;
 
@@ -63,10 +64,33 @@ export const addLigneToDraft = (ligne) => {
   if (!draftDimensionFlow) return null;
   const existing = draftDimensionFlow.lignes || [];
   const maxOrdre = existing.reduce((max, item) => Math.max(max, Number(item.ordre) || 0), -1);
+  const sectionId = ligne?.section_id || null;
+  const metierId = ligne?.metier_id || null;
+  const sameMetier = existing.find(
+    (item) =>
+      item.section_id === sectionId &&
+      (item.metier_id || null) === metierId &&
+      Number.isFinite(Number(item.metier_ordre))
+  );
+  let metierOrdre = Number.isFinite(Number(ligne?.metier_ordre))
+    ? Number(ligne.metier_ordre)
+    : null;
+  if (metierOrdre == null) {
+    if (sameMetier) {
+      metierOrdre = Number(sameMetier.metier_ordre) || 0;
+    } else {
+      const sectionMetierOrdres = existing
+        .filter((item) => item.section_id === sectionId)
+        .map((item) => Number(item.metier_ordre) || 0);
+      metierOrdre = sectionMetierOrdres.length ? Math.max(...sectionMetierOrdres) + 1 : 0;
+    }
+  }
+
   const entry = {
+    ...ligne,
     id: `ligne-${Date.now()}-${maxOrdre + 1}`,
     ordre: maxOrdre + 1,
-    ...ligne,
+    metier_ordre: metierOrdre,
   };
   draftDimensionFlow.lignes = [...existing, entry];
   ensureSectionOrderEntry(entry.section_id);
@@ -132,6 +156,47 @@ export const reorderDraftLignesInSection = (sectionId, reorderedSectionLignes = 
   return { ...draftDimensionFlow };
 };
 
+/** Monte / descend un bloc métier dans une section du draft. */
+export const reorderDraftMetierInSection = (sectionId, metierId, direction) => {
+  if (!draftDimensionFlow || !sectionId || !metierId) return null;
+  if (direction !== 'up' && direction !== 'down') return null;
+
+  const allLignes = draftDimensionFlow.lignes || [];
+  const sectionLignes = allLignes.filter((ligne) => ligne.section_id === sectionId);
+  if (!sectionLignes.length) return null;
+
+  const metierGroups = groupLignesByMetier(sectionLignes);
+  const index = metierGroups.findIndex((group) => String(group.metierId) === String(metierId));
+  if (index < 0) return null;
+
+  const swapWith = direction === 'up' ? index - 1 : index + 1;
+  if (swapWith < 0 || swapWith >= metierGroups.length) return { ...draftDimensionFlow };
+
+  const reorderedGroups = [...metierGroups];
+  const [moved] = reorderedGroups.splice(index, 1);
+  reorderedGroups.splice(swapWith, 0, moved);
+
+  const sectionOrdreValues = sectionLignes
+    .map((ligne) => Number(ligne.ordre) || 0)
+    .sort((left, right) => left - right);
+
+  let ordreCursor = 0;
+  const updatesById = new Map();
+  reorderedGroups.forEach((group, metierIndex) => {
+    group.lignes.forEach((ligne) => {
+      updatesById.set(ligne.id, {
+        ...ligne,
+        metier_ordre: metierIndex,
+        ordre: sectionOrdreValues[ordreCursor] ?? ordreCursor,
+      });
+      ordreCursor += 1;
+    });
+  });
+
+  draftDimensionFlow.lignes = allLignes.map((ligne) => updatesById.get(ligne.id) || ligne);
+  return { ...draftDimensionFlow };
+};
+
 export const changeDraftSectionForLignes = (fromSectionId, newSection) => {
   if (!draftDimensionFlow || !fromSectionId || !newSection?.id) return null;
   if (fromSectionId === newSection.id) return { ...draftDimensionFlow };
@@ -182,18 +247,48 @@ export const startDraftFromChantierEdit = ({
     section_nom: ligne.section_nom || null,
     section_ordre: Number(ligne.section_ordre) || 0,
     ordre: Number.isFinite(Number(ligne.ordre)) ? Number(ligne.ordre) : index,
+    metier_ordre: Number.isFinite(Number(ligne.metier_ordre)) ? Number(ligne.metier_ordre) : 0,
     largeur: ligne.largeur,
     hauteur: ligne.hauteur,
     profondeur: ligne.profondeur,
     nombre: ligne.nombre,
     quantite: ligne.quantite,
     prix_unitaire_applique: ligne.prix_unitaire_applique,
+    prix_revient_applique:
+      ligne.prix_revient_applique == null || ligne.prix_revient_applique === ''
+        ? null
+        : Number(ligne.prix_revient_applique),
     montant: ligne.montant,
     note: ligne.note || null,
+    note_2: ligne.note_2 || null,
     photo: ligne.photo || null,
     ind_complete: Number(ligne.ind_complete) === 1 ? 1 : 0,
   }));
 
+  // Si aucun metier_ordre explicite, dériver l'ordre d'apparition par section.
+  const hasExplicitMetierOrdre = mappedLignes.some((ligne) => Number(ligne.metier_ordre) > 0);
+  if (!hasExplicitMetierOrdre && mappedLignes.length) {
+    const metierIndexBySection = new Map();
+    mappedLignes
+      .slice()
+      .sort(
+        (left, right) =>
+          (Number(left.ordre) || 0) - (Number(right.ordre) || 0) ||
+          String(left.id || '').localeCompare(String(right.id || ''))
+      )
+      .forEach((ligne) => {
+        const sectionKey = ligne.section_id || 'sans-section';
+        if (!metierIndexBySection.has(sectionKey)) {
+          metierIndexBySection.set(sectionKey, new Map());
+        }
+        const byMetier = metierIndexBySection.get(sectionKey);
+        const metierKey = ligne.metier_id || ligne.metier_nom || 'Autre';
+        if (!byMetier.has(metierKey)) {
+          byMetier.set(metierKey, byMetier.size);
+        }
+        ligne.metier_ordre = byMetier.get(metierKey);
+      });
+  }
   const resolvedSectionOrder =
     Array.isArray(sectionOrder) && sectionOrder.length
       ? [...sectionOrder]

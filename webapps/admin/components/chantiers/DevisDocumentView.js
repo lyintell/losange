@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import DocumentViewToolbar from '@/components/chantiers/DocumentViewToolbar';
 import DevisDocument from '@/components/chantiers/DevisDocument';
+import { downloadDevisExcel } from '@/lib/chantiers/exportDevisExcel';
 import { buildDocumentFileName } from '@/lib/chantiers/format';
 import { getNextReleveStatus } from '@/lib/chantiers/releveStatus';
 import { updateReleveStatusClient } from '@/lib/chantiers/updateReleveStatusClient';
@@ -44,10 +45,22 @@ export default function DevisDocumentView({
     }
   };
 
+  const handleDownloadExcel = (excelFileName) => {
+    downloadDevisExcel({
+      entreprise,
+      chantier,
+      lignes,
+      releve: { ...releve, status: releveStatus },
+      fileName: excelFileName || buildDocumentFileName(chantier, 'devis-excel'),
+    });
+  };
+
   return (
     <div className="document-page">
       <DocumentViewToolbar
         fileName={buildDocumentFileName(chantier, 'devis')}
+        excelFileName={buildDocumentFileName(chantier, 'devis-excel')}
+        onDownloadExcel={handleDownloadExcel}
         modifyHref={modifyHref}
         canModifyChantier={canModifyChantier}
         canChangeChantierStatus={canChangeChantierStatus}

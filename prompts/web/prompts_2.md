@@ -56,3 +56,10 @@ cependant les PU et les montant sont arrondi à l'unité (ex. 19.33 devient 19, 
 13. 
 Dans webapp, affiche Prix de revient dans la liste des ouvrages et articles.
 Ajuste les formulaires ajouter et modifier pour inclure le prix de revient.
+
+14. 
+J ai toujours des problemes avec les decimaux. J ai modifier une ligne releve en entre decimal, mais ca n apparait nulle par (recapitulatif, releve, devis, etc). Comme je l ai dit, on garde 2 chiffre apres la virgule si decimal entre (ou calcule).
+
+** 17/7/26
+
+15. Lorsque un chantier plusieur releve (> 1), lorsque on supprime releve 1, alors le chantier est supprimer. rectifie cela. Le chantier est supprimer seulement si il n y a aucun releve.

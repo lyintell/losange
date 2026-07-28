@@ -6,6 +6,7 @@ import { fetchChantierDetail } from '@/lib/chantiers/queries';
 import { fetchLignesByReleveId } from '@/lib/lignes/queries';
 import { canEditReleveRemise } from '@/lib/chantiers/remise';
 import { getSession } from '@/lib/auth/session';
+import { fetchMetiersCatalogueList } from '@/lib/metiers/queries';
 
 export default async function DevisEditPage({ params }) {
   const session = await getSession();
@@ -23,7 +24,10 @@ export default async function DevisEditPage({ params }) {
   const releve = (chantier.releves || []).find((row) => row.id === releveId);
   if (!releve) notFound();
 
-  const { lignes } = await fetchLignesByReleveId(releveId).catch(() => ({ lignes: [] }));
+  const [{ lignes }, metiers] = await Promise.all([
+    fetchLignesByReleveId(releveId).catch(() => ({ lignes: [] })),
+    fetchMetiersCatalogueList({ entrepriseId: session?.entrepriseId || null }).catch(() => []),
+  ]);
 
   return (
     <div className="document-page">
@@ -31,9 +35,11 @@ export default async function DevisEditPage({ params }) {
         ← Retour au devis
       </Link>
       <DevisEditClient
+        mode="edit"
         chantier={chantier}
         releve={releve}
         lignes={lignes}
+        metiers={metiers}
         canEditRemise={canEditReleveRemise(session?.role)}
       />
     </div>

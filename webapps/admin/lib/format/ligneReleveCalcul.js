@@ -1,10 +1,15 @@
-import { roundMontant, roundQuantite } from './formatLigneMesures';
+import { isNomUnitePiece, roundMontant, roundQuantite } from './formatLigneMesures';
 
 /**
  * Symboles ligne_releve : l=largeur, h=hauteur, p/e=épaisseur (profondeur), n=nombre.
  * ind_dimension=0 : quantite unitaire = n.
  * ind_dimension=1 : quantite = eval(unites.formule) * n (ex. l*h*n, l*h*e*n).
  * l, h, p/e sont saisis en cm et convertis en m avant le calcul.
+ *
+ * Dimension + nom_unite != u (m2, m3…) :
+ *   P.U appliqué = P.U catalogue ; Quantité = formule × n ; Montant = P.U × Quantité.
+ * Dimension + nom_unite = u :
+ *   P.U appliqué = P.U catalogue × formule(l,h,p) ; Quantité = n ; Montant = P.U × Quantité.
  */
 
 const normalizeFormulaString = (raw) => {
@@ -90,7 +95,11 @@ export const computeQuantiteLigneReleve = ({
   return roundQuantite(dimensionValue * n);
 };
 
-/** P.U applique par defaut : P.U catalogue, ou P.U x formule(l,h,p) si ind_dimension = 1. */
+/** Dimension mesurée (m2…) : P.U reste au catalogue. Pièce (u) : P.U × formule. */
+export const usesCataloguePuAsApplique = (indDimension, nomUnite) =>
+  Number(indDimension) === 1 && !isNomUnitePiece(nomUnite);
+
+/** P.U applique par defaut selon ind_dimension + nom_unite. */
 export const computePrixUnitaireAppliqueDefault = ({
   indDimension,
   prixUnitaire,
@@ -98,16 +107,78 @@ export const computePrixUnitaireAppliqueDefault = ({
   largeur,
   hauteur,
   profondeur,
+  nomUnite,
 }) => {
   const pu = Number(prixUnitaire) || 0;
   if (Number(indDimension) !== 1) {
     return roundMontant(pu);
   }
 
+  // m2, m3… : P.U appliqué = P.U catalogue (pas × l × h)
+  if (!isNomUnitePiece(nomUnite)) {
+    return roundMontant(pu);
+  }
+
+  // u : comportement historique — P.U × formule(l,h,p)
   const dimensionValue = computeDimensionFactor({ formule, largeur, hauteur, profondeur });
   return roundMontant(pu * dimensionValue);
 };
 
-/** Montant ligne : P.U applique x n (nombre). */
-export const computeMontantLigneReleve = ({ prixUnitaireApplique, nombre }) =>
-  roundMontant((Number(prixUnitaireApplique) || 0) * (Number(nombre) || 0));
+/** P.R appliqué par défaut : même logique que P.U appliqué, à partir du P.R catalogue. */
+export const computePrixRevientAppliqueDefault = ({
+  indDimension,
+  prixRevient,
+  formule,
+  largeur,
+  hauteur,
+  profondeur,
+  nomUnite,
+}) => {
+  if (prixRevient == null || prixRevient === '') return null;
+  return computePrixUnitaireAppliqueDefault({
+    indDimension,
+    prixUnitaire: prixRevient,
+    formule,
+    largeur,
+    hauteur,
+    profondeur,
+    nomUnite,
+  });
+};
+
+/** Quantité utilisée pour le montant (= quantité affichée devis / recap). */
+export const resolveQuantitePourMontant = ({
+  quantite,
+  nombre,
+  indDimension,
+  nomUnite,
+}) => {
+  // m2, m3… : Quantité = formule × n (colonne quantite)
+  if (usesCataloguePuAsApplique(indDimension, nomUnite)) {
+    if (quantite != null && quantite !== '') return Number(quantite) || 0;
+    return Number(nombre) || 0;
+  }
+  // u : Quantité affichée = n ; unitaire : quantite (= n)
+  if (Number(indDimension) === 1) {
+    return Number(nombre) || 0;
+  }
+  if (quantite != null && quantite !== '') return Number(quantite) || 0;
+  return Number(nombre) || 0;
+};
+
+/** Montant = P.U appliqué × Quantité. */
+export const computeMontantLigneReleve = ({
+  prixUnitaireApplique,
+  quantite,
+  nombre,
+  indDimension,
+  nomUnite,
+}) => {
+  const qty = resolveQuantitePourMontant({
+    quantite,
+    nombre,
+    indDimension,
+    nomUnite,
+  });
+  return roundMontant((Number(prixUnitaireApplique) || 0) * qty);
+};

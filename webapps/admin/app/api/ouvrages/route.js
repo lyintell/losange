@@ -1,7 +1,33 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { createOuvrage } from '@/lib/ouvrages/queries';
+import { createOuvrage, fetchOuvragesByMetierId } from '@/lib/ouvrages/queries';
 import { fetchMetierById } from '@/lib/metiers/queries';
+
+export async function GET(request) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ ok: false, error: 'Non authentifié.' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const metierId = searchParams.get('metierId');
+    if (!metierId) {
+      return NextResponse.json({ ok: false, error: 'metierId requis.' }, { status: 400 });
+    }
+
+    const ouvrages = await fetchOuvragesByMetierId(metierId, {
+      entrepriseId: session.entrepriseId || null,
+    });
+
+    return NextResponse.json({ ok: true, ouvrages });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, error: error.message || 'Erreur chargement ouvrages.' },
+      { status: 500 }
+    );
+  }
+}
 
 export async function POST(request) {
   try {

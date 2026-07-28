@@ -3,9 +3,8 @@ export const CATALOGUE_SECTION_LABEL = 'Métiers, ouvrages, articles';
 
 export const DASHBOARD_NAV_SLUG = 'tableau-de-bord';
 
-export function getDashboardNavLabel(prenom) {
-  const name = String(prenom || '').trim();
-  return name ? `Bonjour ${name}` : 'Bonjour';
+export function getDashboardNavLabel() {
+  return 'Tableau de bord';
 }
 
 export const ADMIN_NAV_ITEMS = [
@@ -14,7 +13,6 @@ export const ADMIN_NAV_ITEMS = [
     href: '/tableau-de-bord',
     label: 'Tableau de bord',
     icon: 'view-dashboard',
-    greetingNav: true,
   },
   { slug: 'clients', href: '/clients', label: CLIENTS_SECTION_LABEL, icon: 'account-group' },
   { slug: 'ouvrages', href: '/ouvrages', label: CATALOGUE_SECTION_LABEL, icon: 'hammer-wrench' },
@@ -22,17 +20,30 @@ export const ADMIN_NAV_ITEMS = [
 
 export const ADMIN_FOOTER_NAV_ITEMS = [
   { slug: 'profil', href: '/profil', label: 'Profil', icon: 'account' },
+  {
+    slug: 'configuration',
+    href: '/configuration',
+    label: 'Configuration',
+    icon: 'cog',
+    adminOnly: true,
+  },
 ];
 
 export const ADMIN_PROTECTED_PATHS = [
   ...ADMIN_NAV_ITEMS.map((item) => item.href),
   ...ADMIN_FOOTER_NAV_ITEMS.map((item) => item.href),
   '/articles',
+  '/parametres',
 ];
 
 export function getAdminNavItem(slug) {
   const allItems = [...ADMIN_NAV_ITEMS, ...ADMIN_FOOTER_NAV_ITEMS];
   return allItems.find((item) => item.slug === slug) || null;
+}
+
+export function getSidebarFooterNavItems(session) {
+  const isAdmin = session?.role === 'A';
+  return ADMIN_FOOTER_NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
 }
 
 export function isAdminProtectedPath(pathname) {

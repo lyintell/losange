@@ -18,9 +18,9 @@ export default async function TableauDeBordPage() {
   return (
     <AdminPageShell
       navItem={navItem}
-      breadcrumbs={[{ label: getDashboardNavLabel(session?.prenom) }]}
+      breadcrumbs={[{ label: getDashboardNavLabel() }]}
     >
-      <DashboardStats stats={stats} />
+      <DashboardStats stats={stats} session={session} />
     </AdminPageShell>
   );
 }

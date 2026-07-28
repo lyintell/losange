@@ -212,6 +212,8 @@ export const initLocalDatabase = async () => {
       telephone_2 TEXT,
       adresse TEXT,
       logo TEXT,
+      entete_1 TEXT,
+      entete_2 TEXT,
       ind_pro INTEGER NOT NULL DEFAULT 0 CHECK (ind_pro IN (0, 1)),
       ind_active INTEGER NOT NULL DEFAULT 1 CHECK (ind_active IN (0, 1)),
       ind_tva INTEGER NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1)),
@@ -380,6 +382,9 @@ export const initLocalDatabase = async () => {
       ind_tva INTEGER NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1)),
       status TEXT NOT NULL DEFAULT 'E' CHECK (status IN ('E', 'V', 'N')),
       note TEXT,
+      ind_dimension_terrain INTEGER NOT NULL DEFAULT 0 CHECK (ind_dimension_terrain IN (0, 1)),
+      ind_changement INTEGER NOT NULL DEFAULT 0 CHECK (ind_changement IN (0, 1)),
+      id_qui_change TEXT,
       supprime_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
       mis_a_jour_le TEXT DEFAULT (datetime('now')),
@@ -423,9 +428,12 @@ export const initLocalDatabase = async () => {
       prix_unitaire_applique REAL NOT NULL,
       montant REAL NOT NULL,
       note TEXT,
+      note_2 TEXT,
       photo TEXT,
       section_id TEXT,
       ordre INTEGER NOT NULL DEFAULT 0,
+      metier_ordre INTEGER NOT NULL DEFAULT 0,
+      prix_revient_applique REAL,
       ind_complete INTEGER NOT NULL DEFAULT 0 CHECK (ind_complete IN (0, 1)),
       supprime_le TEXT,
       cree_le TEXT DEFAULT (datetime('now')),
@@ -634,6 +642,22 @@ const ensureRelevesColumns = async (db) => {
       "ALTER TABLE releves ADD COLUMN status TEXT NOT NULL DEFAULT 'E' CHECK (status IN ('E', 'V', 'N'));"
     );
   }
+
+  if (!(await tableHasColumn(db, 'releves', 'ind_dimension_terrain'))) {
+    await db.execAsync(
+      'ALTER TABLE releves ADD COLUMN ind_dimension_terrain INTEGER NOT NULL DEFAULT 0 CHECK (ind_dimension_terrain IN (0, 1));'
+    );
+  }
+
+  if (!(await tableHasColumn(db, 'releves', 'ind_changement'))) {
+    await db.execAsync(
+      'ALTER TABLE releves ADD COLUMN ind_changement INTEGER NOT NULL DEFAULT 0 CHECK (ind_changement IN (0, 1));'
+    );
+  }
+
+  if (!(await tableHasColumn(db, 'releves', 'id_qui_change'))) {
+    await db.execAsync('ALTER TABLE releves ADD COLUMN id_qui_change TEXT;');
+  }
 };
 
 const ensureSchemaMigrations = async (db) => {
@@ -832,6 +856,18 @@ const ensureSchemaMigrations = async (db) => {
   }
 
   try {
+    await db.execAsync('ALTER TABLE entreprises ADD COLUMN entete_1 TEXT;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
+    await db.execAsync('ALTER TABLE entreprises ADD COLUMN entete_2 TEXT;');
+  } catch {
+    // Colonne deja presente.
+  }
+
+  try {
     await db.execAsync('ALTER TABLE metiers ADD COLUMN ordre INTEGER NOT NULL DEFAULT 0;');
   } catch {
     // Colonne deja presente.
@@ -943,6 +979,32 @@ const ensureSchemaMigrations = async (db) => {
     `);
   } catch {
     // Index deja present.
+  }
+
+  if (!(await tableHasColumn(db, 'ligne_releves', 'metier_ordre'))) {
+    try {
+      await db.execAsync(
+        'ALTER TABLE ligne_releves ADD COLUMN metier_ordre INTEGER NOT NULL DEFAULT 0;'
+      );
+    } catch {
+      // Colonne deja presente.
+    }
+  }
+
+  if (!(await tableHasColumn(db, 'ligne_releves', 'prix_revient_applique'))) {
+    try {
+      await db.execAsync('ALTER TABLE ligne_releves ADD COLUMN prix_revient_applique REAL;');
+    } catch {
+      // Colonne deja presente.
+    }
+  }
+
+  if (!(await tableHasColumn(db, 'ligne_releves', 'note_2'))) {
+    try {
+      await db.execAsync('ALTER TABLE ligne_releves ADD COLUMN note_2 TEXT;');
+    } catch {
+      // Colonne deja presente.
+    }
   }
 
   await ensureRelevesColumns(db);

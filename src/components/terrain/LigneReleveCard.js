@@ -21,9 +21,10 @@ export default function LigneReleveCard({
   showPrices = false,
   onPress,
   onDoublePress,
+  onLongPress,
 }) {
   const nomUnite = getLigneNomUnite(ligne);
-  const hasNote = Boolean(ligne?.note?.trim());
+  const hasNote = Boolean(ligne?.note?.trim() || ligne?.note_2?.trim());
   const hasPhoto = Boolean(ligne?.photo || ligne?.photo_pending_uri);
   const isDetails = variant === 'details';
   const isRecap = variant === 'recap';
@@ -56,6 +57,15 @@ export default function LigneReleveCard({
         onPress?.();
       }
     }, DOUBLE_PRESS_DELAY_MS);
+  };
+
+  const handleLongPress = () => {
+    if (pressTimerRef.current) {
+      clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+    pressCountRef.current = 0;
+    onLongPress?.();
   };
 
   const ouvrageLabel = `${ligne.ouvrage_nom || 'Ouvrage'}${isDetailsLayout && hasNote ? ' **' : ''}`;
@@ -99,19 +109,26 @@ export default function LigneReleveCard({
             </Text>
           ) : null}
         </View>
-        {!isDetailsLayout && hasNote ? (
+        {!isDetailsLayout && ligne?.note?.trim() ? (
           <Text style={styles.note} numberOfLines={3}>
             {ligne.note}
+          </Text>
+        ) : null}
+        {!isDetailsLayout && ligne?.note_2?.trim() ? (
+          <Text style={styles.note2} numberOfLines={2}>
+            ({ligne.note_2.trim()})
           </Text>
         ) : null}
       </View>
     </>
   );
 
-  if (onPress || onDoublePress) {
+  if (onPress || onDoublePress || onLongPress) {
     return (
       <Pressable
         onPress={handlePress}
+        onLongPress={onLongPress ? handleLongPress : undefined}
+        delayLongPress={450}
         style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
       >
         {cardBody}
@@ -198,5 +215,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 4,
     fontStyle: 'italic',
+  },
+  note2: {
+    color: '#4B5563',
+    fontSize: 13,
+    marginTop: 2,
   },
 });

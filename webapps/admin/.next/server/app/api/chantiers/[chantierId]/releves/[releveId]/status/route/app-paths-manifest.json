@@ -1,3 +1,0 @@
-{
-  "/api/chantiers/[chantierId]/releves/[releveId]/status/route": "app/api/chantiers/[chantierId]/releves/[releveId]/status/route.js"
-}

@@ -77,7 +77,12 @@ export default function ChantierDetails({
   const [exportOverlayVisible, setExportOverlayVisible] = useState(false);
   const [exportOverlayMode, setExportOverlayMode] = useState('devis');
   const [exporting, setExporting] = useState(false);
-  const [noteModal, setNoteModal] = useState({ visible: false, note: '', ouvrageNom: '' });
+  const [noteModal, setNoteModal] = useState({
+    visible: false,
+    note: '',
+    note2: '',
+    ouvrageNom: '',
+  });
   const [hidesDevisUi, setHidesDevisUi] = useState(false);
   const [isProAccount, setIsProAccount] = useState(false);
   const [canEditReleveStatus, setCanEditReleveStatus] = useState(false);
@@ -197,10 +202,13 @@ export default function ChantierDetails({
       });
       return;
     }
-    if (!ligne?.note?.trim()) return;
+    const hasNote = Boolean(ligne?.note?.trim());
+    const hasNote2 = Boolean(ligne?.note_2?.trim());
+    if (!hasNote && !hasNote2) return;
     setNoteModal({
       visible: true,
-      note: ligne.note,
+      note: ligne.note || '',
+      note2: ligne.note_2 || '',
       ouvrageNom: ligne.ouvrage_nom || '',
     });
   };
@@ -532,8 +540,9 @@ export default function ChantierDetails({
       <LigneNoteReadModal
         visible={noteModal.visible}
         note={noteModal.note}
+        note2={noteModal.note2}
         ouvrageNom={noteModal.ouvrageNom}
-        onDismiss={() => setNoteModal({ visible: false, note: '', ouvrageNom: '' })}
+        onDismiss={() => setNoteModal({ visible: false, note: '', note2: '', ouvrageNom: '' })}
       />
 
       <TerrainImageViewModal

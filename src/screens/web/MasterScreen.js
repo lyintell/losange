@@ -36,11 +36,15 @@ const FIELD_LABELS = {
   pro_downgraded_le: 'Pro désactivé le',
   ind_active: 'Compte actif',
   ind_tva: 'Afficher TVA et TTC sur le devis',
+  ind_dimension_terrain: 'Créé sur le terrain (mobile)',
+  ind_changement: 'Modifié après création',
+  id_qui_change: 'Dernier modificateur (X00X)',
   ind_actif: 'Actif (prise de cotes)',
   ind_default: 'Métier catalogue par défaut',
   ind_admin_connecte_mobile: 'Admin connecté sur mobile',
   ind_metiers_preselectionnes: 'Métiers présélectionnés (onboarding)',
   ordre: "Ordre d'affichage",
+  metier_ordre: 'Ordre métier (dans section)',
   status: 'Statut relevé',
   ind_complete: 'Ligne complète',
   date_actif_jusqua: "Actif jusqu'au (AAAA-MM-JJ)",
@@ -49,7 +53,9 @@ const FIELD_LABELS = {
   notes: 'Notes chantier',
   supprime_le: 'Supprimé le (tombstone sync)',
   note: 'Note relevé',
+  note_2: 'Note devis',
   prix_revient: 'Prix de revient',
+  prix_revient_applique: 'P.R appliqué',
 };
 
 const getFieldLabel = (field) => FIELD_LABELS[field.name] || field.name;
@@ -88,6 +94,18 @@ const TABLE_SCHEMAS = {
     { name: 'telephone_2', type: 'TEXT' },
     { name: 'adresse', type: 'TEXT' },
     { name: 'logo', type: 'TEXT', isImageFile: true },
+    {
+      name: 'entete_1',
+      type: 'TEXT',
+      section: 'Devis',
+      placeholder: 'Ligne sous le nom (ex. spécialité)',
+    },
+    {
+      name: 'entete_2',
+      type: 'TEXT',
+      section: 'Devis',
+      placeholder: '2e ligne sous le nom (ex. contact / ville)',
+    },
     { name: 'ind_pro', type: 'INTEGER', required: true, isBinaryToggle: true, defaultValue: 0, section: 'Compte' },
     { name: 'pro_activated_le', type: 'TEXT', isReadOnly: true, isTierManaged: true, section: 'Compte' },
     { name: 'pro_downgraded_le', type: 'TEXT', isReadOnly: true, isTierManaged: true, section: 'Compte' },
@@ -284,6 +302,9 @@ const TABLE_SCHEMAS = {
       defaultValue: 'E',
     },
     { name: 'note', type: 'TEXT', isMultiline: true },
+    { name: 'ind_dimension_terrain', type: 'INTEGER', isBinaryToggle: true, defaultValue: 0 },
+    { name: 'ind_changement', type: 'INTEGER', isBinaryToggle: true, defaultValue: 0 },
+    { name: 'id_qui_change', type: 'TEXT', placeholder: 'X00X' },
     { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
     { name: 'mis_a_jour_le', type: 'TEXT' },
@@ -309,11 +330,14 @@ const TABLE_SCHEMAS = {
     { name: 'nombre', type: 'REAL' },
     { name: 'quantite', type: 'REAL', required: true, isAutoComputed: true },
     { name: 'prix_unitaire_applique', type: 'REAL', required: true },
+    { name: 'prix_revient_applique', type: 'REAL' },
     { name: 'montant', type: 'REAL', required: true, isAutoComputed: true },
     { name: 'note', type: 'TEXT', isMultiline: true },
+    { name: 'note_2', type: 'TEXT', isMultiline: true },
     { name: 'photo', type: 'TEXT', isImageFile: true },
     { name: 'section_id', type: 'TEXT', fkTable: 'sections' },
     { name: 'ordre', type: 'INTEGER', required: true, defaultValue: 0 },
+    { name: 'metier_ordre', type: 'INTEGER', required: true, defaultValue: 0 },
     { name: 'ind_complete', type: 'INTEGER', isBinaryToggle: true, defaultValue: 0 },
     { name: 'supprime_le', type: 'TEXT' },
     { name: 'cree_le', type: 'TEXT' },
@@ -470,7 +494,10 @@ const applyLigneReleveAutoCalculations = (record, recordsByTable) => {
   record.quantite = quantite;
   record.montant = computeMontantLigneReleve({
     prixUnitaireApplique: record.prix_unitaire_applique,
+    quantite,
     nombre: record.nombre,
+    indDimension: unite?.ind_dimension,
+    nomUnite: unite?.nom_unite,
   });
   return record;
 };

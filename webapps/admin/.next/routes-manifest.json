@@ -39,6 +39,14 @@
       "namedRegex": "^/api/chantiers/(?<nxtPchantierId>[^/]+?)(?:/)?$"
     },
     {
+      "page": "/api/chantiers/[chantierId]/releves",
+      "regex": "^/api/chantiers/([^/]+?)/releves(?:/)?$",
+      "routeKeys": {
+        "nxtPchantierId": "nxtPchantierId"
+      },
+      "namedRegex": "^/api/chantiers/(?<nxtPchantierId>[^/]+?)/releves(?:/)?$"
+    },
+    {
       "page": "/api/chantiers/[chantierId]/releves/[releveId]",
       "regex": "^/api/chantiers/([^/]+?)/releves/([^/]+?)(?:/)?$",
       "routeKeys": {
@@ -113,6 +121,14 @@
         "nxtPchantierId": "nxtPchantierId"
       },
       "namedRegex": "^/chantiers/(?<nxtPchantierId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/chantiers/[chantierId]/devis/nouveau",
+      "regex": "^/chantiers/([^/]+?)/devis/nouveau(?:/)?$",
+      "routeKeys": {
+        "nxtPchantierId": "nxtPchantierId"
+      },
+      "namedRegex": "^/chantiers/(?<nxtPchantierId>[^/]+?)/devis/nouveau(?:/)?$"
     },
     {
       "page": "/chantiers/[chantierId]/devis/[releveId]",
@@ -220,10 +236,22 @@
       "namedRegex": "^/api/auth/logout(?:/)?$"
     },
     {
+      "page": "/api/chantiers",
+      "regex": "^/api/chantiers(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/chantiers(?:/)?$"
+    },
+    {
       "page": "/api/chantiers/search",
       "regex": "^/api/chantiers/search(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/chantiers/search(?:/)?$"
+    },
+    {
+      "page": "/api/clients",
+      "regex": "^/api/clients(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/clients(?:/)?$"
     },
     {
       "page": "/api/clients/search",
@@ -238,10 +266,22 @@
       "namedRegex": "^/api/fournisseurs/search(?:/)?$"
     },
     {
+      "page": "/api/metiers",
+      "regex": "^/api/metiers(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/metiers(?:/)?$"
+    },
+    {
       "page": "/api/ouvrages",
       "regex": "^/api/ouvrages(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/ouvrages(?:/)?$"
+    },
+    {
+      "page": "/api/sections",
+      "regex": "^/api/sections(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/sections(?:/)?$"
     },
     {
       "page": "/api/unites",

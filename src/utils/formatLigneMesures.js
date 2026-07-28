@@ -139,10 +139,13 @@ export function formatOuvrageNomAvecUnite(ouvrageNom, nomUnite, indDimension, fo
   return unite ? `${name} (${unite})` : name;
 }
 
-/** ind_dimension = 1 : affichage = nombre (n), calculs = quantite. */
+/** Dimension != u : affichage = quantite (formule × n). Dimension u / unitaire : nombre ou quantite. */
 export const isLigneDimension = (ligne) => Number(ligne?.ind_dimension) === 1;
 
 export function getLigneQuantiteAffichage(ligne) {
+  if (shouldAfficherFormuleDerivee(ligne)) {
+    return Number(ligne?.quantite) || 0;
+  }
   if (isLigneDimension(ligne)) {
     return Number(ligne?.nombre) || 0;
   }
@@ -167,13 +170,13 @@ export function getLignePrixUnitaireAffichage(ligne) {
   return getLignePrixUnitaireApplique(ligne);
 }
 
-/** Montant = P.U applique x n (nombre). */
+/** Montant = P.U appliqué × Quantité. Prefere le montant stocke s'il est present. */
 export function getLigneMontant(ligne) {
   const stored = Number(ligne?.montant);
   if (Number.isFinite(stored) && ligne?.montant != null && ligne?.montant !== '') {
     return roundMontant(stored);
   }
-  return roundMontant(getLignePrixUnitaireApplique(ligne) * (Number(ligne?.nombre) || 0));
+  return roundMontant(getLignePrixUnitaireApplique(ligne) * getLigneQuantiteAffichage(ligne));
 }
 
 function pushCotePart(parts, value) {
@@ -220,6 +223,12 @@ export function formatLigneNombrePdf(ligne) {
 
 export function formatMontant(value) {
   return formatMontantFcfa(value);
+}
+
+/** Montant sans devise (table devis : P.U / Montant). */
+export function formatMontantNombre(value) {
+  const amount = roundMontant(value);
+  return amount.toLocaleString('fr-FR', { maximumFractionDigits: 0 });
 }
 
 export function formatMontantFcfa(value) {

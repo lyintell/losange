@@ -4,19 +4,44 @@ import { Modal, Portal, Text } from 'react-native-paper';
 import MobileButton from './MobileButton';
 import { chantierColors } from '../../styles/theme';
 
-export default function LigneNoteReadModal({ visible, note, ouvrageNom, onDismiss }) {
+export default function LigneNoteReadModal({
+  visible,
+  note,
+  note2,
+  ouvrageNom,
+  onDismiss,
+}) {
+  const hasNote = Boolean(String(note || '').trim());
+  const hasNote2 = Boolean(String(note2 || '').trim());
+
   return (
     <Portal>
       <Modal visible={visible} onDismiss={onDismiss} contentContainerStyle={styles.modal}>
         <Text variant="titleLarge" style={styles.title}>
-          Note
+          Notes
         </Text>
         {ouvrageNom ? (
           <Text variant="titleMedium" style={styles.ouvrage}>
             {ouvrageNom}
           </Text>
         ) : null}
-        <Text style={styles.note}>{note || ''}</Text>
+
+        {hasNote ? (
+          <View style={styles.block}>
+            <Text style={styles.label}>Note relevé</Text>
+            <Text style={styles.note}>{String(note).trim()}</Text>
+          </View>
+        ) : null}
+
+        {hasNote2 ? (
+          <View style={styles.block}>
+            <Text style={styles.label}>Note devis</Text>
+            <Text style={styles.note}>({String(note2).trim()})</Text>
+          </View>
+        ) : null}
+
+        {!hasNote && !hasNote2 ? <Text style={styles.note}>Aucune note.</Text> : null}
+
         <View style={styles.actions}>
           <MobileButton mode="contained" onPress={onDismiss}>
             Fermer
@@ -42,6 +67,14 @@ const styles = StyleSheet.create({
   ouvrage: {
     color: chantierColors.muted,
     fontWeight: '700',
+  },
+  block: {
+    gap: 4,
+  },
+  label: {
+    color: chantierColors.muted,
+    fontWeight: '700',
+    fontSize: 13,
   },
   note: {
     color: chantierColors.text,

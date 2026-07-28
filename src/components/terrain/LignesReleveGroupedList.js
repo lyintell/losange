@@ -25,6 +25,7 @@ export function LignesReleveGroupedSections({
   sectionOrder = null,
   onLignePress,
   onLigneDoublePress,
+  onLigneLongPress,
   contentContainerStyle,
   ListEmptyComponent,
   ListFooterComponent,
@@ -68,6 +69,7 @@ export function LignesReleveGroupedSections({
             showPrices={showPrices}
             onLignePress={onLignePress}
             onLigneDoublePress={onLigneDoublePress}
+            onLigneLongPress={onLigneLongPress}
           />
         ))}
       </View>
@@ -76,13 +78,54 @@ export function LignesReleveGroupedSections({
   );
 }
 
-function MetierSubHeader({ metierId, nom }) {
+function MetierSubHeader({
+  metierId,
+  nom,
+  canMoveUp = false,
+  canMoveDown = false,
+  onMoveUp,
+  onMoveDown,
+}) {
   const label = nom?.trim() || 'Autre';
+  const showArrows = Boolean(onMoveUp || onMoveDown);
 
   return (
-    <Text variant="bodyLarge" style={[styles.metierTitle, { color: getMetierColor(metierId || label) }]}>
-      {label}
-    </Text>
+    <View style={styles.metierHeaderRow}>
+      <Text
+        variant="bodyLarge"
+        style={[styles.metierTitle, { color: getMetierColor(metierId || label), flex: 1 }]}
+      >
+        {label}
+      </Text>
+      {showArrows ? (
+        <View style={styles.metierArrowRow}>
+          <Pressable
+            onPress={onMoveUp}
+            disabled={!canMoveUp}
+            hitSlop={8}
+            style={[styles.metierArrowBtn, !canMoveUp && styles.metierArrowBtnDisabled]}
+          >
+            <MaterialCommunityIcons
+              name="chevron-up"
+              size={26}
+              color={canMoveUp ? chantierColors.text : chantierColors.muted}
+            />
+          </Pressable>
+          <Pressable
+            onPress={onMoveDown}
+            disabled={!canMoveDown}
+            hitSlop={8}
+            style={[styles.metierArrowBtn, !canMoveDown && styles.metierArrowBtnDisabled]}
+          >
+            <MaterialCommunityIcons
+              name="chevron-down"
+              size={26}
+              color={canMoveDown ? chantierColors.text : chantierColors.muted}
+            />
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -114,6 +157,7 @@ function SectionGroupBlock({
   showPrices,
   onLignePress,
   onLigneDoublePress,
+  onLigneLongPress,
   onSectionPress,
 }) {
   const isDefaultSection = isDefaultSectionNom(group.sectionNom);
@@ -131,6 +175,7 @@ function SectionGroupBlock({
       showPrices={showPrices}
       onPress={onLignePress ? () => onLignePress(ligne) : undefined}
       onDoublePress={onLigneDoublePress ? () => onLigneDoublePress(ligne) : undefined}
+      onLongPress={onLigneLongPress ? () => onLigneLongPress(ligne) : undefined}
     />
   );
 
@@ -160,6 +205,7 @@ function RecapDraggableLigneItem({
   showPrices,
   onLignePress,
   onLigneDoublePress,
+  onLigneLongPress,
   drag,
   isActive,
 }) {
@@ -176,6 +222,7 @@ function RecapDraggableLigneItem({
             showPrices={showPrices}
             onPress={onLignePress ? () => onLignePress(item) : undefined}
             onDoublePress={onLigneDoublePress ? () => onLigneDoublePress(item) : undefined}
+            onLongPress={onLigneLongPress ? () => onLigneLongPress(item) : undefined}
           />
         </View>
       </View>
@@ -190,8 +237,10 @@ function SectionGroupBlockWithDrag({
   showPrices,
   onLignePress,
   onLigneDoublePress,
+  onLigneLongPress,
   onSectionPress,
   onLigneReorder,
+  onMetierReorder,
 }) {
   const isDefaultSection = isDefaultSectionNom(group.sectionNom);
   const showMetierGroups = variant === 'recap' || variant === 'details';
@@ -231,6 +280,10 @@ function SectionGroupBlockWithDrag({
     onLigneReorder?.(group.sectionId, data);
   };
 
+  const handleMetierMove = (metierId, direction) => {
+    onMetierReorder?.(group.sectionId, metierId, direction);
+  };
+
   return (
     <View style={styles.section}>
       {showSectionDivider ? <SectionDivider /> : null}
@@ -238,9 +291,20 @@ function SectionGroupBlockWithDrag({
         <SectionHeader group={group} onSectionPress={onSectionPress} />
       ) : null}
       {showMetierGroups ? (
-        metierGroups.map((metierGroup) => (
+        metierGroups.map((metierGroup, metierIndex) => (
           <View key={metierGroup.metierId} style={styles.metierBlock}>
-            <MetierSubHeader metierId={metierGroup.metierId} nom={metierGroup.metierNom} />
+            <MetierSubHeader
+              metierId={metierGroup.metierId}
+              nom={metierGroup.metierNom}
+              canMoveUp={metierIndex > 0}
+              canMoveDown={metierIndex < metierGroups.length - 1}
+              onMoveUp={
+                onMetierReorder ? () => handleMetierMove(metierGroup.metierId, 'up') : undefined
+              }
+              onMoveDown={
+                onMetierReorder ? () => handleMetierMove(metierGroup.metierId, 'down') : undefined
+              }
+            />
             <NestableDraggableFlatList
               data={localMetierLignes[metierGroup.metierId] || metierGroup.lignes}
               keyExtractor={(item) => String(item.id)}
@@ -255,6 +319,7 @@ function SectionGroupBlockWithDrag({
                   showPrices={showPrices}
                   onLignePress={onLignePress}
                   onLigneDoublePress={onLigneDoublePress}
+                  onLigneLongPress={onLigneLongPress}
                   drag={drag}
                   isActive={isActive}
                 />
@@ -277,6 +342,7 @@ function SectionGroupBlockWithDrag({
               showPrices={showPrices}
               onLignePress={onLignePress}
               onLigneDoublePress={onLigneDoublePress}
+              onLigneLongPress={onLigneLongPress}
               drag={drag}
               isActive={isActive}
             />
@@ -293,11 +359,13 @@ export function LignesReleveGroupedList({
   showPrices = false,
   onLignePress,
   onLigneDoublePress,
+  onLigneLongPress,
   style,
   groupBySection = false,
   sectionOrder = null,
   enableLigneDrag = false,
   onLigneReorder,
+  onMetierReorder,
   onSectionPress,
   contentPaddingBottom = 0,
 }) {
@@ -334,8 +402,10 @@ export function LignesReleveGroupedList({
               showPrices={showPrices}
               onLignePress={onLignePress}
               onLigneDoublePress={onLigneDoublePress}
+              onLigneLongPress={onLigneLongPress}
               onSectionPress={onSectionPress}
               onLigneReorder={onLigneReorder}
+              onMetierReorder={onMetierReorder}
             />
           ))}
         </NestableScrollContainer>
@@ -353,6 +423,7 @@ export function LignesReleveGroupedList({
             showPrices={showPrices}
             onLignePress={onLignePress}
             onLigneDoublePress={onLigneDoublePress}
+            onLigneLongPress={onLigneLongPress}
             onSectionPress={onSectionPress}
           />
         ))}
@@ -378,6 +449,7 @@ export function LignesReleveGroupedList({
                 showPrices={showPrices}
                 onPress={onLignePress ? () => onLignePress(ligne) : undefined}
                 onDoublePress={onLigneDoublePress ? () => onLigneDoublePress(ligne) : undefined}
+                onLongPress={onLigneLongPress ? () => onLigneLongPress(ligne) : undefined}
               />
             ))}
           </View>
@@ -435,10 +507,26 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 4,
   },
+  metierHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingLeft: 4,
+  },
   metierTitle: {
     fontWeight: '800',
     fontSize: 16,
-    paddingLeft: 4,
+  },
+  metierArrowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  metierArrowBtn: {
+    paddingHorizontal: 2,
+    paddingVertical: 2,
+  },
+  metierArrowBtnDisabled: {
+    opacity: 0.35,
   },
   dragHandle: {
     paddingVertical: 8,

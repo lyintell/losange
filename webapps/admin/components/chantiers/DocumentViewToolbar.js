@@ -8,6 +8,8 @@ import { markChantierAsDevisIfNeeded } from '@/lib/chantiers/updateChantierStatu
 
 export default function DocumentViewToolbar({
   fileName,
+  excelFileName = null,
+  onDownloadExcel = null,
   modifyHref = null,
   canModifyChantier = true,
   canChangeChantierStatus = true,
@@ -21,7 +23,10 @@ export default function DocumentViewToolbar({
   releveStatusError = '',
 }) {
   const [downloading, setDownloading] = useState(false);
+  const [downloadingExcel, setDownloadingExcel] = useState(false);
   const [error, setError] = useState('');
+
+  const busy = downloading || downloadingExcel;
 
   const maybeMarkAsDevis = async () => {
     if (!canChangeChantierStatus || !chantierId || chantierStatus !== 'D') return;
@@ -70,6 +75,23 @@ export default function DocumentViewToolbar({
     }
   };
 
+  const handleDownloadExcel = async () => {
+    if (!onDownloadExcel) return;
+
+    setDownloadingExcel(true);
+    setError('');
+
+    try {
+      await onDownloadExcel(excelFileName);
+      await maybeMarkAsDevis();
+    } catch (downloadError) {
+      console.error('Erreur export Excel:', downloadError);
+      setError('Impossible de générer le fichier Excel.');
+    } finally {
+      setDownloadingExcel(false);
+    }
+  };
+
   return (
     <div className="document-toolbar">
       <div className="document-toolbar-actions">
@@ -77,7 +99,7 @@ export default function DocumentViewToolbar({
           type="button"
           className="secondary-button document-toolbar-button"
           onClick={handlePrint}
-          disabled={downloading}
+          disabled={busy}
         >
           <AdminIcon name="printer" size={16} />
           <span>Imprimer</span>
@@ -86,11 +108,22 @@ export default function DocumentViewToolbar({
           type="button"
           className="primary-button document-toolbar-button"
           onClick={handleDownloadPdf}
-          disabled={downloading}
+          disabled={busy}
         >
           <AdminIcon name="download" size={16} />
           <span>{downloading ? 'Génération…' : 'Télécharger PDF'}</span>
         </button>
+        {onDownloadExcel ? (
+          <button
+            type="button"
+            className="success-button document-toolbar-button"
+            onClick={handleDownloadExcel}
+            disabled={busy}
+          >
+            <AdminIcon name="download" size={16} />
+            <span>{downloadingExcel ? 'Génération…' : 'Télécharger Excel'}</span>
+          </button>
+        ) : null}
         {modifyHref && canModifyChantier ? (
           <Link href={modifyHref} className="secondary-button document-toolbar-button">
             <AdminIcon name="pencil" size={16} />

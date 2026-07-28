@@ -1,4 +1,5 @@
 import {
+  formatCoteAffichage,
   formatLigneDimensionsLxhN,
   formatLigneDimensionsSelonFormule,
   formatLigneMesures,
@@ -22,34 +23,58 @@ import { getLigneOuvrageNomPourDevis } from './ouvrageNomDevis';
 export function formatDevisDimension(ligne) {
   if (!isLigneDimension(ligne)) return null;
   if (shouldAfficherFormuleDerivee(ligne)) {
-    return formatLigneDimensionsSelonFormule(ligne);
+    const dims = formatLigneDimensionsSelonFormule(ligne);
+    const nFormatted = formatCoteAffichage(ligne?.nombre);
+    if (dims && dims !== '—' && nFormatted != null) {
+      return `${dims} x ${nFormatted}`;
+    }
+    return dims;
   }
   return formatLigneMesures(ligne);
 }
 
-export function formatDevisQuantite(ligne) {
+/** Chiffre quantité seul (colonne Qté). */
+export function formatDevisQuantiteValeur(ligne) {
   if (shouldAfficherFormuleDerivee(ligne)) {
-    const qty = formatQuantite(Number(ligne?.quantite) || 0);
-    const nomUnite = getLigneNomUnite(ligne);
-    return nomUnite ? `${qty} ${nomUnite}` : qty;
+    return formatQuantite(Number(ligne?.quantite) || 0);
   }
+  return formatLigneQuantiteAffichage(ligne);
+}
 
-  const qty = formatLigneQuantiteAffichage(ligne);
-  const nomUnite = getLigneNomUnite(ligne);
+/** Unité seule (colonne U). */
+export function formatDevisUnite(ligne) {
+  return getLigneNomUnite(ligne) || '';
+}
+
+export function formatDevisQuantite(ligne) {
+  const qty = formatDevisQuantiteValeur(ligne);
+  const nomUnite = formatDevisUnite(ligne);
   return nomUnite ? `${qty} ${nomUnite}` : qty;
+}
+
+/** Designation devis : nom ouvrage seul (sans formule l x h x n). */
+export function formatDevisOuvrageDesignation(ligne) {
+  return getLigneOuvrageNomPourDevis(ligne);
 }
 
 function groupByMetierThenOuvrageInOrder(lignes = []) {
   const metierOrder = [];
   const metierMap = new Map();
 
-  lignes.forEach((ligne) => {
+  [...lignes]
+    .sort(
+      (left, right) =>
+        (Number(left.metier_ordre) || 0) - (Number(right.metier_ordre) || 0) ||
+        (Number(left.ordre) || 0) - (Number(right.ordre) || 0) ||
+        String(left.id || '').localeCompare(String(right.id || ''))
+    )
+    .forEach((ligne) => {
     const metierNom = ligne.metier_nom?.trim() || 'Autre';
     const metierId = ligne.metier_id || metierNom;
-    const ouvrageNom = getLigneOuvrageNomPourDevis(ligne);
+    const ouvrageNom = formatDevisOuvrageDesignation(ligne);
     const nomUnite = getLigneNomUnite(ligne);
     const isDimension = isLigneDimension(ligne);
-    const ouvrageKey = `${metierId}::${ouvrageNom}::${isDimension ? `dim::${ligne.formule || ''}` : nomUnite}`;
+    const ouvrageKey = `${metierId}::${getLigneOuvrageNomPourDevis(ligne)}::${isDimension ? `dim::${ligne.formule || ''}::${nomUnite}` : nomUnite}`;
 
     if (!metierMap.has(metierId)) {
       metierOrder.push(metierId);
@@ -137,6 +162,7 @@ export function buildRelevesTableRows(lignes = [], sectionOrder = null) {
           nombrePdf: formatLigneNombrePdf(ligne),
           isDimensionLine: isLigneDimension(ligne),
           note: ligne.note?.trim() || '',
+          indComplete: Number(ligne.ind_complete) === 1,
         });
       });
     });
@@ -184,7 +210,9 @@ export function buildDevisTableRows(lignes = [], sectionOrder = null) {
             nombrePdf: formatLigneNombrePdf(ligne),
             isDimensionLine: isLigneDimension(ligne),
             note: ligne.note?.trim() || '',
-            quantiteLabel: formatDevisQuantite(ligne),
+            note_2: ligne.note_2?.trim() || '',
+            quantiteLabel: formatDevisQuantiteValeur(ligne),
+            uniteLabel: formatDevisUnite(ligne),
             prixUnitaire: getLignePrixUnitaireApplique(ligne),
             montant: getLigneMontant(ligne),
           });

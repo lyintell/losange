@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { fetchClientById, updateClient } from '@/lib/chantiers/queries';
+import { canModifyChantiers } from '@/lib/chantiers/access';
+import { fetchClientById, softDeleteClient, updateClient } from '@/lib/chantiers/queries';
 
 export async function PATCH(request, { params }) {
   try {
@@ -34,6 +35,27 @@ export async function PATCH(request, { params }) {
   } catch (error) {
     return NextResponse.json(
       { ok: false, error: error.message || 'Erreur mise à jour client.' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(_request, { params }) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ ok: false, error: 'Non authentifié.' }, { status: 401 });
+    }
+    if (!canModifyChantiers(session.role)) {
+      return NextResponse.json({ ok: false, error: 'Accès refusé.' }, { status: 403 });
+    }
+
+    const { clientId } = await params;
+    await softDeleteClient(clientId, { entrepriseId: session.entrepriseId || null });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, error: error.message || 'Erreur suppression client.' },
       { status: 500 }
     );
   }

@@ -78,6 +78,13 @@ if (-not (Test-Path ".vercel\project.json")) {
   }
 }
 
+# Le projet Vercel a Root Directory = webapps/admin : deploy depuis la racine du repo.
+$RootVercelDir = Join-Path $Root ".vercel"
+if (-not (Test-Path $RootVercelDir)) {
+  New-Item -ItemType Directory -Path $RootVercelDir | Out-Null
+}
+Copy-Item (Join-Path $AdminDir ".vercel\project.json") (Join-Path $RootVercelDir "project.json") -Force
+
 function Sync-VercelEnvFromLocal {
   param([string]$Path)
 
@@ -122,13 +129,15 @@ if ($LASTEXITCODE -ne 0) {
   throw "Build local echoue - corrige avant deploy."
 }
 
+Set-Location $Root
+
 Write-Host ""
 if ($PreviewOnly) {
   Write-Host "Deploy preview..." -ForegroundColor Cyan
-  npx vercel deploy --yes --name $ProjectName
+  npx vercel deploy --yes
 } else {
   Write-Host "Deploy production..." -ForegroundColor Cyan
-  npx vercel deploy --prod --yes --name $ProjectName
+  npx vercel deploy --prod --yes
 }
 if ($LASTEXITCODE -ne 0) {
   throw "Deploy Vercel echoue."
@@ -137,10 +146,12 @@ if ($LASTEXITCODE -ne 0) {
 if (-not $PreviewOnly -and -not $SkipDomain) {
   Write-Host ""
   Write-Host "Association domaine $Domain ..." -ForegroundColor Cyan
+  Set-Location $AdminDir
   npx vercel domains add $Domain $ProjectName 2>&1
   if ($LASTEXITCODE -ne 0) {
     Write-Host "Domaine peut-etre deja configure - verifie Domains dans le dashboard Vercel." -ForegroundColor Yellow
   }
+  Set-Location $Root
 }
 
 Write-Host ""

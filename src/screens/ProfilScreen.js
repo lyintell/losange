@@ -75,6 +75,8 @@ export default function ProfilScreen({
   const [profil, setProfil] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [entrepriseNom, setEntrepriseNom] = useState('');
+  const [entete1, setEntete1] = useState('');
+  const [entete2, setEntete2] = useState('');
   const [indTva, setIndTva] = useState(0);
   const [logoPreviewUri, setLogoPreviewUri] = useState(null);
   const [logoMimeType, setLogoMimeType] = useState(null);
@@ -92,6 +94,8 @@ export default function ProfilScreen({
       setProfil(data);
       setIsAdmin(admin);
       setEntrepriseNom(data?.entreprise_nom || '');
+      setEntete1(data?.entreprise_entete_1 || '');
+      setEntete2(data?.entreprise_entete_2 || '');
       setIndTva(Number(data?.entreprise_ind_tva) === 1 ? 1 : 0);
       setLogoPreviewUri(null);
       setLogoMimeType(null);
@@ -113,6 +117,8 @@ export default function ProfilScreen({
   useEffect(() => {
     if (!editing || !profil) return;
     setEntrepriseNom(profil.entreprise_nom || '');
+    setEntete1(profil.entreprise_entete_1 || '');
+    setEntete2(profil.entreprise_entete_2 || '');
     setIndTva(Number(profil.entreprise_ind_tva) === 1 ? 1 : 0);
     setLogoPreviewUri(null);
     setLogoMimeType(null);
@@ -168,6 +174,8 @@ export default function ProfilScreen({
       if (canEditEntreprise && entrepriseId) {
         await updateEntrepriseAdminLocal(entrepriseId, {
           nom: entrepriseNom.trim(),
+          entete_1: entete1,
+          entete_2: entete2,
           ind_tva: profil?.is_pro ? indTva : 0,
         });
         if (logoPreviewUri && profil?.is_pro) {
@@ -198,6 +206,8 @@ export default function ProfilScreen({
   }, [
     confirmPassword,
     currentPassword,
+    entete1,
+    entete2,
     entrepriseId,
     entrepriseNom,
     indTva,
@@ -284,6 +294,33 @@ export default function ProfilScreen({
               </View>
             ) : (
               <InfoRow label="Entreprise" value={profil.entreprise_nom} />
+            )}
+            {canEditEntreprise ? (
+              <>
+                <TextInput
+                  mode="outlined"
+                  label="En-tête 1 du devis"
+                  value={entete1}
+                  onChangeText={setEntete1}
+                  style={styles.textInput}
+                  dense
+                  disabled={saving}
+                />
+                <TextInput
+                  mode="outlined"
+                  label="En-tête 2 du devis"
+                  value={entete2}
+                  onChangeText={setEntete2}
+                  style={styles.textInput}
+                  dense
+                  disabled={saving}
+                />
+              </>
+            ) : (
+              <>
+                <InfoRow label="En-tête 1 du devis" value={profil.entreprise_entete_1} />
+                <InfoRow label="En-tête 2 du devis" value={profil.entreprise_entete_2} />
+              </>
             )}
             {canEditEntreprise ? (
               <View style={styles.infoRow}>

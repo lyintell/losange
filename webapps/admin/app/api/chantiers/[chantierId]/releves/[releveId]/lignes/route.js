@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { canModifyChantiers } from '@/lib/chantiers/access';
-import { fetchChantierDetail, updateReleveLignesPrix } from '@/lib/chantiers/queries';
+import { fetchChantierDetail, syncReleveLignes } from '@/lib/chantiers/queries';
 import { canEditReleveRemise } from '@/lib/chantiers/remise';
 
 export async function PATCH(request, { params }) {
@@ -33,11 +33,10 @@ export async function PATCH(request, { params }) {
     const body = await request.json();
     const lignes = Array.isArray(body?.lignes) ? body.lignes : [];
 
-    if (!lignes.length) {
-      return NextResponse.json({ ok: false, error: 'Aucune ligne à mettre à jour.' }, { status: 400 });
-    }
-
-    const options = {};
+    const options = {
+      markChanged: true,
+      changedByIdentifiant: session.identifiant || null,
+    };
     const allowRemiseEdit = canEditReleveRemise(session.role);
     if (allowRemiseEdit) {
       if (body?.remise != null) {
@@ -48,7 +47,7 @@ export async function PATCH(request, { params }) {
       }
     }
 
-    await updateReleveLignesPrix(releveId, lignes, options);
+    await syncReleveLignes(releveId, lignes, options);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

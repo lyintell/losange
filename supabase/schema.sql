@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS entreprises (
   telephone_2 TEXT,
   adresse TEXT,
   logo TEXT,
+  entete_1 TEXT,
+  entete_2 TEXT,
   ind_pro SMALLINT NOT NULL DEFAULT 0 CHECK (ind_pro IN (0, 1)),
   ind_active SMALLINT NOT NULL DEFAULT 1 CHECK (ind_active IN (0, 1)),
   ind_tva SMALLINT NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1)),
@@ -30,6 +32,8 @@ ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS pro_activated_le TIMESTAMPTZ;
 ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS pro_downgraded_le TIMESTAMPTZ;
 ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS ind_admin_connecte_mobile SMALLINT NOT NULL DEFAULT 0 CHECK (ind_admin_connecte_mobile IN (0, 1));
 ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS ind_metiers_preselectionnes SMALLINT NOT NULL DEFAULT 0 CHECK (ind_metiers_preselectionnes IN (0, 1));
+ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS entete_1 TEXT;
+ALTER TABLE entreprises ADD COLUMN IF NOT EXISTS entete_2 TEXT;
 
 CREATE TABLE IF NOT EXISTS profils (
   id TEXT PRIMARY KEY,
@@ -184,6 +188,9 @@ CREATE TABLE IF NOT EXISTS releves (
   ind_tva SMALLINT NOT NULL DEFAULT 0 CHECK (ind_tva IN (0, 1)),
   status TEXT NOT NULL DEFAULT 'E' CHECK (status IN ('E', 'V', 'N')),
   note TEXT,
+  ind_dimension_terrain SMALLINT NOT NULL DEFAULT 0 CHECK (ind_dimension_terrain IN (0, 1)),
+  ind_changement SMALLINT NOT NULL DEFAULT 0 CHECK (ind_changement IN (0, 1)),
+  id_qui_change TEXT,
   supprime_le TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
   mis_a_jour_le TIMESTAMPTZ DEFAULT now(),
@@ -225,9 +232,12 @@ CREATE TABLE IF NOT EXISTS ligne_releves (
   prix_unitaire_applique DOUBLE PRECISION NOT NULL,
   montant DOUBLE PRECISION NOT NULL,
   note TEXT,
+  note_2 TEXT,
   photo TEXT,
   section_id TEXT REFERENCES sections (id) ON DELETE SET NULL,
   ordre INTEGER NOT NULL DEFAULT 0,
+  metier_ordre INTEGER NOT NULL DEFAULT 0,
+  prix_revient_applique DOUBLE PRECISION,
   ind_complete SMALLINT NOT NULL DEFAULT 0 CHECK (ind_complete IN (0, 1)),
   supprime_le TIMESTAMPTZ,
   cree_le TIMESTAMPTZ DEFAULT now(),
@@ -238,6 +248,9 @@ CREATE TABLE IF NOT EXISTS ligne_releves (
 ALTER TABLE ligne_releves ADD COLUMN IF NOT EXISTS photo TEXT;
 ALTER TABLE ligne_releves ADD COLUMN IF NOT EXISTS section_id TEXT REFERENCES sections (id) ON DELETE SET NULL;
 ALTER TABLE ligne_releves ADD COLUMN IF NOT EXISTS ordre INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ligne_releves ADD COLUMN IF NOT EXISTS metier_ordre INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ligne_releves ADD COLUMN IF NOT EXISTS prix_revient_applique DOUBLE PRECISION;
+ALTER TABLE ligne_releves ADD COLUMN IF NOT EXISTS note_2 TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_ligne_releves_releve_ordre
   ON ligne_releves (releve_id, ordre)

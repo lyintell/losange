@@ -1,12 +1,10 @@
-import AdminPageShell from '@/components/layout/AdminPageShell';
-import { getAdminNavItem } from '@/lib/navigation/adminNav';
+import { redirect } from 'next/navigation';
 
 export const metadata = {
   title: 'Paramètres — Losange Admin',
 };
 
+/** Ancienne route : redirige vers Configuration. */
 export default function ParametresPage() {
-  const navItem = getAdminNavItem('parametres');
-
-  return <AdminPageShell navItem={navItem} />;
+  redirect('/configuration');
 }

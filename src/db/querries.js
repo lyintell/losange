@@ -33,6 +33,29 @@ const notifyLocalDataChanged = () => {
   scheduleTerrainSyncAfterWrite();
 };
 
+const markReleveChangedLocal = async (releveId) => {
+  if (!releveId) return;
+  const db = await ensureLocalDatabaseReady();
+  const hasIndChangement = await tableHasColumn(db, 'releves', 'ind_changement');
+  const hasIdQuiChange = await tableHasColumn(db, 'releves', 'id_qui_change');
+  if (!hasIndChangement && !hasIdQuiChange) return;
+
+  const profil = await getLoggedInProfilLocal();
+  const identifiant = profil?.identifiant != null ? String(profil.identifiant).trim() : null;
+  const sets = [];
+  const params = [];
+  if (hasIndChangement) {
+    sets.push('ind_changement = 1');
+  }
+  if (hasIdQuiChange) {
+    sets.push('id_qui_change = ?');
+    params.push(identifiant || null);
+  }
+  sets.push("_synced = 0", "mis_a_jour_le = datetime('now')");
+  params.push(releveId);
+  await db.runAsync(`UPDATE releves SET ${sets.join(', ')} WHERE id = ?;`, params);
+};
+
 const RELEVE_ACCESS_DENIED_ERROR =
   "Vous ne pouvez pas modifier un chantier ou relevé que vous n'avez pas pris.";
 
@@ -436,12 +459,10 @@ const ouvrageActifFilterSql = (hasIndActif, alias = '') => {
   return hasIndActif ? ` AND (${prefix}ind_actif = 1 OR ${prefix}ind_actif IS NULL)` : '';
 };
 
-const ouvrageOrderBySql = (hasOrdre, alias = '') => {
+/** Tri alphabétique pour les écrans de choix (ordre métier réservé aux listes admin). */
+const ouvrageOrderBySql = (_hasOrdre, alias = '') => {
   const prefix = alias ? `${alias}.` : '';
-  if (hasOrdre) {
-    return ` ORDER BY ${prefix}ordre ASC, ${prefix}nom ASC`;
-  }
-  return ` ORDER BY ${prefix}nom ASC`;
+  return ` ORDER BY ${prefix}nom COLLATE NOCASE ASC`;
 };
 
 const fetchOwnedMetiersLocal = async (db, entrepriseId) => {
@@ -861,12 +882,36 @@ export const insertReleveLocal = async (chantierId, priseParId = null, remise = 
 
   const dateFacture = todayFactureDate();
   const remiseValue = Number(remise) || 0;
+  const hasTerrainFlag = await tableHasColumn(db, 'releves', 'ind_dimension_terrain');
+  const hasChangementFlag = await tableHasColumn(db, 'releves', 'ind_changement');
+  const hasQuiChange = await tableHasColumn(db, 'releves', 'id_qui_change');
+
+  const extraCols = [];
+  const extraPlaceholders = [];
+  const extraValues = [];
+  if (hasTerrainFlag) {
+    extraCols.push('ind_dimension_terrain');
+    extraPlaceholders.push('?');
+    extraValues.push(1);
+  }
+  if (hasChangementFlag) {
+    extraCols.push('ind_changement');
+    extraPlaceholders.push('?');
+    extraValues.push(0);
+  }
+  if (hasQuiChange) {
+    extraCols.push('id_qui_change');
+    extraPlaceholders.push('?');
+    extraValues.push(null);
+  }
+
   const query = `
     INSERT INTO releves (
       id, chantier_id, prise_par_id, date_facture,
-      total_ht_facture, tva_facture, total_ttc_facture, remise, ind_tva, status, _synced
+      total_ht_facture, tva_facture, total_ttc_facture, remise, ind_tva, status,
+      ${extraCols.length ? `${extraCols.join(', ')}, ` : ''}_synced
     )
-    VALUES (?, ?, ?, ?, 0.0, 18.0, 0.0, ?, ?, ?, 0);
+    VALUES (?, ?, ?, ?, 0.0, 18.0, 0.0, ?, ?, ?, ${extraPlaceholders.length ? `${extraPlaceholders.join(', ')}, ` : ''}0);
   `;
   await db.runAsync(query, [
     id,
@@ -876,6 +921,7 @@ export const insertReleveLocal = async (chantierId, priseParId = null, remise = 
     remiseValue,
     resolvedIndTva,
     RELEVE_STATUS_DEFAULT,
+    ...extraValues,
   ]);
   notifyLocalDataChanged();
   return id;
@@ -894,6 +940,7 @@ export const updateReleveRemiseLocal = async (releveId, remise) => {
     [remiseValue, releveId]
   );
   await refreshReleveTotaux(releveId);
+  await markReleveChangedLocal(releveId);
   notifyLocalDataChanged();
 };
 
@@ -910,6 +957,7 @@ export const updateReleveIndTvaLocal = async (releveId, indTva) => {
     [value, releveId]
   );
   await refreshReleveTotaux(releveId);
+  await markReleveChangedLocal(releveId);
   notifyLocalDataChanged();
 };
 
@@ -994,7 +1042,7 @@ const getUniteContextByOuvrageUniteId = async (ouvrageUniteId) => {
   const tombstoneFilter = hasSupprimeLe ? ' AND ou.supprime_le IS NULL' : '';
   return db.getFirstAsync(
     `
-    SELECT u.ind_dimension, u.formule
+    SELECT u.ind_dimension, u.formule, u.nom_unite
     FROM ouvrage_unites ou
     JOIN unites u ON u.id = ou.unite_id
     WHERE ou.id = ?${tombstoneFilter};
@@ -1003,7 +1051,12 @@ const getUniteContextByOuvrageUniteId = async (ouvrageUniteId) => {
   );
 };
 
-export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) => {
+export const insertLigneReleveLocal = async (
+  releveId,
+  ouvrageUniteId,
+  cotes,
+  { markChanged = true } = {}
+) => {
   const releve = await getReleveByIdLocal(releveId);
   await assertCanModifyReleveLocal(releve);
 
@@ -1020,6 +1073,7 @@ export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) =>
     photo = null,
     indComplete = 0,
   } = cotes;
+  const note2Raw = cotes.note_2 ?? cotes.note2 ?? null;
   const uniteContext = await getUniteContextByOuvrageUniteId(ouvrageUniteId);
   const resolvedLargeur =
     largeur != null && largeur !== '' ? roundQuantite(largeur) : null;
@@ -1039,11 +1093,17 @@ export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) =>
 
   const montant = computeMontantLigneReleve({
     prixUnitaireApplique: resolvedPu,
+    quantite,
     nombre: nombre || 1,
+    indDimension: uniteContext?.ind_dimension,
+    nomUnite: uniteContext?.nom_unite,
   });
 
   const hasSectionId = await tableHasColumn(db, 'ligne_releves', 'section_id');
   const hasOrdre = await tableHasColumn(db, 'ligne_releves', 'ordre');
+  const hasMetierOrdre = await tableHasColumn(db, 'ligne_releves', 'metier_ordre');
+  const hasPrixRevientApplique = await tableHasColumn(db, 'ligne_releves', 'prix_revient_applique');
+  const hasNote2 = await tableHasColumn(db, 'ligne_releves', 'note_2');
   const sectionId = cotes.sectionId || cotes.section_id || null;
 
   let ordre = cotes.ordre;
@@ -1059,7 +1119,45 @@ export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) =>
     ordre = Number(row?.next_ordre) || 0;
   }
 
-  if (hasSectionId && hasOrdre) {
+  let metierOrdre = cotes.metier_ordre ?? cotes.metierOrdre;
+  if (hasMetierOrdre && !Number.isFinite(Number(metierOrdre))) {
+    metierOrdre = 0;
+  }
+
+  const rawPrixRevientApplique = cotes.prix_revient_applique ?? cotes.prixRevientApplique;
+  const resolvedPrixRevientApplique =
+    rawPrixRevientApplique == null || rawPrixRevientApplique === ''
+      ? null
+      : roundMontant(rawPrixRevientApplique);
+
+  if (hasSectionId && hasOrdre && hasMetierOrdre) {
+    await db.runAsync(
+      `
+      INSERT INTO ligne_releves (
+        id, releve_id, ouvrage_unite_id, section_id, ordre, metier_ordre, largeur, hauteur, profondeur,
+        nombre, quantite, prix_unitaire_applique, montant, note, photo, ind_complete, _synced
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
+      `,
+      [
+        id,
+        releveId,
+        ouvrageUniteId,
+        sectionId,
+        Number(ordre) || 0,
+        Number(metierOrdre) || 0,
+        resolvedLargeur,
+        resolvedHauteur,
+        resolvedProfondeur,
+        nombre || 1,
+        quantite,
+        resolvedPu,
+        montant,
+        note?.trim() || null,
+        photo || null,
+        Number(indComplete) === 1 ? 1 : 0,
+      ]
+    );
+  } else if (hasSectionId && hasOrdre) {
     await db.runAsync(
       `
       INSERT INTO ligne_releves (
@@ -1161,8 +1259,33 @@ export const insertLigneReleveLocal = async (releveId, ouvrageUniteId, cotes) =>
     );
   }
 
+  if (hasPrixRevientApplique) {
+    await db.runAsync(
+      `
+      UPDATE ligne_releves
+      SET prix_revient_applique = ?
+      WHERE id = ?;
+      `,
+      [resolvedPrixRevientApplique, id]
+    );
+  }
+
+  if (hasNote2) {
+    await db.runAsync(
+      `
+      UPDATE ligne_releves
+      SET note_2 = ?
+      WHERE id = ?;
+      `,
+      [note2Raw != null && String(note2Raw).trim() ? String(note2Raw).trim() : null, id]
+    );
+  }
+
   // Optionnel mais recommandé : Recalculer les totaux du relevé parent après l'ajout
   await refreshReleveTotaux(releveId);
+  if (markChanged) {
+    await markReleveChangedLocal(releveId);
+  }
   notifyLocalDataChanged();
 
   return id;
@@ -1176,18 +1299,29 @@ const insertLignesForReleveLocal = async (releveId, lignes = []) => {
     const ligne = lignes[index];
     if (!ligne?.ouvrage_unite_id) continue;
     try {
-      const ligneId = await insertLigneReleveLocal(releveId, ligne.ouvrage_unite_id, {
-        largeur: ligne.largeur,
-        hauteur: ligne.hauteur,
-        profondeur: ligne.profondeur,
-        nombre: ligne.nombre,
-        prixUnitaireApplique: resolveLignePrixUnitaire(ligne),
-        note: ligne.note,
-        photo: ligne.photo_pending_uri ? null : ligne.photo || null,
-        indComplete: Number(ligne.ind_complete) === 1 ? 1 : 0,
-        sectionId: ligne.section_id || null,
-        ordre: Number.isFinite(Number(ligne.ordre)) ? Number(ligne.ordre) : index,
-      });
+      const ligneId = await insertLigneReleveLocal(
+        releveId,
+        ligne.ouvrage_unite_id,
+        {
+          largeur: ligne.largeur,
+          hauteur: ligne.hauteur,
+          profondeur: ligne.profondeur,
+          nombre: ligne.nombre,
+          prixUnitaireApplique: resolveLignePrixUnitaire(ligne),
+          prix_revient_applique:
+            ligne.prix_revient_applique == null || ligne.prix_revient_applique === ''
+              ? null
+              : Number(ligne.prix_revient_applique),
+          note: ligne.note,
+          note_2: ligne.note_2,
+          photo: ligne.photo_pending_uri ? null : ligne.photo || null,
+          indComplete: Number(ligne.ind_complete) === 1 ? 1 : 0,
+          sectionId: ligne.section_id || null,
+          ordre: Number.isFinite(Number(ligne.ordre)) ? Number(ligne.ordre) : index,
+          metier_ordre: Number.isFinite(Number(ligne.metier_ordre)) ? Number(ligne.metier_ordre) : 0,
+        },
+        { markChanged: false }
+      );
       if (ligne.photo_pending_uri) {
         await setLigneRelevePhotoLocal(ligneId, ligne.photo_pending_uri, {
           mimeType: ligne.photo_mime_type,
@@ -1266,6 +1400,7 @@ export const replaceLignesReleveLocal = async (releveId, lignes = [], sectionOrd
   await insertLignesForReleveLocal(releveId, lignes);
   await replaceSectionRelevesForReleveLocal(releveId, lignes, sectionOrder);
   await refreshReleveTotaux(releveId);
+  await markReleveChangedLocal(releveId);
   notifyLocalDataChanged();
 };
 
@@ -1349,6 +1484,18 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
     )`
     : '';
 
+  // Liste principale : masquer les chantiers sans relevé actif.
+  // (Ils restent trouvables via searchChantiersByClientLocal à l'enregistrement.)
+  const hasActiveReleveFilter = filterOwnReleves
+    ? ''
+    : `
+    AND EXISTS (
+      SELECT 1
+      FROM releves r_vis
+      WHERE r_vis.chantier_id = chantiers.id
+      ${hasReleveSupprimeLe ? 'AND r_vis.supprime_le IS NULL' : ''}
+    )`;
+
   const relevePriseJoin = filterOwnReleves
     ? `
     LEFT JOIN (
@@ -1418,7 +1565,7 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
     FROM chantiers
     JOIN clients ON chantiers.client_id = clients.id
     ${relevePriseJoin}
-    WHERE clients.entreprise_id = ?${tombstoneFilter}${ownChantierFilter}
+    WHERE clients.entreprise_id = ?${tombstoneFilter}${ownChantierFilter}${hasActiveReleveFilter}
     ORDER BY releve_prise.prise_le IS NULL ASC, datetime(replace(releve_prise.prise_le, 'T', ' ')) DESC;
   `
     : `
@@ -1434,7 +1581,7 @@ export const getChantiersWithClientLocal = async (entrepriseId = null) => {
     FROM chantiers
     JOIN clients ON chantiers.client_id = clients.id
     ${relevePriseJoin}
-    WHERE 1=1${tombstoneFilter}${ownChantierFilter}
+    WHERE 1=1${tombstoneFilter}${ownChantierFilter}${hasActiveReleveFilter}
     ORDER BY releve_prise.prise_le IS NULL ASC, datetime(replace(releve_prise.prise_le, 'T', ' ')) DESC;
   `;
 
@@ -1992,10 +2139,14 @@ export const getLignesByReleveIdLocal = async (releveId) => {
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'section_releves';"
   );
   const hasOrdre = await tableHasColumn(db, 'ligne_releves', 'ordre');
+  const hasPrixRevientApplique = await tableHasColumn(db, 'ligne_releves', 'prix_revient_applique');
+  const hasNote2 = await tableHasColumn(db, 'ligne_releves', 'note_2');
   const sectionSelect = hasSectionId && hasSectionsTable ? ', lr.section_id, s.nom AS section_nom' : '';
   const sectionOrdreSelect =
     hasSectionId && hasSectionsTable && hasSectionRelevesTable ? ', sr.ordre AS section_ordre' : '';
   const ordreSelect = hasOrdre ? ', lr.ordre' : '';
+  const prixRevientAppliqueSelect = hasPrixRevientApplique ? ', lr.prix_revient_applique' : '';
+  const note2Select = hasNote2 ? ', lr.note_2' : '';
   const sectionJoin =
     hasSectionId && hasSectionsTable ? ' LEFT JOIN sections s ON s.id = lr.section_id' : '';
   const sectionReleveJoin =
@@ -2027,7 +2178,7 @@ export const getLignesByReleveIdLocal = async (releveId) => {
       u.nom_unite,
       u.formule,
       u.ind_dimension
-      ${sectionSelect}${sectionOrdreSelect}${ordreSelect}
+      ${sectionSelect}${sectionOrdreSelect}${ordreSelect}${prixRevientAppliqueSelect}${note2Select}
     FROM ligne_releves lr
     JOIN releves r ON r.id = lr.releve_id
     JOIN ouvrage_unites ou ON ou.id = lr.ouvrage_unite_id
@@ -2054,7 +2205,11 @@ export const getLignesByChantierLocal = async (chantierId) => {
     (await tableHasColumn(db, 'releves', 'supprime_le'));
   const tombstoneFilter = hasSupprimeLe ? ' AND lr.supprime_le IS NULL AND r.supprime_le IS NULL' : '';
   const hasOrdre = await tableHasColumn(db, 'ligne_releves', 'ordre');
+  const hasPrixRevientApplique = await tableHasColumn(db, 'ligne_releves', 'prix_revient_applique');
+  const hasNote2 = await tableHasColumn(db, 'ligne_releves', 'note_2');
   const ordreSelect = hasOrdre ? ', lr.ordre' : '';
+  const prixRevientAppliqueSelect = hasPrixRevientApplique ? ', lr.prix_revient_applique' : '';
+  const note2Select = hasNote2 ? ', lr.note_2' : '';
 
   const query = `
     SELECT
@@ -2080,7 +2235,7 @@ export const getLignesByChantierLocal = async (chantierId) => {
       u.nom_unite,
       u.formule,
       u.ind_dimension
-      ${ordreSelect}
+      ${ordreSelect}${prixRevientAppliqueSelect}${note2Select}
     FROM ligne_releves lr
     JOIN releves r ON r.id = lr.releve_id
     JOIN ouvrage_unites ou ON ou.id = lr.ouvrage_unite_id
@@ -2242,7 +2397,10 @@ export const getEntrepriseByIdLocal = async (entrepriseId) => {
   return db.getFirstAsync(`SELECT * FROM entreprises WHERE id = ?;`, [entrepriseId]);
 };
 
-export const updateEntrepriseAdminLocal = async (entrepriseId, { nom, ind_tva }) => {
+export const updateEntrepriseAdminLocal = async (
+  entrepriseId,
+  { nom, entete_1 = null, entete_2 = null, ind_tva }
+) => {
   if (!(await isLoggedInAdminLocal())) {
     throw new Error("Seul un administrateur peut modifier l'entreprise.");
   }
@@ -2255,14 +2413,17 @@ export const updateEntrepriseAdminLocal = async (entrepriseId, { nom, ind_tva })
   const profil = await getLoggedInProfilLocal();
   const tvaValue =
     isProAccount(profil) && Number(ind_tva) === 1 ? 1 : 0;
+  const entete1 = String(entete_1 || '').trim() || null;
+  const entete2 = String(entete_2 || '').trim() || null;
   const db = await ensureLocalDatabaseReady();
   await db.runAsync(
     `
     UPDATE entreprises
-    SET nom = ?, ind_tva = ?, _synced = 0, mis_a_jour_le = datetime('now')
+    SET nom = ?, entete_1 = ?, entete_2 = ?, ind_tva = ?,
+        _synced = 0, mis_a_jour_le = datetime('now')
     WHERE id = ?;
     `,
-    [trimmedNom, tvaValue, entrepriseId]
+    [trimmedNom, entete1, entete2, tvaValue, entrepriseId]
   );
   notifyLocalDataChanged();
 };

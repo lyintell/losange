@@ -3,6 +3,8 @@
 import { useMemo, useState } from 'react';
 import { matchesArticleSearch } from '@/lib/articles/format';
 import ArticlesTable from '@/components/articles/ArticlesTable';
+import TablePagination from '@/components/ui/TablePagination';
+import { useTablePagination } from '@/hooks/useTablePagination';
 
 const SEARCH_PLACEHOLDERS = {
   default: 'Nom article, métier, fournisseur…',
@@ -26,6 +28,7 @@ export default function ArticlesListClient({
       ),
     [articles, query, showMetierColumn]
   );
+  const { pageItems, paginationProps } = useTablePagination(filtered);
 
   return (
     <div className="ouvrages-list">
@@ -40,12 +43,13 @@ export default function ArticlesListClient({
         />
       </label>
       <ArticlesTable
-        rows={filtered}
+        rows={pageItems}
         metierId={metierId}
         showMetierColumn={showMetierColumn}
         showFournisseurColumn={showFournisseurColumn}
         onRowSelect={onRowSelect}
       />
+      <TablePagination {...paginationProps} />
     </div>
   );
 }

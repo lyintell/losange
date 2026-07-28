@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import ClientEditModal from '@/components/clients/ClientEditModal';
 import ChantiersListClient from '@/components/chantiers/ChantiersListClient';
@@ -7,6 +8,7 @@ import AdminIcon from '@/components/ui/AdminIcon';
 import { formatClientNamePhoneLine } from '@/lib/chantiers/format';
 
 export default function ClientChantiersClient({ client: initialClient, chantiers, clientId }) {
+  const router = useRouter();
   const [client, setClient] = useState(initialClient);
   const [editModalOpen, setEditModalOpen] = useState(false);
 
@@ -29,6 +31,7 @@ export default function ClientChantiersClient({ client: initialClient, chantiers
         clientId={clientId}
         showClientColumn={false}
         searchMode="client-chantiers"
+        canCreate
       />
 
       <ClientEditModal
@@ -36,6 +39,10 @@ export default function ClientChantiersClient({ client: initialClient, chantiers
         client={client}
         onClose={() => setEditModalOpen(false)}
         onSaved={setClient}
+        onDeleted={() => {
+          router.push('/clients');
+          router.refresh();
+        }}
       />
     </>
   );

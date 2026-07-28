@@ -4,6 +4,7 @@ import { Text } from 'react-native-paper';
 import { LosangeLogoBackground } from '../components/terrain/LosangeLogoLoader';
 import TerrainSyncOverlay from '../components/terrain/TerrainSyncOverlay';
 import PlusMenuButton from '../components/terrain/PlusMenuButton';
+import GesturesLegendModal from '../components/terrain/GesturesLegendModal';
 import { FlowActionFab, FlowSmallFab, flowFabColors } from '../components/terrain/TerrainFlowFabs';
 import { useTerrainSyncRefresh } from '../hooks/useTerrainSyncRefresh';
 import { getLoggedInProfilViewLocal } from '../db/querries';
@@ -14,6 +15,7 @@ export default function PlusScreen({ onProfilPress, onDatabasePress, onRapportsP
   const [isPro, setIsPro] = useState(false);
   const [canShowRapports, setCanShowRapports] = useState(false);
   const [canShowDatabase, setCanShowDatabase] = useState(false);
+  const [legendVisible, setLegendVisible] = useState(false);
   const { syncing, canSync, runSync } = useTerrainSyncRefresh({ onSyncFromSupabase });
 
   useEffect(() => {
@@ -76,6 +78,14 @@ export default function PlusScreen({ onProfilPress, onDatabasePress, onRapportsP
 
       <View style={styles.spacer} />
 
+      <FlowSmallFab
+        icon="information-outline"
+        side="left"
+        tierFromBottom={canSync ? 1 : 0}
+        color="#6B7280"
+        onPress={() => setLegendVisible(true)}
+      />
+
       {canSync ? (
         <FlowSmallFab
           icon="sync"
@@ -94,6 +104,8 @@ export default function PlusScreen({ onProfilPress, onDatabasePress, onRapportsP
         onPress={onLogout}
       />
       </View>
+
+      <GesturesLegendModal visible={legendVisible} onDismiss={() => setLegendVisible(false)} />
     </View>
   );
 }

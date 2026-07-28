@@ -19,10 +19,11 @@ export default function ReleveDimensionsDocument({
   return (
     <article className={`pdf-document pdf-document--releve${bare ? ' pdf-document--bare' : ''}`}>
       <div className="pdf-releve-header">
-        <DocumentExportLogo storageKey={entreprise?.logo} alt={entreprise?.nom || 'Entreprise'} />
-        <h2 className="pdf-releve-title">
-          RELEVÉS - {clientNom} / {chantierNom}
-        </h2>
+        <div className="pdf-releve-company-row">
+          <DocumentExportLogo storageKey={entreprise?.logo} alt={entreprise?.nom || 'Entreprise'} />
+          <h1 className="pdf-releve-company">{entreprise?.nom || 'Entreprise'}</h1>
+        </div>
+        <h2 className="pdf-releve-title">RELEVÉS - {clientNom} / {chantierNom}</h2>
       </div>
 
       {chantierNotes ? (

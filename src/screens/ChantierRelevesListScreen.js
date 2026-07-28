@@ -5,6 +5,8 @@ import LosangeLogoLoader from '../components/terrain/LosangeLogoLoader';
 import ReleveStatutBadge from '../components/terrain/ReleveStatutBadge';
 import { getFabColumnPadding } from '../components/terrain/TerrainFlowFabs';
 import {
+  canCurrentUserModifyChantierLocal,
+  deleteChantierLocal,
   deleteReleveLocal,
   getLoggedInProfilViewLocal,
   getRelevesByChantierLocal,
@@ -76,7 +78,12 @@ function ReleveListCard({ item, position, profil, onPress, onDelete, onStatusCha
   );
 }
 
-export default function ChantierRelevesListScreen({ chantier, onRelevePress, onRelevesChanged }) {
+export default function ChantierRelevesListScreen({
+  chantier,
+  onRelevePress,
+  onRelevesChanged,
+  onChantierDeleted,
+}) {
   const [loading, setLoading] = useState(false);
   const [releves, setReleves] = useState([]);
   const [profil, setProfil] = useState(null);
@@ -146,33 +153,75 @@ export default function ChantierRelevesListScreen({ chantier, onRelevePress, onR
       if (!releve?.id) return;
 
       const dateLabel = formatPriseLe(releve.cree_le) || 'ce relevé';
-      Alert.alert('Supprimer', `Supprimer le relevé du ${dateLabel} ?`, [
-        { text: 'Non', style: 'cancel' },
-        {
-          text: 'Oui',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              if (!canModifyReleveForProfil(profil, releve)) {
-                Alert.alert(
-                  'Modification refusée',
-                  "Vous ne pouvez pas supprimer un relevé que vous n'avez pas pris."
-                );
-                return;
-              }
+      const chantierNom = chantier?.nom || 'ce chantier';
 
-              await deleteReleveLocal(releve.id);
-              const rows = await loadReleves();
-              onRelevesChanged?.(rows.length);
-            } catch (error) {
-              console.error('Erreur suppression releve:', error);
-              Alert.alert('Erreur', error.message || 'Impossible de supprimer ce relevé.');
-            }
+      Alert.alert(
+        'Supprimer',
+        `Que souhaitez-vous supprimer ?\nRelevé du ${dateLabel}`,
+        [
+          { text: 'Annuler', style: 'cancel' },
+          {
+            text: 'Ce relevé',
+            onPress: async () => {
+              try {
+                if (!canModifyReleveForProfil(profil, releve)) {
+                  Alert.alert(
+                    'Modification refusée',
+                    "Vous ne pouvez pas supprimer un relevé que vous n'avez pas pris."
+                  );
+                  return;
+                }
+
+                await deleteReleveLocal(releve.id);
+                const rows = await loadReleves();
+                onRelevesChanged?.(rows.length);
+              } catch (error) {
+                console.error('Erreur suppression releve:', error);
+                Alert.alert('Erreur', error.message || 'Impossible de supprimer ce relevé.');
+              }
+            },
           },
-        },
-      ]);
+          {
+            text: 'Le chantier',
+            style: 'destructive',
+            onPress: () => {
+              Alert.alert(
+                'Supprimer le chantier',
+                `Confirmer la suppression définitive du chantier "${chantierNom}" et de tous ses relevés ?`,
+                [
+                  { text: 'Annuler', style: 'cancel' },
+                  {
+                    text: 'Supprimer le chantier',
+                    style: 'destructive',
+                    onPress: async () => {
+                      try {
+                        if (!(await canCurrentUserModifyChantierLocal(chantier?.id))) {
+                          Alert.alert(
+                            'Modification refusée',
+                            "Vous ne pouvez pas supprimer un chantier que vous n'avez pas pris."
+                          );
+                          return;
+                        }
+
+                        await deleteChantierLocal(chantier.id);
+                        onChantierDeleted?.(chantier);
+                      } catch (error) {
+                        console.error('Erreur suppression chantier:', error);
+                        Alert.alert(
+                          'Erreur',
+                          error.message || 'Impossible de supprimer ce chantier.'
+                        );
+                      }
+                    },
+                  },
+                ]
+              );
+            },
+          },
+        ]
+      );
     },
-    [loadReleves, onRelevesChanged, profil]
+    [chantier, loadReleves, onChantierDeleted, onRelevesChanged, profil]
   );
 
   useEffect(() => {

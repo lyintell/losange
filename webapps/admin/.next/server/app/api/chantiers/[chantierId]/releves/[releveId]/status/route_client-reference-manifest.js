@@ -1,3 +1,1 @@
-globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};
-globalThis.__RSC_MANIFEST["/api/chantiers/[chantierId]/releves/[releveId]/status/route"] = {"moduleLoading":{"prefix":"","crossOrigin":null},"clientModules":{},"ssrModuleMapping":{},"edgeSSRModuleMapping":{},"rscModuleMapping":{},"edgeRscModuleMapping":{},"entryCSSFiles":{},"entryJSFiles":{}};
-
+globalThis.__RSC_MANIFEST=(globalThis.__RSC_MANIFEST||{});globalThis.__RSC_MANIFEST["/api/chantiers/[chantierId]/releves/[releveId]/status/route"]={"moduleLoading":{"prefix":"/_next/"},"ssrModuleMapping":{},"edgeSSRModuleMapping":{},"clientModules":{},"entryCSSFiles":{"C:\\Users\\oumar\\Documents\\PROJECTS\\MY_APPS\\DEV\\losange_NEW\\webapps\\admin\\app\\api\\chantiers\\[chantierId]\\releves\\[releveId]\\status\\route":[]},"rscModuleMapping":{},"edgeRscModuleMapping":{}};
