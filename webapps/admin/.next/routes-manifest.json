@@ -260,6 +260,12 @@
       "namedRegex": "^/api/clients/search(?:/)?$"
     },
     {
+      "page": "/api/entreprise",
+      "regex": "^/api/entreprise(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/entreprise(?:/)?$"
+    },
+    {
       "page": "/api/fournisseurs/search",
       "regex": "^/api/fournisseurs/search(?:/)?$",
       "routeKeys": {},
@@ -278,6 +284,12 @@
       "namedRegex": "^/api/ouvrages(?:/)?$"
     },
     {
+      "page": "/api/profil",
+      "regex": "^/api/profil(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/profil(?:/)?$"
+    },
+    {
       "page": "/api/sections",
       "regex": "^/api/sections(?:/)?$",
       "routeKeys": {},
@@ -288,6 +300,12 @@
       "regex": "^/api/unites(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/unites(?:/)?$"
+    },
+    {
+      "page": "/apple-icon.png",
+      "regex": "^/apple\\-icon\\.png(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/apple\\-icon\\.png(?:/)?$"
     },
     {
       "page": "/articles",
@@ -308,10 +326,16 @@
       "namedRegex": "^/clients(?:/)?$"
     },
     {
-      "page": "/favicon.ico",
-      "regex": "^/favicon\\.ico(?:/)?$",
+      "page": "/configuration",
+      "regex": "^/configuration(?:/)?$",
       "routeKeys": {},
-      "namedRegex": "^/favicon\\.ico(?:/)?$"
+      "namedRegex": "^/configuration(?:/)?$"
+    },
+    {
+      "page": "/icon.png",
+      "regex": "^/icon\\.png(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/icon\\.png(?:/)?$"
     },
     {
       "page": "/login",
